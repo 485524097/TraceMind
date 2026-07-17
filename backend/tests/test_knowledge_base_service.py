@@ -8,10 +8,12 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.knowledge_base import KnowledgeBase
+from app.repositories.document import DocumentRepository
 from app.repositories.knowledge_base import KnowledgeBaseRepository
 from app.schemas.knowledge_base import KnowledgeBaseCreate, KnowledgeBaseUpdate
 from app.services.exceptions import (
     KnowledgeBaseNameConflictError,
+    KnowledgeBaseNotEmptyError,
     KnowledgeBaseNotFoundError,
 )
 from app.services.knowledge_base import KnowledgeBaseService
@@ -31,9 +33,12 @@ def make_knowledge_base(name: str = "Backend Notes") -> KnowledgeBase:
 def make_service() -> tuple[KnowledgeBaseService, AsyncMock, AsyncMock]:
     session = AsyncMock(spec=AsyncSession)
     repository = AsyncMock(spec=KnowledgeBaseRepository)
+    documents = AsyncMock(spec=DocumentRepository)
+    documents.count_by_knowledge_base.return_value = 0
     service = KnowledgeBaseService(
         cast(AsyncSession, session),
         cast(KnowledgeBaseRepository, repository),
+        cast(DocumentRepository, documents),
     )
     return service, session, repository
 
@@ -147,6 +152,31 @@ async def test_delete_missing_knowledge_base() -> None:
         await service.delete(uuid4())
 
     session.commit.assert_not_awaited()
+
+
+async def test_delete_non_empty_knowledge_base_is_rejected() -> None:
+    service, session, repository = make_service()
+    existing = make_knowledge_base()
+    repository.get_by_id.return_value = existing
+    service.documents.count_by_knowledge_base = AsyncMock(return_value=1)
+
+    with pytest.raises(KnowledgeBaseNotEmptyError):
+        await service.delete(existing.id)
+
+    repository.delete.assert_not_awaited()
+    session.commit.assert_not_awaited()
+
+
+async def test_delete_foreign_key_race_becomes_not_empty_error() -> None:
+    service, session, repository = make_service()
+    existing = make_knowledge_base()
+    repository.get_by_id.return_value = existing
+    repository.delete.side_effect = IntegrityError("delete", {}, Exception("foreign key"))
+
+    with pytest.raises(KnowledgeBaseNotEmptyError):
+        await service.delete(existing.id)
+
+    session.rollback.assert_awaited_once()
 
 
 async def test_database_error_rolls_back() -> None:

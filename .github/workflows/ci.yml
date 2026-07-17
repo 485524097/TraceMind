@@ -28,6 +28,7 @@ jobs:
     env:
       DATABASE_URL: postgresql+asyncpg://tracemind:tracemind-ci-only@127.0.0.1:5432/tracemind_test
       TEST_DATABASE_URL: postgresql+asyncpg://tracemind:tracemind-ci-only@127.0.0.1:5432/tracemind_test
+      DOCUMENT_STORAGE_ROOT: ${{ runner.temp }}/tracemind-uploads
     defaults:
       run:
         working-directory: backend
@@ -45,6 +46,8 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run mypy app
       - run: uv run pytest -m "not integration"
+      - run: uv run alembic upgrade head
+      - run: uv run alembic downgrade 20260717_0001
       - run: uv run alembic upgrade head
       - run: uv run pytest -m integration
 

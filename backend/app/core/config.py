@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated, Self
 from urllib.parse import quote_plus
 
@@ -33,6 +34,27 @@ class Settings(BaseSettings):
     celery_broker_url: str = "redis://127.0.0.1:6379/1"
     celery_result_backend: str = "redis://127.0.0.1:6379/2"
     healthcheck_timeout_seconds: int = 2
+    document_storage_root: Path = Path("../data/uploads")
+    document_max_file_size_bytes: int = 52_428_800
+    document_upload_chunk_size_bytes: int = 1_048_576
+    document_allowed_extensions: Annotated[list[str], NoDecode] = [
+        ".md",
+        ".txt",
+        ".pdf",
+        ".docx",
+        ".java",
+        ".jsp",
+        ".js",
+        ".ts",
+        ".vue",
+        ".sql",
+        ".xml",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".properties",
+        ".py",
+    ]
 
     @field_validator("cors_origins", mode="before")
     @classmethod
@@ -40,6 +62,28 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
+
+    @field_validator("document_allowed_extensions", mode="before")
+    @classmethod
+    def parse_document_extensions(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @field_validator("document_allowed_extensions")
+    @classmethod
+    def normalize_document_extensions(cls, value: list[str]) -> list[str]:
+        normalized = sorted(
+            {item.lower() if item.startswith(".") else f".{item.lower()}" for item in value}
+        )
+        if not normalized:
+            raise ValueError("DOCUMENT_ALLOWED_EXTENSIONS must not be empty")
+        return normalized
+
+    @field_validator("document_storage_root")
+    @classmethod
+    def resolve_document_storage_root(cls, value: Path) -> Path:
+        return value.expanduser().resolve()
 
     @field_validator("api_v1_prefix")
     @classmethod
@@ -61,6 +105,10 @@ class Settings(BaseSettings):
         missing = [name for name, value in required.items() if not str(value).strip()]
         if missing:
             raise ValueError(f"Required settings are empty: {', '.join(missing)}")
+        if self.document_max_file_size_bytes <= 0:
+            raise ValueError("DOCUMENT_MAX_FILE_SIZE_BYTES must be greater than zero")
+        if self.document_upload_chunk_size_bytes <= 0:
+            raise ValueError("DOCUMENT_UPLOAD_CHUNK_SIZE_BYTES must be greater than zero")
         return self
 
     @property

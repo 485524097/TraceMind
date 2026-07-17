@@ -27,6 +27,8 @@ try {
         }
         $env:DATABASE_URL = $env:TEST_DATABASE_URL
         Invoke-Checked { uv run alembic upgrade head }
+        Invoke-Checked { uv run alembic downgrade 20260717_0001 }
+        Invoke-Checked { uv run alembic upgrade head }
         Invoke-Checked { uv run pytest -m integration }
     }
 }

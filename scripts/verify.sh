@@ -18,6 +18,8 @@ uv run pytest -m "not integration"
 if [[ "${run_integration}" == "true" ]]; then
   : "${TEST_DATABASE_URL:?TEST_DATABASE_URL is required with --integration}"
   DATABASE_URL="${TEST_DATABASE_URL}" uv run alembic upgrade head
+  DATABASE_URL="${TEST_DATABASE_URL}" uv run alembic downgrade 20260717_0001
+  DATABASE_URL="${TEST_DATABASE_URL}" uv run alembic upgrade head
   uv run pytest -m integration
 fi
 

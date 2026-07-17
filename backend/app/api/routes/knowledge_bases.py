@@ -15,6 +15,7 @@ from app.schemas.knowledge_base import (
 )
 from app.services.exceptions import (
     KnowledgeBaseNameConflictError,
+    KnowledgeBaseNotEmptyError,
     KnowledgeBaseNotFoundError,
 )
 from app.services.knowledge_base import KnowledgeBaseService
@@ -41,6 +42,11 @@ def raise_http_error(exc: Exception) -> NoReturn:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="A knowledge base with this name already exists",
+        )
+    if isinstance(exc, KnowledgeBaseNotEmptyError):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Knowledge base must be empty before deletion",
         )
     if isinstance(exc, SQLAlchemyError):
         logger.exception("Knowledge base database operation failed (%s)", type(exc).__name__)
@@ -139,7 +145,10 @@ async def update_knowledge_base(
     response_class=Response,
     summary="Delete a knowledge base",
     response_description="Knowledge base deleted successfully",
-    responses={404: {"description": "Knowledge base not found"}},
+    responses={
+        404: {"description": "Knowledge base not found"},
+        409: {"description": "Knowledge base contains documents"},
+    },
 )
 async def delete_knowledge_base(
     knowledge_base_id: UUID,
@@ -147,6 +156,6 @@ async def delete_knowledge_base(
 ) -> Response:
     try:
         await service.delete(knowledge_base_id)
-    except (KnowledgeBaseNotFoundError, SQLAlchemyError) as exc:
+    except (KnowledgeBaseNotFoundError, KnowledgeBaseNotEmptyError, SQLAlchemyError) as exc:
         raise_http_error(exc)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

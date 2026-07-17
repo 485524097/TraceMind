@@ -48,6 +48,8 @@ uv run uvicorn app.main:app --reload
 
 默认 API 地址为 `http://localhost:8000`，开发环境 Swagger 文档位于 `/docs`。
 
+本地文档默认保存到仓库 `data/uploads`。可通过 `DOCUMENT_STORAGE_ROOT`、`DOCUMENT_MAX_FILE_SIZE_BYTES`、`DOCUMENT_UPLOAD_CHUNK_SIZE_BYTES` 和 `DOCUMENT_ALLOWED_EXTENSIONS` 覆盖。真实上传目录和 `.env` 不得提交。
+
 ## 启动前端
 
 在 `frontend` 目录运行：
@@ -98,7 +100,7 @@ uv run alembic upgrade head
 
 ## PostgreSQL 集成测试
 
-集成测试只接受数据库名以 `_test` 结尾的 `TEST_DATABASE_URL`。不要把它指向开发数据库，也不要把真实连接串写入仓库。
+集成测试只接受数据库名以 `_test` 结尾的 `TEST_DATABASE_URL`。Document 存储单元测试使用 pytest `tmp_path`，不读取本机上传目录。
 
 Windows PowerShell：
 
@@ -115,6 +117,14 @@ export TEST_DATABASE_URL="postgresql+asyncpg://tracemind:本地测试密码@127.
 ```
 
 默认验证脚本不会运行集成测试，也不会创建、清空或删除数据库和 Docker Volume。
+
+Document migration 往返命令：
+
+```bash
+uv run alembic upgrade head
+uv run alembic downgrade 20260717_0001
+uv run alembic upgrade head
+```
 
 ## 前端检查
 
@@ -135,6 +145,8 @@ docker compose --profile app up --build
 ```
 
 该命令启动基础服务、后端与 Celery Worker。Vue 前端默认在本地使用 npm 启动。
+
+容器内 backend 与 celery-worker 共享 `/app/data/uploads`；宿主机目录由 `DOCUMENT_STORAGE_HOST_PATH` 指定。Celery 本阶段不处理文档，只保证未来任务可访问相同文件。
 
 ## 停止容器
 
