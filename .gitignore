@@ -216,3 +216,56 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# FastAPI / application runtime
+*.sqlite3
+instance/
+
+# Alembic temporary files
+alembic/versions/*.pyc
+alembic/versions/__pycache__/
+
+# Node.js / Vue / Vite
+node_modules/
+.npm/
+.pnpm-store/
+.yarn/
+.vite/
+*.tsbuildinfo
+
+# IDEs and editors
+.idea/
+.vscode/
+*.suo
+*.user
+*.sln.docstates
+
+# Operating systems
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Docker local data
+docker-data/
+docker-volumes/
+postgres-data/
+redis-data/
+qdrant-data/
+
+# Local uploads and models
+uploads/
+storage/uploads/
+models/
+local-models/
+*.bin
+*.safetensors
+*.onnx
+
+# Logs, caches, and build artifacts
+logs/
+*.log
+*.log.*
+.cache/
+dist/
+build/
+coverage/
