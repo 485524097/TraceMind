@@ -1,3 +1,7 @@
+param(
+    [switch]$Integration
+)
+
 $ErrorActionPreference = "Stop"
 
 function Invoke-Checked {
@@ -16,7 +20,15 @@ try {
     Invoke-Checked { uv run ruff check . }
     Invoke-Checked { uv run ruff format --check . }
     Invoke-Checked { uv run mypy app }
-    Invoke-Checked { uv run pytest }
+    Invoke-Checked { uv run pytest -m "not integration" }
+    if ($Integration) {
+        if (-not $env:TEST_DATABASE_URL) {
+            throw "TEST_DATABASE_URL is required when -Integration is used"
+        }
+        $env:DATABASE_URL = $env:TEST_DATABASE_URL
+        Invoke-Checked { uv run alembic upgrade head }
+        Invoke-Checked { uv run pytest -m integration }
+    }
 }
 finally {
     Pop-Location

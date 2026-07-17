@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ElButton } from 'element-plus'
 import { onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 
 import { fetchHealth } from '@/services/health'
 
@@ -30,7 +31,8 @@ onMounted(checkBackend)
       <p class="eyebrow">LOCAL-FIRST · TRACEABLE</p>
       <h1>TraceMind</h1>
       <p class="description">面向中文开发者的、本地优先、答案可追溯的 AI 个人知识库。</p>
-      <p class="phase">当前状态：基础工程搭建阶段</p>
+      <p class="phase">当前状态：知识库管理功能已可用</p>
+      <RouterLink to="/knowledge-bases" class="management-link">进入知识库管理 →</RouterLink>
 
       <div class="service-panel" aria-live="polite">
         <div>

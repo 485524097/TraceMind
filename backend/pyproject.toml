@@ -28,6 +28,9 @@ dev = [
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "integration: tests requiring an explicit external test database",
+]
 
 [tool.ruff]
 line-length = 100

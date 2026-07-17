@@ -12,7 +12,7 @@ TraceMind 是一个面向中文开发者的、本地优先、答案可追溯的 
 
 ## 当前状态
 
-- 项目处于基础工程搭建阶段
+- 项目已完成知识库管理的第一个业务垂直功能
 - 尚未发布可用版本
 
 ## 规划技术栈
@@ -39,9 +39,11 @@ TraceMind 是一个面向中文开发者的、本地优先、答案可追溯的 
 - 使用 Docker Compose 启动 PostgreSQL、Redis 和 Qdrant
 - 启动 FastAPI，并通过存活与就绪接口检查服务状态
 - 启动 Vue 3 首页并检查后端存活状态
+- 创建、查询、修改和删除知识库
+- 在 Vue 3 管理页面维护知识库名称与描述
 - 运行前后端单元测试、静态检查与构建
 
-知识库、文件解析、检索和 RAG 等业务能力尚未实现。
+文件导入与解析、Document/Chunk、检索和 RAG 等业务能力尚未实现。
 
 ## 最小启动
 
@@ -73,4 +75,4 @@ npm ci
 npm run dev
 ```
 
-更完整的 Windows、macOS 和 Linux 开发步骤见 [开发指南](docs/development.md)，当前架构边界见 [架构说明](docs/architecture.md)。
+知识库管理页面位于 `http://localhost:5173/knowledge-bases`。更完整的 Windows、macOS 和 Linux 开发步骤见 [开发指南](docs/development.md)，当前架构边界见 [架构说明](docs/architecture.md)，数据库结构见 [数据库设计](docs/database-design.md)。

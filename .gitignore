@@ -255,7 +255,8 @@ qdrant-data/
 # Local uploads and models
 uploads/
 storage/uploads/
-models/
+/models/
+storage/models/
 local-models/
 *.bin
 *.safetensors
