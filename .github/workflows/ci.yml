@@ -11,6 +11,23 @@ permissions:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.4-alpine3.23
+        env:
+          POSTGRES_USER: tracemind
+          POSTGRES_PASSWORD: tracemind-ci-only
+          POSTGRES_DB: tracemind_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tracemind -d tracemind_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://tracemind:tracemind-ci-only@127.0.0.1:5432/tracemind_test
+      TEST_DATABASE_URL: postgresql+asyncpg://tracemind:tracemind-ci-only@127.0.0.1:5432/tracemind_test
     defaults:
       run:
         working-directory: backend
@@ -27,7 +44,9 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy app
-      - run: uv run pytest
+      - run: uv run pytest -m "not integration"
+      - run: uv run alembic upgrade head
+      - run: uv run pytest -m integration
 
   frontend:
     runs-on: ubuntu-latest

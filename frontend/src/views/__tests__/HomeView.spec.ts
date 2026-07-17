@@ -8,7 +8,9 @@ vi.mock('@/services/health', () => ({ fetchHealth: vi.fn() }))
 const mockedFetchHealth = vi.mocked(fetchHealth)
 
 function mountView() {
-  return mount(HomeView)
+  return mount(HomeView, {
+    global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
+  })
 }
 
 describe('HomeView', () => {

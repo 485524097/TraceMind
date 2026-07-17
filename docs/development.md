@@ -67,7 +67,7 @@ npm run dev
 uv run celery -A app.worker.celery_app:celery_app worker --loglevel=INFO
 ```
 
-本阶段没有注册业务任务。
+当前没有注册 Celery 业务任务；知识库 CRUD 直接访问 PostgreSQL。
 
 ## 后端检查
 
@@ -77,8 +77,44 @@ uv run celery -A app.worker.celery_app:celery_app worker --loglevel=INFO
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy app
-uv run pytest
+uv run pytest -m "not integration"
 ```
+
+## 数据库迁移
+
+确保根目录 `.env` 指向开发数据库，然后在 `backend` 目录运行：
+
+```bash
+uv run alembic upgrade head
+uv run alembic current
+```
+
+回退 migration 前必须确认目标数据库和数据影响。第一条 migration 可在专用测试数据库中验证：
+
+```bash
+uv run alembic downgrade base
+uv run alembic upgrade head
+```
+
+## PostgreSQL 集成测试
+
+集成测试只接受数据库名以 `_test` 结尾的 `TEST_DATABASE_URL`。不要把它指向开发数据库，也不要把真实连接串写入仓库。
+
+Windows PowerShell：
+
+```powershell
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://tracemind:本地测试密码@127.0.0.1:5432/tracemind_test"
+./scripts/verify.ps1 -Integration
+```
+
+macOS/Linux：
+
+```bash
+export TEST_DATABASE_URL="postgresql+asyncpg://tracemind:本地测试密码@127.0.0.1:5432/tracemind_test"
+./scripts/verify.sh --integration
+```
+
+默认验证脚本不会运行集成测试，也不会创建、清空或删除数据库和 Docker Volume。
 
 ## 前端检查
 

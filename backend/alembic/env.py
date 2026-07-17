@@ -6,13 +6,13 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 from app.core.config import get_settings
+from app.models import Base
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Import future model metadata here when the first database model is introduced.
-target_metadata = None
+target_metadata = Base.metadata
 
 
 def do_run_migrations(connection: Any) -> None:
