@@ -3,8 +3,10 @@ import hashlib
 import os
 import shutil
 import tempfile
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import BinaryIO
 from uuid import UUID, uuid4
 
 from fastapi import UploadFile
@@ -41,34 +43,73 @@ class LocalFileStorage:
         self.trash_root.mkdir(exist_ok=True)
 
     async def write_upload(self, upload: UploadFile) -> TemporaryUpload:
-        descriptor, raw_path = await asyncio.to_thread(
-            tempfile.mkstemp, prefix="upload-", dir=self.temp_root
-        )
-        path = Path(raw_path)
+        descriptor: int | None = None
+        path: Path | None = None
+        file_handle: BinaryIO | None = None
+        result: TemporaryUpload | None = None
+        failure: Exception | None = None
+        close_failure: Exception | None = None
         digest = hashlib.sha256()
         size = 0
-        file_handle = await asyncio.to_thread(os.fdopen, descriptor, "wb")
         try:
+            descriptor, raw_path = await asyncio.to_thread(
+                tempfile.mkstemp, prefix="upload-", dir=self.temp_root
+            )
+            path = Path(raw_path)
+            assert descriptor is not None
+            opened_file = await asyncio.to_thread(self._open_descriptor, descriptor)
+            file_handle = opened_file
+            descriptor = None  # fdopen owns the descriptor after a successful call.
             while chunk := await upload.read(self.chunk_size):
                 size += len(chunk)
                 if size > self.max_size:
                     raise DocumentTooLargeError("Document exceeds configured size limit")
                 digest.update(chunk)
-                await asyncio.to_thread(file_handle.write, chunk)
-            await asyncio.to_thread(file_handle.flush)
+                await asyncio.to_thread(opened_file.write, chunk)
+            await asyncio.to_thread(opened_file.flush)
             if size == 0:
                 raise EmptyDocumentError("Empty documents are not allowed")
-            return TemporaryUpload(path=path, content_hash=digest.hexdigest(), file_size=size)
-        except (DocumentTooLargeError, EmptyDocumentError):
-            await asyncio.to_thread(file_handle.close)
-            await asyncio.to_thread(self._unlink_if_exists, path)
-            raise
-        except OSError as exc:
-            await asyncio.to_thread(file_handle.close)
-            await asyncio.to_thread(self._unlink_if_exists, path)
-            raise DocumentStorageError("Document upload could not be stored") from exc
+            result = TemporaryUpload(
+                path=path,
+                content_hash=digest.hexdigest(),
+                file_size=size,
+            )
+        except (DocumentTooLargeError, EmptyDocumentError) as exc:
+            failure = exc
+        except Exception as exc:
+            failure = exc
         finally:
-            await asyncio.to_thread(file_handle.close)
+            if file_handle is not None:
+                try:
+                    await asyncio.to_thread(file_handle.close)
+                except Exception as exc:
+                    close_failure = exc
+                    with suppress(Exception):
+                        file_descriptor = file_handle.fileno()
+                        await asyncio.to_thread(os.close, file_descriptor)
+            elif descriptor is not None:
+                try:
+                    await asyncio.to_thread(os.close, descriptor)
+                except Exception as exc:
+                    close_failure = exc
+
+            if (result is None or close_failure is not None) and path is not None:
+                with suppress(Exception):
+                    await asyncio.to_thread(self._unlink_if_exists, path)
+
+        if isinstance(failure, (DocumentTooLargeError, EmptyDocumentError)):
+            raise failure
+        if failure is not None:
+            raise DocumentStorageError("Document upload could not be stored") from failure
+        if close_failure is not None:
+            raise DocumentStorageError("Document upload could not be stored") from close_failure
+        if result is None:
+            raise DocumentStorageError("Document upload could not be stored")
+        return result
+
+    @staticmethod
+    def _open_descriptor(descriptor: int) -> BinaryIO:
+        return os.fdopen(descriptor, "wb")
 
     def final_relative_path(
         self,

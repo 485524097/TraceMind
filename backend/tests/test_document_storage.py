@@ -1,7 +1,9 @@
 import hashlib
+import os
 import unicodedata
 from io import BytesIO
 from pathlib import Path
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -85,6 +87,32 @@ async def test_rejects_large_file_and_cleans_temporary_file(tmp_path: Path) -> N
         await local.write_upload(upload("large.md", b"12345"))
 
     assert list(local.temp_root.iterdir()) == []
+
+
+async def test_interrupted_read_closes_handle_and_cleans_temporary_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local = storage(tmp_path)
+    interrupted_upload = AsyncMock(spec=UploadFile)
+    interrupted_upload.read.side_effect = [b"first", RuntimeError("connection interrupted")]
+    original_fdopen = os.fdopen
+    handles: list[object] = []
+
+    def tracked_fdopen(descriptor: int, mode: str) -> object:
+        handle = original_fdopen(descriptor, mode)
+        handles.append(handle)
+        return handle
+
+    monkeypatch.setattr(os, "fdopen", tracked_fdopen)
+
+    with pytest.raises(DocumentStorageError) as exc_info:
+        await local.write_upload(interrupted_upload)
+
+    assert str(exc_info.value) == "Document upload could not be stored"
+    assert list(local.temp_root.iterdir()) == []
+    assert len(handles) == 1
+    assert handles[0].closed
+    assert interrupted_upload.read.await_count == 2
 
 
 async def test_final_path_uses_only_uuids_and_stays_under_root(tmp_path: Path) -> None:
