@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
@@ -24,10 +25,17 @@ class FakeParser:
     parser_version = "1"
     supported_extensions = frozenset({".md"})
 
-    def __init__(self, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        error: Exception | None = None,
+        on_parse: Callable[[], None] | None = None,
+    ) -> None:
         self.error = error
+        self.on_parse = on_parse
 
     def parse(self, _path: Path, _context: ParseContext) -> ParsedDocument:
+        if self.on_parse is not None:
+            self.on_parse()
         if self.error is not None:
             raise self.error
         return ParsedDocument(
@@ -74,6 +82,10 @@ class FakeParsingRepository:
         if version.parse_started_at is None:
             return True
         return version.parse_started_at <= now - timedelta(seconds=stale_after_seconds)
+
+    @staticmethod
+    def is_current_attempt(version: DocumentVersion, attempt_started_at: datetime) -> bool:
+        return DocumentParsingRepository.is_current_attempt(version, attempt_started_at)
 
     async def mark_processing(self, version: DocumentVersion, now: datetime) -> None:
         version.parse_status = "processing"
@@ -285,6 +297,58 @@ async def test_stale_processing_is_taken_over(tmp_path: Path) -> None:
     assert version.parse_status == "succeeded"
 
 
+async def test_superseded_success_does_not_replace_new_worker_chunks(tmp_path: Path) -> None:
+    service, session, repository, _, version = make_service(tmp_path)
+    newer_attempt = datetime.now(UTC) + timedelta(seconds=1)
+    newer_chunk = DocumentChunk(
+        document_version_id=version.id,
+        chunk_index=0,
+        content="new worker content",
+        content_hash="b" * 64,
+        char_count=18,
+        chunk_type="paragraph",
+    )
+
+    def simulate_new_worker() -> None:
+        version.parse_status = "succeeded"
+        version.parse_started_at = newer_attempt
+        version.chunk_count = 1
+        repository.chunks = [newer_chunk]
+
+    service.registry = cast(object, FakeRegistry(FakeParser(on_parse=simulate_new_worker)))
+
+    assert not await service.parse_version(version.id)
+    assert version.parse_status == "succeeded"
+    assert version.parse_started_at == newer_attempt
+    assert repository.chunks == [newer_chunk]
+    assert repository.deleted == repository.created == 0
+    assert session.rollback.await_count == 1
+
+
+async def test_superseded_failure_does_not_overwrite_new_worker_state(tmp_path: Path) -> None:
+    service, _, repository, _, version = make_service(tmp_path)
+    newer_attempt = datetime.now(UTC) + timedelta(seconds=1)
+
+    def simulate_new_worker() -> None:
+        version.parse_status = "succeeded"
+        version.parse_started_at = newer_attempt
+        version.chunk_count = 3
+        version.parse_error_code = None
+        version.parse_error_message = None
+
+    service.registry = cast(
+        object,
+        FakeRegistry(FakeParser(DocumentEncodingError(), on_parse=simulate_new_worker)),
+    )
+
+    assert not await service.parse_version(version.id)
+    assert version.parse_status == "succeeded"
+    assert version.chunk_count == 3
+    assert version.parse_error_code is None
+    assert version.parse_error_message is None
+    assert repository.failure is None
+
+
 async def test_missing_storage_is_safe_failed_state(tmp_path: Path) -> None:
     service, _, repository, _, version = make_service(tmp_path)
     service.storage.resolve_relative(version.storage_path).unlink()
@@ -313,6 +377,50 @@ async def test_scoped_status_chunks_and_manual_queue(tmp_path: Path) -> None:
     assert page.items == [] and page.total == 0
     with pytest.raises(DocumentVersionNotFoundError):
         await service.get_status(uuid4(), document.id, version.id)
+
+
+async def test_manual_request_does_not_enqueue_fresh_processing(tmp_path: Path) -> None:
+    dispatcher = FakeDispatcher()
+    service, _, _, document, version = make_service(
+        tmp_path, status="processing", dispatcher=dispatcher
+    )
+    version.parse_started_at = datetime.now(UTC)
+
+    result = await service.request_parse(
+        document.knowledge_base_id, document.id, version.id, force=False
+    )
+
+    assert not result.queued
+    assert dispatcher.calls == []
+
+
+async def test_manual_request_requeues_stale_processing_with_force(tmp_path: Path) -> None:
+    dispatcher = FakeDispatcher()
+    service, _, _, document, version = make_service(
+        tmp_path, status="processing", dispatcher=dispatcher
+    )
+    version.parse_started_at = datetime.now(UTC) - timedelta(hours=1)
+
+    result = await service.request_parse(
+        document.knowledge_base_id, document.id, version.id, force=False
+    )
+
+    assert result.queued
+    assert dispatcher.calls == [(version.id, True)]
+
+
+async def test_manual_force_requeues_succeeded_version(tmp_path: Path) -> None:
+    dispatcher = FakeDispatcher()
+    service, _, _, document, version = make_service(
+        tmp_path, status="succeeded", chunks=1, dispatcher=dispatcher
+    )
+
+    result = await service.request_parse(
+        document.knowledge_base_id, document.id, version.id, force=True
+    )
+
+    assert result.queued
+    assert dispatcher.calls == [(version.id, True)]
 
 
 async def test_manual_queue_failure_is_preserved(tmp_path: Path) -> None:

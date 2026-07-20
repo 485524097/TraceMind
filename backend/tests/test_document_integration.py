@@ -1,7 +1,10 @@
 import asyncio
 import os
+import threading
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
 import pytest
@@ -21,7 +24,10 @@ from alembic import command
 from app.core.config import Settings, get_settings
 from app.models.document import Document, DocumentChunk, DocumentVersion
 from app.models.knowledge_base import KnowledgeBase
+from app.parsing import ParseContext, ParsedBlock, ParsedDocument, ParserRegistry
+from app.parsing.chunker import ChunkDraft
 from app.repositories.document import DocumentRepository
+from app.repositories.document_parsing import DocumentParsingRepository
 from app.services.document_parsing import DocumentParsingService
 from app.storage.local import LocalFileStorage
 
@@ -97,6 +103,34 @@ def make_chunk(version_id: object, index: int = 0) -> DocumentChunk:
         chunk_type="page_text",
         language=None,
     )
+
+
+class BlockingParser:
+    parser_name = "blocking"
+    parser_version = "1"
+    supported_extensions = frozenset({".md"})
+
+    def __init__(self, started: threading.Event, release: threading.Event) -> None:
+        self.started = started
+        self.release = release
+
+    def parse(self, _path: Path, _context: ParseContext) -> ParsedDocument:
+        self.started.set()
+        if not self.release.wait(timeout=30):
+            raise RuntimeError("Parser release timed out")
+        return ParsedDocument(
+            [ParsedBlock("old worker content", "paragraph", start_line=1, end_line=1)],
+            self.parser_name,
+            self.parser_version,
+        )
+
+
+class BlockingRegistry:
+    def __init__(self, parser: BlockingParser) -> None:
+        self.parser = parser
+
+    def get(self, _extension: str) -> BlockingParser:
+        return self.parser
 
 
 async def test_repository_constraints_cascade_restrict_and_query_shape(
@@ -415,3 +449,107 @@ async def test_real_parsing_and_failed_reparse_preserve_chunks(
     await session.delete(persisted)
     await session.delete(await session.get(KnowledgeBase, knowledge_base_id))
     await session.commit()
+
+
+async def test_superseded_parse_attempt_cannot_overwrite_new_transaction(
+    database: tuple[AsyncSession, AsyncEngine], tmp_path: Path
+) -> None:
+    session, engine = database
+    storage = LocalFileStorage(tmp_path / "uploads", max_size=1024, chunk_size=64)
+    knowledge_base = KnowledgeBase(name=f"Attempt ownership {uuid4()}")
+    session.add(knowledge_base)
+    await session.flush()
+    knowledge_base_id = knowledge_base.id
+    document = make_document(knowledge_base_id, "ownership.md")
+    session.add(document)
+    await session.flush()
+    document_id = document.id
+    version = make_version(document_id, 1)
+    version.storage_path = storage.final_relative_path(
+        knowledge_base_id, document_id, version.id, ".md"
+    )
+    stored = storage.resolve_relative(version.storage_path, must_exist=False)
+    stored.parent.mkdir(parents=True)
+    stored.write_text("content", encoding="utf-8")
+    session.add(version)
+    await session.commit()
+    version_id = version.id
+
+    started = threading.Event()
+    release = threading.Event()
+    service = DocumentParsingService(
+        session,
+        storage,
+        Settings(document_storage_root=storage.root),
+        registry=cast(ParserRegistry, BlockingRegistry(BlockingParser(started, release))),
+    )
+    old_worker = asyncio.create_task(service.parse_version(version_id))
+    assert await asyncio.to_thread(started.wait, 5)
+
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    newer_attempt = datetime.now(UTC) + timedelta(seconds=1)
+    async with factory() as worker_b:
+        repository = DocumentParsingRepository(worker_b)
+        record = await repository.lock_version_for_parsing(version_id)
+        assert record is not None
+        await repository.mark_processing(record.version, newer_attempt)
+        await worker_b.commit()
+
+        record = await repository.lock_version_for_parsing(version_id)
+        assert record is not None
+        await repository.delete_chunks_by_version(version_id)
+        await repository.create_chunks(
+            version_id,
+            [
+                ChunkDraft(
+                    chunk_index=0,
+                    content="new worker content",
+                    content_hash="b" * 64,
+                    char_count=18,
+                    page_number=None,
+                    start_line=1,
+                    end_line=1,
+                    section_title=None,
+                    chunk_type="paragraph",
+                    language=None,
+                )
+            ],
+        )
+        await repository.mark_succeeded(
+            record.version,
+            parser_name="new-worker",
+            parser_version="1",
+            chunk_count=1,
+            parsed_at=datetime.now(UTC),
+        )
+        await worker_b.commit()
+
+    release.set()
+    assert not await old_worker
+
+    async with factory() as verification:
+        persisted_version = await verification.get(DocumentVersion, version_id)
+        chunks = (
+            (
+                await verification.execute(
+                    select(DocumentChunk).where(DocumentChunk.document_version_id == version_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert persisted_version is not None
+        assert persisted_version.parse_status == "succeeded"
+        assert persisted_version.parse_started_at == newer_attempt
+        assert persisted_version.parser_name == "new-worker"
+        assert persisted_version.chunk_count == 1
+        assert [chunk.content for chunk in chunks] == ["new worker content"]
+
+        persisted_document = await verification.get(Document, document_id)
+        persisted_knowledge_base = await verification.get(KnowledgeBase, knowledge_base_id)
+        assert persisted_document is not None
+        assert persisted_knowledge_base is not None
+        await verification.delete(persisted_document)
+        await verification.commit()
+        await verification.delete(persisted_knowledge_base)
+        await verification.commit()

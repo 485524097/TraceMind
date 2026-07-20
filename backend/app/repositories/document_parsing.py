@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import delete, func, select
@@ -32,7 +32,9 @@ class DocumentParsingRepository:
             .where(DocumentVersion.id == version_id)
         )
         if lock:
-            statement = statement.with_for_update(of=DocumentVersion)
+            statement = statement.with_for_update(of=DocumentVersion).execution_options(
+                populate_existing=True
+            )
         row = (await self.session.execute(statement)).one_or_none()
         return ParsingVersionRecord(*row) if row is not None else None
 
@@ -57,6 +59,18 @@ class DocumentParsingRepository:
         if version.parse_status != "processing" or version.parse_started_at is None:
             return version.parse_status == "processing"
         return version.parse_started_at <= now - timedelta(seconds=stale_after_seconds)
+
+    @staticmethod
+    def is_current_attempt(version: DocumentVersion, attempt_started_at: datetime) -> bool:
+        if version.parse_status != "processing" or version.parse_started_at is None:
+            return False
+
+        def as_utc(value: datetime) -> datetime:
+            if value.tzinfo is None:
+                return value.replace(tzinfo=UTC)
+            return value.astimezone(UTC)
+
+        return as_utc(version.parse_started_at) == as_utc(attempt_started_at)
 
     async def count_chunks(self, version_id: UUID) -> int:
         result = await self.session.execute(

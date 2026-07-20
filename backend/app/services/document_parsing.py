@@ -68,13 +68,20 @@ class DocumentParsingService:
         force: bool,
     ) -> ParseRequestResult:
         version = await self._require_scoped_version(knowledge_base_id, document_id, version_id)
+        dispatch_force = force
         if version.parse_status == "processing":
-            return ParseRequestResult(False, version)
+            if not self.repository.is_processing_stale(
+                version,
+                now=datetime.now(UTC),
+                stale_after_seconds=self.settings.document_parse_stale_after_seconds,
+            ):
+                return ParseRequestResult(False, version)
+            dispatch_force = True
         if version.parse_status == "succeeded" and not force:
             return ParseRequestResult(False, version)
         if self.dispatcher is None:
             raise DocumentParsingQueueError("Document parsing queue is unavailable")
-        await self.dispatcher.enqueue(version.id, force=force)
+        await self.dispatcher.enqueue(version.id, force=dispatch_force)
         return ParseRequestResult(True, version)
 
     async def get_status(
@@ -100,7 +107,7 @@ class DocumentParsingService:
         claimed = await self._claim(version_id, force=force)
         if claimed is None:
             return False
-        version, had_chunks = claimed
+        version, had_chunks, attempt_started_at = claimed
         try:
             path = self.storage.resolve_relative(version.storage_path)
             parser = self.registry.get(version.extension)
@@ -113,11 +120,17 @@ class DocumentParsingService:
             if not drafts:
                 raise NoExtractableTextError()
         except DocumentParseError as exc:
-            await self._record_failure(version_id, exc.code, exc.safe_message, had_chunks)
+            await self._record_failure(
+                version_id, exc.code, exc.safe_message, had_chunks, attempt_started_at
+            )
             return False
         except DocumentStorageError:
             await self._record_failure(
-                version_id, "storage_unavailable", "Stored document is unavailable", had_chunks
+                version_id,
+                "storage_unavailable",
+                "Stored document is unavailable",
+                had_chunks,
+                attempt_started_at,
             )
             return False
         except Exception as exc:
@@ -127,7 +140,11 @@ class DocumentParsingService:
                 type(exc).__name__,
             )
             await self._record_failure(
-                version_id, "internal_parse_error", "Document could not be parsed", had_chunks
+                version_id,
+                "internal_parse_error",
+                "Document could not be parsed",
+                had_chunks,
+                attempt_started_at,
             )
             return False
 
@@ -135,6 +152,10 @@ class DocumentParsingService:
             record = await self.repository.lock_version_for_parsing(version_id)
             if record is None:
                 raise DocumentVersionNotFoundError("Document version was not found")
+            if not self.repository.is_current_attempt(record.version, attempt_started_at):
+                await self.session.rollback()
+                logger.info("Document parsing attempt no longer owns version %s", version_id)
+                return False
             await self.repository.delete_chunks_by_version(version_id)
             await self.repository.create_chunks(version_id, drafts)
             await self.repository.mark_succeeded(
@@ -154,11 +175,17 @@ class DocumentParsingService:
                 type(exc).__name__,
             )
             await self._record_failure(
-                version_id, "internal_parse_error", "Document chunks could not be saved", had_chunks
+                version_id,
+                "internal_parse_error",
+                "Document chunks could not be saved",
+                had_chunks,
+                attempt_started_at,
             )
             return False
 
-    async def _claim(self, version_id: UUID, *, force: bool) -> tuple[DocumentVersion, bool] | None:
+    async def _claim(
+        self, version_id: UUID, *, force: bool
+    ) -> tuple[DocumentVersion, bool, datetime] | None:
         record = await self.repository.lock_version_for_parsing(version_id)
         if record is None:
             raise DocumentVersionNotFoundError("Document version was not found")
@@ -177,14 +204,23 @@ class DocumentParsingService:
         had_chunks = version.chunk_count > 0
         await self.repository.mark_processing(version, now)
         await self.session.commit()
-        return version, had_chunks
+        return version, had_chunks, now
 
     async def _record_failure(
-        self, version_id: UUID, code: str, message: str, preserve_chunks: bool
+        self,
+        version_id: UUID,
+        code: str,
+        message: str,
+        preserve_chunks: bool,
+        attempt_started_at: datetime,
     ) -> None:
         await self.session.rollback()
         record = await self.repository.lock_version_for_parsing(version_id)
         if record is None:
+            return
+        if not self.repository.is_current_attempt(record.version, attempt_started_at):
+            await self.session.rollback()
+            logger.info("Document parsing attempt no longer owns version %s", version_id)
             return
         await self.repository.mark_failed(
             record.version,
