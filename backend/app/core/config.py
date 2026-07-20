@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     document_storage_root: Path = Path("../data/uploads")
     document_max_file_size_bytes: int = 52_428_800
     document_upload_chunk_size_bytes: int = 1_048_576
+    document_parse_max_extracted_chars: int = 5_000_000
+    document_parse_max_pdf_pages: int = 1_000
+    document_parse_stale_after_seconds: int = 1_800
+    document_chunk_max_chars: int = 1_800
+    document_chunk_overlap_chars: int = 200
     document_allowed_extensions: Annotated[list[str], NoDecode] = [
         ".md",
         ".txt",
@@ -109,6 +114,20 @@ class Settings(BaseSettings):
             raise ValueError("DOCUMENT_MAX_FILE_SIZE_BYTES must be greater than zero")
         if self.document_upload_chunk_size_bytes <= 0:
             raise ValueError("DOCUMENT_UPLOAD_CHUNK_SIZE_BYTES must be greater than zero")
+        parse_values = {
+            "DOCUMENT_PARSE_MAX_EXTRACTED_CHARS": self.document_parse_max_extracted_chars,
+            "DOCUMENT_PARSE_MAX_PDF_PAGES": self.document_parse_max_pdf_pages,
+            "DOCUMENT_PARSE_STALE_AFTER_SECONDS": self.document_parse_stale_after_seconds,
+            "DOCUMENT_CHUNK_MAX_CHARS": self.document_chunk_max_chars,
+            "DOCUMENT_CHUNK_OVERLAP_CHARS": self.document_chunk_overlap_chars,
+        }
+        invalid = [name for name, value in parse_values.items() if value <= 0]
+        if invalid:
+            raise ValueError(f"Parsing settings must be greater than zero: {', '.join(invalid)}")
+        if self.document_chunk_overlap_chars >= self.document_chunk_max_chars:
+            raise ValueError("DOCUMENT_CHUNK_OVERLAP_CHARS must be smaller than max chars")
+        if self.document_parse_max_extracted_chars < self.document_chunk_max_chars:
+            raise ValueError("Parse character limit must not be smaller than chunk max chars")
         return self
 
     @property

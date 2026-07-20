@@ -250,7 +250,67 @@ th {
 }
 
 .document-actions {
-  min-width: 230px;
+  min-width: 410px;
+}
+
+.parse-error-summary {
+  display: block;
+  max-width: 220px;
+  margin-top: 5px;
+  color: #c24141;
+  white-space: normal;
+}
+
+[data-status='pending'],
+[data-status='processing'] {
+  color: #9a6700;
+}
+
+[data-status='succeeded'] {
+  color: #16865c;
+}
+
+[data-status='failed'] {
+  color: #c24141;
+}
+
+.chunk-list {
+  display: grid;
+  gap: 16px;
+  max-height: 62vh;
+  margin: 0;
+  padding-left: 24px;
+  overflow-y: auto;
+}
+
+.chunk-list li {
+  padding: 14px;
+  border: 1px solid #e3e8ef;
+  border-radius: 10px;
+}
+
+.chunk-list header,
+.chunk-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chunk-list header span {
+  color: #68748a;
+  font-size: 13px;
+}
+
+.chunk-list pre {
+  overflow-x: auto;
+  margin: 12px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chunk-pagination {
+  margin-top: 18px;
 }
 
 .sr-only {

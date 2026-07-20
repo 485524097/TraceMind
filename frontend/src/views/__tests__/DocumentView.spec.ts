@@ -1,15 +1,17 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   deleteDocument,
   downloadCurrentDocument,
   listDocuments,
+  requestDocumentParse,
 } from '@/services/documents'
 import { getKnowledgeBase } from '@/services/knowledgeBases'
 import type { DocumentItem, DocumentListResponse } from '@/types/document'
 import DocumentView from '@/views/DocumentView.vue'
+import { ApiError } from '@/services/api'
 
 vi.mock('vue-router', () => ({
   useRoute: () => ({ params: { knowledgeBaseId: 'kb-id' } }),
@@ -21,6 +23,8 @@ vi.mock('@/services/documents', () => ({
   downloadCurrentDocument: vi.fn(),
   downloadDocumentVersion: vi.fn(),
   listDocumentVersions: vi.fn(),
+  requestDocumentParse: vi.fn(),
+  listDocumentChunks: vi.fn(),
   uploadDocument: vi.fn(),
 }))
 vi.mock('@/services/knowledgeBases', () => ({ getKnowledgeBase: vi.fn() }))
@@ -28,6 +32,7 @@ vi.mock('@/services/knowledgeBases', () => ({ getKnowledgeBase: vi.fn() }))
 const mockedList = vi.mocked(listDocuments)
 const mockedDelete = vi.mocked(deleteDocument)
 const mockedDownload = vi.mocked(downloadCurrentDocument)
+const mockedParse = vi.mocked(requestDocumentParse)
 const mockedKnowledgeBase = vi.mocked(getKnowledgeBase)
 const document: DocumentItem = {
   id: 'document-id',
@@ -45,6 +50,15 @@ const document: DocumentItem = {
     mime_type: 'text/markdown',
     extension: '.md',
     created_at: '2026-07-17T01:00:00Z',
+    parse_status: 'succeeded',
+    parser_name: 'markdown',
+    parser_version: '1',
+    chunk_count: 2,
+    parse_started_at: '2026-07-17T01:00:00Z',
+    parsed_at: '2026-07-17T01:00:30Z',
+    last_parse_attempt_at: '2026-07-17T01:00:00Z',
+    parse_error_code: null,
+    parse_error_message: null,
   },
 }
 
@@ -58,6 +72,10 @@ function mountView() {
       stubs: {
         DocumentUploadPanel: { template: '<button data-testid="upload-completed" @click="$emit(\'completed\')">upload</button>' },
         DocumentVersionDialog: true,
+        DocumentChunkDialog: {
+          props: ['modelValue'],
+          template: '<div v-if="modelValue" data-testid="chunk-dialog" />',
+        },
       },
     },
   })
@@ -69,6 +87,7 @@ describe('DocumentView', () => {
     mockedList.mockReset()
     mockedDelete.mockReset()
     mockedDownload.mockReset()
+    mockedParse.mockReset()
     mockedKnowledgeBase.mockReset()
     mockedKnowledgeBase.mockResolvedValue({
       id: 'kb-id',
@@ -81,6 +100,10 @@ describe('DocumentView', () => {
     vi.spyOn(ElMessage, 'error').mockImplementation(() => ({ close: vi.fn() }))
   })
 
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('loads knowledge base and document list', async () => {
     mockedList.mockResolvedValue(response([document]))
     const wrapper = mountView()
@@ -90,6 +113,8 @@ describe('DocumentView', () => {
     expect(wrapper.text()).toContain('sample.md')
     expect(wrapper.text()).toContain('V2')
     expect(wrapper.text()).toContain('2.0 KB')
+    expect(wrapper.text()).toContain('解析完成')
+    expect(wrapper.text()).toContain('2')
   })
 
   it('shows an empty state', async () => {
@@ -146,5 +171,74 @@ describe('DocumentView', () => {
     expect(confirm).toHaveBeenCalledOnce()
     expect(mockedDelete).toHaveBeenCalledWith('kb-id', 'document-id')
     expect(mockedList).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    ['pending', '等待解析'],
+    ['processing', '解析中'],
+    ['succeeded', '解析完成'],
+    ['failed', '解析失败'],
+  ] as const)('shows the %s parse state', async (parseStatus, label) => {
+    mockedList.mockResolvedValue(
+      response([{ ...document, latest_version: { ...document.latest_version, parse_status: parseStatus } }]),
+    )
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.text()).toContain(label)
+  })
+
+  it('starts polling for pending documents and stops after a terminal state', async () => {
+    vi.useFakeTimers()
+    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval')
+    mockedList
+      .mockResolvedValueOnce(
+        response([{ ...document, latest_version: { ...document.latest_version, parse_status: 'pending' } }]),
+      )
+      .mockResolvedValueOnce(response([document]))
+    const wrapper = mountView()
+    await flushPromises()
+
+    await vi.advanceTimersByTimeAsync(2500)
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(2500)
+
+    expect(mockedList).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+    expect(clearIntervalSpy).toHaveBeenCalled()
+  })
+
+  it('requests a force reparse and opens chunk preview', async () => {
+    mockedList.mockResolvedValue(response([document]))
+    mockedParse.mockResolvedValue({
+      queued: true,
+      version: {
+        version_id: document.latest_version.id,
+        ...document.latest_version,
+      },
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const reparse = wrapper.findAll('button').find((button) => button.text() === '重新解析')
+    await reparse?.trigger('click')
+    await flushPromises()
+    expect(mockedParse).toHaveBeenCalledWith('kb-id', 'document-id', 'version-id', true)
+
+    const chunks = wrapper.findAll('button').find((button) => button.text() === 'Chunk')
+    await chunks?.trigger('click')
+    expect(wrapper.find('[data-testid="chunk-dialog"]').exists()).toBe(true)
+  })
+
+  it('shows a clear queue unavailable message', async () => {
+    mockedList.mockResolvedValue(response([document]))
+    mockedParse.mockRejectedValue(new ApiError(503, 'private broker'))
+    const wrapper = mountView()
+    await flushPromises()
+
+    const reparse = wrapper.findAll('button').find((button) => button.text() === '重新解析')
+    await reparse?.trigger('click')
+    await flushPromises()
+
+    expect(ElMessage.error).toHaveBeenCalledWith('解析队列暂时不可用，请稍后重试')
   })
 })

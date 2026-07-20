@@ -68,7 +68,9 @@ async function uploadAll(): Promise<void> {
       try {
         const result = await uploadDocument(props.knowledgeBaseId, entry.file)
         entry.state = result.import_action
-        entry.message = labels[result.import_action]
+        entry.message = result.parsing_queued
+          ? `${labels[result.import_action]}，已进入解析队列`
+          : `${labels[result.import_action]}，等待手动解析`
       } catch (error) {
         entry.state = 'failed'
         entry.message = errorMessage(error)

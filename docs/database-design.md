@@ -22,12 +22,20 @@
 
 ## DocumentVersion
 
-`document_versions` 保存不可变版本元数据：正整数版本号、64 位 SHA-256、正数文件大小、可空 MIME、带点小写扩展名、POSIX 相对 `storage_path` 和带时区创建时间。
+`document_versions` 保存不可变文件版本元数据，并保存该版本独立的解析状态、Parser 标识、Chunk 数量、解析时间及安全错误摘要。
 
 - `(document_id, version_number)` 唯一。
 - Document 外键使用 ON DELETE CASCADE。
 - 当前版本是最大 `version_number`，不增加循环 `current_version_id`。
 - 数据库不保存 storage root、绝对路径、解析正文或索引状态。
+
+解析状态为 `pending`、`processing`、`succeeded` 或 `failed`。`chunk_count >= 0`；`processing` 使用 `parse_started_at` 支持超时接管，`succeeded` 的 Chunk 可预览但尚不代表已建立检索索引。
+
+## DocumentChunk
+
+`document_chunks` 通过 `document_version_id` 归属于单一版本并使用 ON DELETE CASCADE。`(document_version_id, chunk_index)` 唯一，索引从 0 连续递增。正文同时保存 SHA-256 与 Python 字符数；可选来源字段包括 1-based PDF 页码、成对的 1-based 起止行号、章节标题和语言。
+
+数据库约束检查非负索引、正字符数、64 位哈希、正页码/行号、行号成对出现及结束行不早于开始行。正文非空白与连续索引由 Parsing Service 在写入前保证。表中不包含 embedding、Qdrant point、BM25 或检索分数。
 
 ## Migration
 
@@ -41,9 +49,11 @@
 
 第二条 migration `20260717_0002_create_documents.py` 创建 documents、document_versions、外键、唯一/检查约束和索引；downgrade 回到 `20260717_0001` 时只移除这两张表。
 
+第三条 migration `20260717_0003_create_document_chunks.py` 扩展 document_versions 的解析字段并创建 document_chunks；downgrade 到 `20260717_0002` 只移除解析字段和 Chunk 表，不触发文件解析或 Celery。
+
 ## 当前关系边界
 
-KnowledgeBase 包含 Document 时禁止删除；Document 删除会在数据库级联删除 DocumentVersion。当前没有 Chunk、用户、标签、软删除或归档关系。
+KnowledgeBase 包含 Document 时禁止删除；Document 删除会级联删除 DocumentVersion，版本删除继续级联删除 DocumentChunk。当前没有用户、标签、软删除、归档或检索索引关系。
 
 ## CRUD API
 

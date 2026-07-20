@@ -1,5 +1,14 @@
 from uuid import UUID
 
+from app.parsing.exceptions import (
+    DocumentEncodingError,
+    DocumentParseError,
+    NoExtractableTextError,
+    ParseLimitExceededError,
+    PdfEncryptedError,
+    UnsupportedParserError,
+)
+
 
 class KnowledgeBaseError(Exception):
     """Base exception for knowledge base business rules."""
@@ -53,3 +62,33 @@ class DocumentStorageError(DocumentError):
 
 class DocumentImportConflictError(DocumentError):
     pass
+
+
+class DocumentVersionNotFoundError(DocumentError):
+    pass
+
+
+class DocumentAlreadyProcessingError(DocumentError):
+    pass
+
+
+class DocumentAlreadyParsedError(DocumentError):
+    pass
+
+
+class DocumentParsingQueueError(DocumentError):
+    pass
+
+
+__all__ = [
+    "DocumentAlreadyParsedError",
+    "DocumentAlreadyProcessingError",
+    "DocumentEncodingError",
+    "DocumentParseError",
+    "DocumentParsingQueueError",
+    "DocumentVersionNotFoundError",
+    "NoExtractableTextError",
+    "ParseLimitExceededError",
+    "PdfEncryptedError",
+    "UnsupportedParserError",
+]

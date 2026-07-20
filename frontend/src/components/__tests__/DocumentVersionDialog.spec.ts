@@ -19,6 +19,15 @@ const version: DocumentVersion = {
   mime_type: 'text/markdown',
   extension: '.md',
   created_at: '2026-07-17T00:00:00Z',
+  parse_status: 'succeeded',
+  parser_name: 'markdown',
+  parser_version: '1',
+  chunk_count: 2,
+  parse_started_at: '2026-07-17T00:00:00Z',
+  parsed_at: '2026-07-17T00:01:00Z',
+  last_parse_attempt_at: '2026-07-17T00:00:00Z',
+  parse_error_code: null,
+  parse_error_message: null,
 }
 const document: DocumentItem = {
   id: 'document-id',
