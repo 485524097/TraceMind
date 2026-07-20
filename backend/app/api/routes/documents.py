@@ -18,6 +18,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db_session
+from app.indexing import QdrantGateway
 from app.models.document import DocumentVersion
 from app.repositories.document import DocumentRecord
 from app.schemas.document import (
@@ -62,11 +63,18 @@ def get_document_service(request: Request, session: SessionDependency) -> Docume
         max_size=settings.document_max_file_size_bytes,
         chunk_size=settings.document_upload_chunk_size_bytes,
     )
+    index_gateway = QdrantGateway(
+        request.app.state.qdrant_client.client,
+        collection_name=settings.qdrant_collection_name,
+        vector_name=settings.qdrant_dense_vector_name,
+        dimension=settings.embedding_dimension,
+    )
     return DocumentService(
         session,
         storage,
         set(settings.document_allowed_extensions),
         parsing_dispatcher=CeleryDocumentParsingDispatcher(),
+        index_gateway=index_gateway,
     )
 
 

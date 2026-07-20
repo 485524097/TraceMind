@@ -144,6 +144,9 @@ class DocumentParsingRepository:
         version.parsed_at = parsed_at
         version.parse_error_code = None
         version.parse_error_message = None
+        version.index_status = "pending"
+        version.index_error_code = None
+        version.index_error_message = None
         await self.session.flush()
 
     async def mark_failed(

@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     database_url: str | None = None
     redis_url: str = "redis://127.0.0.1:6379/0"
     qdrant_url: str = "http://127.0.0.1:6333"
+    qdrant_collection_name: str = "tracemind_chunks"
+    qdrant_dense_vector_name: str = "dense_v1"
+    embedding_model_name: str = "Qwen/Qwen3-Embedding-0.6B"
+    embedding_dimension: int = 1_024
+    embedding_batch_size: int = 16
+    embedding_device: str = "auto"
+    document_index_stale_after_seconds: int = 1_800
     celery_broker_url: str = "redis://127.0.0.1:6379/1"
     celery_result_backend: str = "redis://127.0.0.1:6379/2"
     healthcheck_timeout_seconds: int = 2
@@ -106,10 +113,23 @@ class Settings(BaseSettings):
             "POSTGRES_DB": self.postgres_db,
             "REDIS_URL": self.redis_url,
             "QDRANT_URL": self.qdrant_url,
+            "QDRANT_COLLECTION_NAME": self.qdrant_collection_name,
+            "QDRANT_DENSE_VECTOR_NAME": self.qdrant_dense_vector_name,
+            "EMBEDDING_MODEL_NAME": self.embedding_model_name,
         }
         missing = [name for name, value in required.items() if not str(value).strip()]
         if missing:
             raise ValueError(f"Required settings are empty: {', '.join(missing)}")
+        index_values = {
+            "EMBEDDING_DIMENSION": self.embedding_dimension,
+            "EMBEDDING_BATCH_SIZE": self.embedding_batch_size,
+            "DOCUMENT_INDEX_STALE_AFTER_SECONDS": self.document_index_stale_after_seconds,
+        }
+        invalid_index = [name for name, value in index_values.items() if value <= 0]
+        if invalid_index:
+            raise ValueError(
+                f"Indexing settings must be greater than zero: {', '.join(invalid_index)}"
+            )
         if self.document_max_file_size_bytes <= 0:
             raise ValueError("DOCUMENT_MAX_FILE_SIZE_BYTES must be greater than zero")
         if self.document_upload_chunk_size_bytes <= 0:

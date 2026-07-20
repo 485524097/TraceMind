@@ -7,6 +7,7 @@ from fastapi import UploadFile
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.indexing import QdrantGateway, VectorIndexError
 from app.models.document import Document, DocumentVersion
 from app.repositories.document import DocumentRecord, DocumentRepository
 from app.repositories.knowledge_base import KnowledgeBaseRepository
@@ -47,6 +48,7 @@ class DocumentService:
         document_repository: DocumentRepository | None = None,
         knowledge_base_repository: KnowledgeBaseRepository | None = None,
         parsing_dispatcher: DocumentParsingDispatcher | None = None,
+        index_gateway: QdrantGateway | None = None,
     ) -> None:
         self.session = session
         self.storage = storage
@@ -54,6 +56,7 @@ class DocumentService:
         self.repository = document_repository or DocumentRepository(session)
         self.knowledge_bases = knowledge_base_repository or KnowledgeBaseRepository(session)
         self.parsing_dispatcher = parsing_dispatcher
+        self.index_gateway = index_gateway
 
     async def import_document(
         self, knowledge_base_id: UUID, upload: UploadFile
@@ -188,6 +191,11 @@ class DocumentService:
             await self.storage.purge_staged(staged)
         except DocumentStorageError:
             logger.warning("A staged document directory requires manual cleanup")
+        if self.index_gateway is not None:
+            try:
+                await self.index_gateway.delete_document(document_id)
+            except VectorIndexError:
+                logger.warning("Deleted document has orphaned Qdrant points requiring cleanup")
 
     async def _require_knowledge_base(self, knowledge_base_id: UUID) -> None:
         if await self.knowledge_bases.get_by_id(knowledge_base_id) is None:

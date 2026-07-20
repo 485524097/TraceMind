@@ -2,10 +2,12 @@ import { apiRequest, apiUrl } from './api'
 import type {
   DocumentChunkListResponse,
   DocumentImportResponse,
+  DocumentIndexRequestResponse,
   DocumentItem,
   DocumentListResponse,
   DocumentParseRequestResponse,
   DocumentVersion,
+  SemanticSearchResponse,
 } from '@/types/document'
 
 function basePath(knowledgeBaseId: string): string {
@@ -57,6 +59,30 @@ export function requestDocumentParse(
     `${basePath(knowledgeBaseId)}/${documentId}/versions/${versionId}/parse?${params}`,
     { method: 'POST' },
   )
+}
+
+export function requestDocumentIndex(
+  knowledgeBaseId: string,
+  documentId: string,
+  versionId: string,
+  force = false,
+): Promise<DocumentIndexRequestResponse> {
+  return apiRequest(`${basePath(knowledgeBaseId)}/${documentId}/versions/${versionId}/index`, {
+    method: 'POST',
+    body: JSON.stringify({ force }),
+  })
+}
+
+export function semanticSearch(
+  knowledgeBaseId: string,
+  query: string,
+  language: string | null,
+  limit = 10,
+): Promise<SemanticSearchResponse> {
+  return apiRequest(`/api/v1/knowledge-bases/${knowledgeBaseId}/search/semantic`, {
+    method: 'POST',
+    body: JSON.stringify({ query, language: language || null, limit }),
+  })
 }
 
 export function listDocumentChunks(

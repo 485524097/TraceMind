@@ -6,12 +6,14 @@ import { RouterLink, useRoute } from 'vue-router'
 import DocumentUploadPanel from '@/components/DocumentUploadPanel.vue'
 import DocumentChunkDialog from '@/components/DocumentChunkDialog.vue'
 import DocumentVersionDialog from '@/components/DocumentVersionDialog.vue'
+import SemanticSearchPanel from '@/components/SemanticSearchPanel.vue'
 import { ApiError } from '@/services/api'
 import {
   deleteDocument,
   downloadCurrentDocument,
   listDocuments,
   requestDocumentParse,
+  requestDocumentIndex,
 } from '@/services/documents'
 import { getKnowledgeBase } from '@/services/knowledgeBases'
 import type { DocumentItem } from '@/types/document'
@@ -28,6 +30,7 @@ const versionDialogVisible = ref(false)
 const selectedDocument = ref<DocumentItem | null>(null)
 const chunkDialogVisible = ref(false)
 const parsingId = ref<string | null>(null)
+const indexingId = ref<string | null>(null)
 let pollingTimer: ReturnType<typeof setInterval> | undefined
 
 const parseLabels = {
@@ -35,6 +38,13 @@ const parseLabels = {
   processing: '解析中',
   succeeded: '解析完成',
   failed: '解析失败',
+} as const
+
+const indexLabels = {
+  pending: '等待索引',
+  processing: '索引中',
+  succeeded: '索引完成',
+  failed: '索引失败',
 } as const
 
 function formatDate(value: string): string {
@@ -66,13 +76,34 @@ async function loadDocuments(): Promise<void> {
 
 function updatePolling(): void {
   const needsPolling = items.value.some(({ latest_version }) =>
-    ['pending', 'processing'].includes(latest_version.parse_status),
+    ['pending', 'processing'].includes(latest_version.parse_status) ||
+    (latest_version.parse_status === 'succeeded' &&
+      ['pending', 'processing'].includes(latest_version.index_status)),
   )
   if (needsPolling && pollingTimer === undefined) {
     pollingTimer = setInterval(() => void loadDocuments(), 2500)
   } else if (!needsPolling && pollingTimer !== undefined) {
     clearInterval(pollingTimer)
     pollingTimer = undefined
+  }
+}
+
+async function requestIndex(document: DocumentItem, force: boolean): Promise<void> {
+  if (indexingId.value) return
+  indexingId.value = document.id
+  try {
+    const result = await requestDocumentIndex(
+      knowledgeBaseId,
+      document.id,
+      document.latest_version.id,
+      force,
+    )
+    ElMessage.success(result.queued ? '已进入索引队列' : '当前状态无需重复入队')
+    await loadDocuments()
+  } catch {
+    ElMessage.error('索引请求失败，请确认文档已解析完成')
+  } finally {
+    indexingId.value = null
   }
 }
 
@@ -174,6 +205,7 @@ onBeforeUnmount(() => {
     </header>
 
     <DocumentUploadPanel :knowledge-base-id="knowledgeBaseId" @completed="loadDocuments" />
+    <SemanticSearchPanel :knowledge-base-id="knowledgeBaseId" />
 
     <section class="document-toolbar">
       <form @submit.prevent="loadDocuments">
@@ -190,7 +222,7 @@ onBeforeUnmount(() => {
       <div v-else class="table-wrap">
         <table>
           <thead>
-            <tr><th>文件名</th><th>版本</th><th>大小</th><th>解析状态</th><th>Chunk</th><th>最近解析</th><th></th></tr>
+            <tr><th>文件名</th><th>版本</th><th>大小</th><th>解析状态</th><th>索引状态</th><th>Chunk</th><th>最近解析</th><th></th></tr>
           </thead>
           <tbody>
             <tr v-for="document in items" :key="document.id">
@@ -200,6 +232,10 @@ onBeforeUnmount(() => {
               <td>
                 <span :data-status="document.latest_version.parse_status">{{ parseLabels[document.latest_version.parse_status] }}</span>
                 <small v-if="document.latest_version.parse_error_message" class="parse-error-summary">{{ parseErrorSummary(document) }}</small>
+              </td>
+              <td>
+                <span :data-index-status="document.latest_version.index_status">{{ indexLabels[document.latest_version.index_status] }}</span>
+                <small v-if="document.latest_version.index_error_message" class="parse-error-summary">{{ document.latest_version.index_error_message }}</small>
               </td>
               <td>{{ document.latest_version.chunk_count }}</td>
               <td>{{ document.latest_version.parsed_at ? formatDate(document.latest_version.parsed_at) : '—' }}</td>
@@ -211,6 +247,12 @@ onBeforeUnmount(() => {
                   :disabled="parsingId !== null || document.latest_version.parse_status === 'processing'"
                   @click="requestParse(document, document.latest_version.parse_status === 'succeeded')"
                 >{{ document.latest_version.parse_status === 'succeeded' ? '重新解析' : '重试解析' }}</ElButton>
+                <ElButton
+                  size="small"
+                  :loading="indexingId === document.id"
+                  :disabled="indexingId !== null || document.latest_version.parse_status !== 'succeeded' || document.latest_version.index_status === 'processing'"
+                  @click="requestIndex(document, document.latest_version.index_status === 'succeeded')"
+                >{{ document.latest_version.index_status === 'succeeded' ? '重新索引' : '索引' }}</ElButton>
                 <ElButton size="small" @click="downloadCurrentDocument(knowledgeBaseId, document.id)">下载</ElButton>
                 <ElButton size="small" @click="showVersions(document)">版本</ElButton>
                 <ElButton

@@ -45,3 +45,21 @@ def test_chunk_overlap_and_extraction_limits_are_consistent() -> None:
         Settings(document_chunk_max_chars=100, document_chunk_overlap_chars=100)
     with pytest.raises(ValidationError):
         Settings(document_parse_max_extracted_chars=99, document_chunk_max_chars=100)
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["embedding_dimension", "embedding_batch_size", "document_index_stale_after_seconds"],
+)
+def test_index_settings_must_be_positive(field: str) -> None:
+    with pytest.raises(ValidationError):
+        Settings(**{field: 0})
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["qdrant_collection_name", "qdrant_dense_vector_name", "embedding_model_name"],
+)
+def test_index_names_must_not_be_empty(field: str) -> None:
+    with pytest.raises(ValidationError):
+        Settings(**{field: " "})

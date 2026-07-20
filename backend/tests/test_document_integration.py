@@ -27,6 +27,7 @@ from app.models.knowledge_base import KnowledgeBase
 from app.parsing import ParseContext, ParsedBlock, ParsedDocument, ParserRegistry
 from app.parsing.chunker import ChunkDraft
 from app.repositories.document import DocumentRepository
+from app.repositories.document_indexing import DocumentIndexingRepository
 from app.repositories.document_parsing import DocumentParsingRepository
 from app.services.document_parsing import DocumentParsingService
 from app.storage.local import LocalFileStorage
@@ -310,6 +311,9 @@ def test_document_migration_upgrade_downgrade_upgrade() -> None:
         "ck_document_versions_hash_length",
         "ck_document_versions_chunk_count_nonnegative",
         "ck_document_versions_parse_status",
+        "ck_document_versions_index_status",
+        "ck_document_versions_indexed_chunk_count_nonnegative",
+        "ck_document_versions_embedding_dimension_positive",
     }.issubset(checks)
     assert {
         "ck_document_chunks_index_nonnegative",
@@ -373,6 +377,45 @@ async def test_document_chunks_constraints_and_cascade(
     )
     assert remaining.scalars().all() == []
     await session.delete(await session.get(KnowledgeBase, knowledge_base_id))
+    await session.commit()
+
+
+async def test_search_generations_use_only_current_document_version(
+    database: tuple[AsyncSession, AsyncEngine],
+) -> None:
+    session, _ = database
+    knowledge_base = KnowledgeBase(name=f"Current index {uuid4()}")
+    session.add(knowledge_base)
+    await session.flush()
+    document = make_document(knowledge_base.id, "versions.md")
+    session.add(document)
+    await session.flush()
+    old_version = make_version(document.id, 1, "a")
+    current_version = make_version(document.id, 2, "b")
+    old_generation, current_generation = uuid4(), uuid4()
+    for version, generation in (
+        (old_version, old_generation),
+        (current_version, current_generation),
+    ):
+        version.index_status = "succeeded"
+        version.active_index_generation = generation
+        version.indexed_chunk_count = 1
+        version.embedding_model = "fake"
+        version.embedding_dimension = 3
+    session.add_all([old_version, current_version])
+    await session.commit()
+
+    generations = await DocumentIndexingRepository(session).list_active_generations(
+        knowledge_base.id, document_id=None
+    )
+
+    assert [(item.version_id, item.generation) for item in generations] == [
+        (current_version.id, current_generation)
+    ]
+
+    await session.delete(document)
+    await session.commit()
+    await session.delete(knowledge_base)
     await session.commit()
 
 

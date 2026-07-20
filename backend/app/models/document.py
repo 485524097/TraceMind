@@ -80,6 +80,18 @@ class DocumentVersion(Base):
             "parse_status IN ('pending', 'processing', 'succeeded', 'failed')",
             name="ck_document_versions_parse_status",
         ),
+        CheckConstraint(
+            "index_status IN ('pending', 'processing', 'succeeded', 'failed')",
+            name="ck_document_versions_index_status",
+        ),
+        CheckConstraint(
+            "indexed_chunk_count >= 0",
+            name="ck_document_versions_indexed_chunk_count_nonnegative",
+        ),
+        CheckConstraint(
+            "embedding_dimension IS NULL OR embedding_dimension > 0",
+            name="ck_document_versions_embedding_dimension_positive",
+        ),
         Index("ix_document_versions_document_id", "document_id"),
     )
 
@@ -114,6 +126,24 @@ class DocumentVersion(Base):
     )
     parse_error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     parse_error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    index_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="pending", server_default="pending"
+    )
+    active_index_generation: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    index_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_index_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    indexed_chunk_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    embedding_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    embedding_dimension: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    index_error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    index_error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
