@@ -67,7 +67,8 @@ class MarkdownParser:
                         lines[candidate],
                     ):
                         break
-                language = fence.group(2).strip().split(maxsplit=1)[0] or None
+                info = fence.group(2).strip()
+                language = info.split(maxsplit=1)[0] if info else None
                 blocks.append(
                     ParsedBlock(
                         "\n".join(code_lines),
