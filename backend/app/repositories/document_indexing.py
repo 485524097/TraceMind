@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -92,8 +92,11 @@ class DocumentIndexingRepository:
             )
             .where(
                 Document.knowledge_base_id == knowledge_base_id,
-                DocumentVersion.index_status == "succeeded",
+                DocumentVersion.index_status.in_(("succeeded", "processing")),
                 DocumentVersion.active_index_generation.is_not(None),
+                DocumentVersion.indexed_at.is_not(None),
+                DocumentVersion.parsed_at.is_not(None),
+                DocumentVersion.indexed_at >= DocumentVersion.parsed_at,
             )
         )
         if document_id is not None:
@@ -114,15 +117,33 @@ class DocumentIndexingRepository:
         return version.index_started_at <= now - timedelta(seconds=stale_after_seconds)
 
     @staticmethod
-    def is_current_generation(version: DocumentVersion, generation: UUID) -> bool:
+    def is_current_attempt(version: DocumentVersion, attempt_generation: UUID) -> bool:
         return (
-            version.index_status == "processing" and version.active_index_generation == generation
+            version.index_status == "processing"
+            and version.index_attempt_generation == attempt_generation
         )
 
     @staticmethod
-    def snapshot_active(version: DocumentVersion) -> IndexSnapshot | None:
+    def has_usable_active_index(version: DocumentVersion) -> bool:
+        if (
+            version.active_index_generation is None
+            or version.indexed_at is None
+            or version.parsed_at is None
+            or version.index_status not in {"succeeded", "processing"}
+        ):
+            return False
+
+        def as_utc(value: datetime) -> datetime:
+            if value.tzinfo is None:
+                return value.replace(tzinfo=UTC)
+            return value.astimezone(UTC)
+
+        return as_utc(version.indexed_at) >= as_utc(version.parsed_at)
+
+    @classmethod
+    def snapshot_active(cls, version: DocumentVersion) -> IndexSnapshot | None:
         generation = version.active_index_generation
-        if generation is None or version.index_status != "succeeded":
+        if generation is None or not cls.has_usable_active_index(version):
             return None
         return IndexSnapshot(
             generation=generation,
@@ -133,10 +154,10 @@ class DocumentIndexingRepository:
         )
 
     async def mark_processing(
-        self, version: DocumentVersion, generation: UUID, now: datetime
+        self, version: DocumentVersion, attempt_generation: UUID, now: datetime
     ) -> None:
         version.index_status = "processing"
-        version.active_index_generation = generation
+        version.index_attempt_generation = attempt_generation
         version.index_started_at = now
         version.last_index_attempt_at = now
         version.index_error_code = None
@@ -155,6 +176,7 @@ class DocumentIndexingRepository:
     ) -> None:
         version.index_status = "succeeded"
         version.active_index_generation = generation
+        version.index_attempt_generation = None
         version.indexed_at = indexed_at
         version.indexed_chunk_count = chunk_count
         version.embedding_model = model_name
@@ -174,6 +196,7 @@ class DocumentIndexingRepository:
         if previous is None:
             version.index_status = "failed"
             version.active_index_generation = None
+            version.indexed_at = None
             version.indexed_chunk_count = 0
             version.embedding_model = None
             version.embedding_dimension = None
@@ -184,12 +207,14 @@ class DocumentIndexingRepository:
             version.indexed_chunk_count = previous.chunk_count
             version.embedding_model = previous.embedding_model
             version.embedding_dimension = previous.embedding_dimension
+        version.index_attempt_generation = None
         version.index_error_code = code
         version.index_error_message = message[:500]
         await self.session.flush()
 
     async def mark_pending_after_parse(self, version: DocumentVersion) -> None:
         version.index_status = "pending"
+        version.index_attempt_generation = None
         version.index_error_code = None
         version.index_error_message = None
         await self.session.flush()

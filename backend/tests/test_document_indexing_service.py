@@ -115,14 +115,15 @@ class FakeRepository:
         return [item for item in self.active if item.document_id == document_id]
 
     is_processing_stale = staticmethod(DocumentIndexingRepository.is_processing_stale)
-    is_current_generation = staticmethod(DocumentIndexingRepository.is_current_generation)
+    is_current_attempt = staticmethod(DocumentIndexingRepository.is_current_attempt)
+    has_usable_active_index = staticmethod(DocumentIndexingRepository.has_usable_active_index)
     snapshot_active = staticmethod(DocumentIndexingRepository.snapshot_active)
 
     async def mark_processing(
-        self, version: DocumentVersion, generation: UUID, now: datetime
+        self, version: DocumentVersion, attempt_generation: UUID, now: datetime
     ) -> None:
         version.index_status = "processing"
-        version.active_index_generation = generation
+        version.index_attempt_generation = attempt_generation
         version.index_started_at = now
         version.last_index_attempt_at = now
 
@@ -138,6 +139,7 @@ class FakeRepository:
     ) -> None:
         version.index_status = "succeeded"
         version.active_index_generation = generation
+        version.index_attempt_generation = None
         version.indexed_chunk_count = chunk_count
         version.embedding_model = model_name
         version.embedding_dimension = dimension
@@ -160,7 +162,11 @@ class FakeRepository:
         else:
             version.index_status = "succeeded"
             version.active_index_generation = previous.generation
+            version.indexed_at = previous.indexed_at
             version.indexed_chunk_count = previous.chunk_count
+            version.embedding_model = previous.embedding_model
+            version.embedding_dimension = previous.embedding_dimension
+        version.index_attempt_generation = None
         version.index_error_code = code
         version.index_error_message = message
 
@@ -184,6 +190,7 @@ def make_version() -> tuple[Document, DocumentVersion, list[DocumentChunk]]:
         storage_path="safe/content.md",
         parse_status="succeeded",
         chunk_count=1,
+        parsed_at=datetime.now(UTC),
         index_status="pending",
         indexed_chunk_count=0,
     )
@@ -240,6 +247,7 @@ async def test_successful_index_writes_traceable_point_and_activates_generation(
     generation = version.active_index_generation
     assert generation is not None
     assert version.index_status == "succeeded"
+    assert version.index_attempt_generation is None
     assert version.indexed_chunk_count == 1
     assert version.embedding_model == "fake-embedding"
     assert gateway.points[0].id == deterministic_point_id(version.id, generation, 0)
@@ -249,35 +257,103 @@ async def test_successful_index_writes_traceable_point_and_activates_generation(
 
 
 async def test_force_reindex_replaces_generation_and_cleans_previous() -> None:
-    service, _, _, gateway, _, version = make_service()
+    observed_claim: list[tuple[str, UUID | None, UUID | None]] = []
+    service, _, _, gateway, _, version = make_service(
+        provider=FakeProvider(
+            on_embed=lambda: observed_claim.append(
+                (
+                    version.index_status,
+                    version.active_index_generation,
+                    version.index_attempt_generation,
+                )
+            )
+        )
+    )
     previous = uuid4()
     version.index_status = "succeeded"
     version.active_index_generation = previous
+    version.indexed_at = version.parsed_at
     version.indexed_chunk_count = 1
     version.embedding_model = "old"
     version.embedding_dimension = 3
 
     assert await service.index_version(version.id, force=True)
+    assert len(observed_claim) == 1
+    status, active_during_claim, attempt_during_claim = observed_claim[0]
+    assert status == "processing"
+    assert active_during_claim == previous
+    assert attempt_during_claim is not None
     assert version.active_index_generation != previous
+    assert version.index_attempt_generation is None
     assert gateway.deleted_generations == [previous]
     assert not await service.index_version(version.id)
 
 
+async def test_force_reindex_failure_preserves_usable_active_generation() -> None:
+    service, _, _, gateway, _, version = make_service(
+        gateway=FakeGateway(upsert_error=VectorIndexError("partial"))
+    )
+    active = uuid4()
+    version.index_status = "succeeded"
+    version.active_index_generation = active
+    version.indexed_at = version.parsed_at
+    version.indexed_chunk_count = 1
+    version.embedding_model = "old"
+    version.embedding_dimension = 3
+
+    assert not await service.index_version(version.id, force=True)
+    assert version.index_status == "succeeded"
+    assert version.active_index_generation == active
+    assert version.index_attempt_generation is None
+    assert version.index_error_code == "vector_index_error"
+    assert active not in gateway.deleted_generations
+    assert len(gateway.deleted_generations) == 1
+
+
 async def test_stale_processing_is_taken_over() -> None:
-    service, _, _, _, _, version = make_service()
+    service, _, _, gateway, _, version = make_service()
+    active, stale_attempt = uuid4(), uuid4()
     version.index_status = "processing"
     version.index_started_at = datetime.now(UTC) - timedelta(hours=1)
-    version.active_index_generation = uuid4()
+    version.active_index_generation = active
+    version.index_attempt_generation = stale_attempt
+    version.indexed_at = version.parsed_at
 
     assert await service.index_version(version.id)
     assert version.index_status == "succeeded"
+    assert version.active_index_generation not in {active, stale_attempt}
+    assert version.index_attempt_generation is None
+    assert set(gateway.deleted_generations) == {active, stale_attempt}
+
+
+async def test_stale_takeover_failure_restores_active_and_cleans_attempts() -> None:
+    service, _, _, gateway, _, version = make_service(
+        gateway=FakeGateway(upsert_error=VectorIndexError("partial"))
+    )
+    active, stale_attempt = uuid4(), uuid4()
+    version.index_status = "processing"
+    version.active_index_generation = active
+    version.index_attempt_generation = stale_attempt
+    version.index_started_at = datetime.now(UTC) - timedelta(hours=1)
+    version.indexed_at = version.parsed_at
+    version.indexed_chunk_count = 1
+    version.embedding_model = "old"
+    version.embedding_dimension = 3
+
+    assert not await service.index_version(version.id)
+    assert version.index_status == "succeeded"
+    assert version.active_index_generation == active
+    assert version.index_attempt_generation is None
+    assert active not in gateway.deleted_generations
+    assert stale_attempt in gateway.deleted_generations
+    assert len(gateway.deleted_generations) == 2
 
 
 async def test_manual_request_distinguishes_fresh_and_stale_processing() -> None:
     dispatcher = FakeDispatcher()
     service, _, _, _, document, version = make_service(dispatcher=dispatcher)
     version.index_status = "processing"
-    version.active_index_generation = uuid4()
+    version.index_attempt_generation = uuid4()
     version.index_started_at = datetime.now(UTC)
 
     fresh = await service.request_index(
@@ -299,6 +375,7 @@ async def test_manual_force_reindexes_succeeded_and_scope_is_preserved() -> None
     service, _, _, _, document, version = make_service(dispatcher=dispatcher)
     version.index_status = "succeeded"
     version.active_index_generation = uuid4()
+    version.indexed_at = version.parsed_at
 
     skipped = await service.request_index(
         document.knowledge_base_id, document.id, version.id, force=False
@@ -320,21 +397,45 @@ async def test_manual_force_reindexes_succeeded_and_scope_is_preserved() -> None
 
 async def test_old_worker_cannot_activate_after_new_generation_takes_ownership() -> None:
     newer_generation = uuid4()
+    active = uuid4()
     service, _, _, gateway, _, version = make_service(
         provider=FakeProvider(
             on_embed=lambda: (
-                setattr(version, "index_status", "succeeded"),
-                setattr(version, "active_index_generation", newer_generation),
-                setattr(version, "indexed_chunk_count", 1),
+                setattr(version, "index_status", "processing"),
+                setattr(version, "active_index_generation", active),
+                setattr(version, "index_attempt_generation", newer_generation),
             )
         )
     )
 
     assert not await service.index_version(version.id)
-    assert version.index_status == "succeeded"
-    assert version.active_index_generation == newer_generation
+    assert version.index_status == "processing"
+    assert version.active_index_generation == active
+    assert version.index_attempt_generation == newer_generation
     assert len(gateway.deleted_generations) == 1
-    assert gateway.deleted_generations[0] != newer_generation
+    assert gateway.deleted_generations[0] not in {active, newer_generation}
+
+
+async def test_old_worker_failure_only_cleans_its_own_generation() -> None:
+    newer_attempt = uuid4()
+    active = uuid4()
+    service, _, _, gateway, _, version = make_service(
+        provider=FakeProvider(
+            error=EmbeddingError("failed"),
+            on_embed=lambda: (
+                setattr(version, "index_status", "processing"),
+                setattr(version, "active_index_generation", active),
+                setattr(version, "index_attempt_generation", newer_attempt),
+            ),
+        )
+    )
+
+    assert not await service.index_version(version.id)
+    assert version.index_status == "processing"
+    assert version.active_index_generation == active
+    assert version.index_attempt_generation == newer_attempt
+    assert len(gateway.deleted_generations) == 1
+    assert gateway.deleted_generations[0] not in {active, newer_attempt}
 
 
 async def test_partial_qdrant_failure_marks_failed_and_cleans_generation() -> None:
@@ -355,6 +456,7 @@ async def test_failed_index_after_reparse_does_not_restore_obsolete_generation()
     obsolete = uuid4()
     version.index_status = "pending"
     version.active_index_generation = obsolete
+    version.indexed_at = version.parsed_at - timedelta(seconds=1)
     version.indexed_chunk_count = 1
     version.embedding_model = "old"
     version.embedding_dimension = 3
@@ -384,6 +486,10 @@ async def test_db_finalization_failure_records_failure_and_removes_points() -> N
         commits += 1
         if commits == 2:
             version.index_status = "processing"
+            version.active_index_generation = None
+            version.index_attempt_generation = UUID(
+                str(gateway.points[0].payload["index_generation"])
+            )
             raise RuntimeError("database unavailable")
 
     session.commit.side_effect = commit

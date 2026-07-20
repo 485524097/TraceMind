@@ -36,9 +36,9 @@ class IndexRequestResult:
 @dataclass(frozen=True)
 class IndexClaim:
     record: IndexingVersionRecord
-    generation: UUID
+    attempt_generation: UUID
     previous: IndexSnapshot | None
-    cleanup_generation: UUID | None
+    cleanup_generations: frozenset[UUID]
 
 
 @dataclass(frozen=True)
@@ -120,7 +120,7 @@ class DocumentIndexingService:
         claim = await self._claim(version_id, force=force)
         if claim is None:
             return False
-        generation = claim.generation
+        generation = claim.attempt_generation
         try:
             chunks = await self.repository.list_chunks(version_id)
             if not chunks:
@@ -144,7 +144,7 @@ class DocumentIndexingService:
                 version_id,
                 generation,
                 claim.previous,
-                claim.cleanup_generation,
+                claim.cleanup_generations,
                 "embedding_error",
                 "Document embeddings could not be generated",
             )
@@ -154,7 +154,7 @@ class DocumentIndexingService:
                 version_id,
                 generation,
                 claim.previous,
-                claim.cleanup_generation,
+                claim.cleanup_generations,
                 "chunks_unavailable",
                 "Document has no parsed chunks to index",
             )
@@ -164,7 +164,7 @@ class DocumentIndexingService:
                 version_id,
                 generation,
                 claim.previous,
-                claim.cleanup_generation,
+                claim.cleanup_generations,
                 "vector_index_error",
                 "Document vectors could not be stored",
             )
@@ -179,7 +179,7 @@ class DocumentIndexingService:
                 version_id,
                 generation,
                 claim.previous,
-                claim.cleanup_generation,
+                claim.cleanup_generations,
                 "internal_index_error",
                 "Document could not be indexed",
             )
@@ -191,7 +191,7 @@ class DocumentIndexingService:
                 await self.session.rollback()
                 await self._cleanup_generation(generation)
                 return False
-            if not self.repository.is_current_generation(record.version, generation):
+            if not self.repository.is_current_attempt(record.version, generation):
                 await self.session.rollback()
                 logger.info("Document indexing attempt no longer owns version %s", version_id)
                 await self._cleanup_generation(generation)
@@ -212,7 +212,7 @@ class DocumentIndexingService:
                 version_id,
                 type(exc).__name__,
             )
-            safe_to_delete = await self._record_failure(
+            owns_attempt, safe_to_delete = await self._record_failure(
                 version_id,
                 generation,
                 claim.previous,
@@ -221,14 +221,15 @@ class DocumentIndexingService:
             )
             if safe_to_delete:
                 await self._cleanup_generation(generation)
-                if claim.cleanup_generation is not None:
-                    await self._cleanup_generation(claim.cleanup_generation)
+            if owns_attempt:
+                await self._cleanup_generations(claim.cleanup_generations)
             return False
 
-        if claim.previous is not None and claim.previous.generation != generation:
-            await self._cleanup_generation(claim.previous.generation)
-        if claim.cleanup_generation is not None and claim.cleanup_generation != generation:
-            await self._cleanup_generation(claim.cleanup_generation)
+        cleanup_generations = set(claim.cleanup_generations)
+        if claim.previous is not None:
+            cleanup_generations.add(claim.previous.generation)
+        cleanup_generations.discard(generation)
+        await self._cleanup_generations(cleanup_generations)
         return True
 
     async def search(
@@ -280,27 +281,40 @@ class DocumentIndexingService:
         if version.index_status == "succeeded" and not force:
             await self.session.rollback()
             return None
+        stale_attempt = version.index_attempt_generation
         previous = self.repository.snapshot_active(version)
-        cleanup_generation = version.active_index_generation if previous is None else None
-        generation = uuid4()
-        await self.repository.mark_processing(version, generation, now)
+        cleanup_generations: set[UUID] = set()
+        if stale_attempt is not None:
+            cleanup_generations.add(stale_attempt)
+        if version.active_index_generation is not None and previous is None:
+            cleanup_generations.add(version.active_index_generation)
+        attempt_generation = uuid4()
+        cleanup_generations.discard(attempt_generation)
+        await self.repository.mark_processing(version, attempt_generation, now)
         await self.session.commit()
-        return IndexClaim(record, generation, previous, cleanup_generation)
+        return IndexClaim(
+            record,
+            attempt_generation,
+            previous,
+            frozenset(cleanup_generations),
+        )
 
     async def _fail_and_cleanup(
         self,
         version_id: UUID,
         generation: UUID,
         previous: IndexSnapshot | None,
-        cleanup_generation: UUID | None,
+        cleanup_generations: frozenset[UUID],
         code: str,
         message: str,
     ) -> None:
-        safe_to_delete = await self._record_failure(version_id, generation, previous, code, message)
+        owns_attempt, safe_to_delete = await self._record_failure(
+            version_id, generation, previous, code, message
+        )
         if safe_to_delete:
             await self._cleanup_generation(generation)
-            if cleanup_generation is not None:
-                await self._cleanup_generation(cleanup_generation)
+        if owns_attempt:
+            await self._cleanup_generations(cleanup_generations)
 
     async def _record_failure(
         self,
@@ -309,19 +323,16 @@ class DocumentIndexingService:
         previous: IndexSnapshot | None,
         code: str,
         message: str,
-    ) -> bool:
+    ) -> tuple[bool, bool]:
         await self.session.rollback()
         record = await self.repository.lock_version(version_id)
         if record is None:
             await self.session.rollback()
-            return True
-        if not self.repository.is_current_generation(record.version, generation):
-            active = (
-                record.version.index_status == "succeeded"
-                and record.version.active_index_generation == generation
-            )
+            return False, True
+        if not self.repository.is_current_attempt(record.version, generation):
+            active = record.version.active_index_generation == generation
             await self.session.rollback()
-            return not active
+            return False, not active
         await self.repository.mark_failed(
             record.version,
             code=code,
@@ -329,7 +340,11 @@ class DocumentIndexingService:
             previous=previous,
         )
         await self.session.commit()
-        return True
+        return True, True
+
+    async def _cleanup_generations(self, generations: set[UUID] | frozenset[UUID]) -> None:
+        for generation in generations:
+            await self._cleanup_generation(generation)
 
     async def _cleanup_generation(self, generation: UUID) -> None:
         try:

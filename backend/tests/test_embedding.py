@@ -45,8 +45,14 @@ def test_query_embedding_uses_developer_retrieval_instruction() -> None:
     model = FakeModel([[1.0, 0.0, 0.0]])
     provider = provider_with(model)
 
-    assert provider.embed_query("where is the service") == model.rows[0]
-    assert QUERY_INSTRUCTION in str(model.calls[0][1]["prompt"])
+    query = "where is the service"
+    assert provider.embed_query(query) == model.rows[0]
+    texts, kwargs = model.calls[0]
+    prompt = str(kwargs["prompt"])
+    assert prompt.startswith("Instruct:")
+    assert "Query:" in prompt
+    assert (prompt + "".join(texts)).count(query) == 1
+    assert QUERY_INSTRUCTION in prompt
 
 
 @pytest.mark.parametrize(

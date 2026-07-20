@@ -64,6 +64,7 @@ def index_status_response(version: DocumentVersion) -> DocumentIndexStatusRespon
         version_id=version.id,
         index_status=version.index_status,
         active_index_generation=version.active_index_generation,
+        index_attempt_generation=version.index_attempt_generation,
         index_started_at=version.index_started_at,
         indexed_at=version.indexed_at,
         last_index_attempt_at=version.last_index_attempt_at,

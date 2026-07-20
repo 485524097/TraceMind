@@ -23,6 +23,7 @@ def upgrade() -> None:
         sa.Column("index_status", sa.String(length=32), server_default="pending", nullable=False),
     )
     op.add_column("document_versions", sa.Column("active_index_generation", sa.Uuid()))
+    op.add_column("document_versions", sa.Column("index_attempt_generation", sa.Uuid()))
     op.add_column("document_versions", sa.Column("index_started_at", sa.DateTime(timezone=True)))
     op.add_column("document_versions", sa.Column("indexed_at", sa.DateTime(timezone=True)))
     op.add_column(
@@ -42,6 +43,12 @@ def upgrade() -> None:
         "index_status IN ('pending', 'processing', 'succeeded', 'failed')",
     )
     op.create_check_constraint(
+        "ck_document_versions_index_attempt_state",
+        "document_versions",
+        "(index_status = 'processing' AND index_attempt_generation IS NOT NULL) OR "
+        "(index_status <> 'processing' AND index_attempt_generation IS NULL)",
+    )
+    op.create_check_constraint(
         "ck_document_versions_indexed_chunk_count_nonnegative",
         "document_versions",
         "indexed_chunk_count >= 0",
@@ -54,6 +61,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_constraint(
+        "ck_document_versions_index_attempt_state",
+        "document_versions",
+        type_="check",
+        if_exists=True,
+    )
     op.drop_constraint(
         "ck_document_versions_embedding_dimension_positive",
         "document_versions",
@@ -78,3 +91,4 @@ def downgrade() -> None:
         "index_status",
     ):
         op.drop_column("document_versions", column)
+    op.drop_column("document_versions", "index_attempt_generation", if_exists=True)

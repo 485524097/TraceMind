@@ -85,6 +85,11 @@ class DocumentVersion(Base):
             name="ck_document_versions_index_status",
         ),
         CheckConstraint(
+            "(index_status = 'processing' AND index_attempt_generation IS NOT NULL) OR "
+            "(index_status <> 'processing' AND index_attempt_generation IS NULL)",
+            name="ck_document_versions_index_attempt_state",
+        ),
+        CheckConstraint(
             "indexed_chunk_count >= 0",
             name="ck_document_versions_indexed_chunk_count_nonnegative",
         ),
@@ -130,6 +135,7 @@ class DocumentVersion(Base):
         String(32), nullable=False, default="pending", server_default="pending"
     )
     active_index_generation: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    index_attempt_generation: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     index_started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

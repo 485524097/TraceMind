@@ -145,6 +145,7 @@ class DocumentParsingRepository:
         version.parse_error_code = None
         version.parse_error_message = None
         version.index_status = "pending"
+        version.index_attempt_generation = None
         version.index_error_code = None
         version.index_error_message = None
         await self.session.flush()

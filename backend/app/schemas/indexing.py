@@ -12,6 +12,7 @@ class DocumentIndexStatusResponse(BaseModel):
     version_id: UUID
     index_status: str
     active_index_generation: UUID | None
+    index_attempt_generation: UUID | None
     index_started_at: datetime | None
     indexed_at: datetime | None
     last_index_attempt_at: datetime | None
