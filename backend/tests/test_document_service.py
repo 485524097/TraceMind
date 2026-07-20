@@ -16,6 +16,7 @@ from app.repositories.document import DocumentRecord, DocumentRepository
 from app.repositories.knowledge_base import KnowledgeBaseRepository
 from app.schemas.document import DocumentImportAction
 from app.services.document import DocumentService
+from app.services.document_dispatcher import DocumentParsingDispatcher
 from app.services.exceptions import (
     DocumentImportConflictError,
     DocumentNotFoundError,
@@ -148,11 +149,23 @@ class FakeDocumentRepository:
         self.versions.pop(document.id)
 
 
+class FakeDispatcher:
+    def __init__(self, error: Exception | None = None) -> None:
+        self.calls: list[tuple[UUID, bool]] = []
+        self.error = error
+
+    async def enqueue(self, document_version_id: UUID, *, force: bool = False) -> None:
+        self.calls.append((document_version_id, force))
+        if self.error is not None:
+            raise self.error
+
+
 def make_service(
     tmp_path: Path,
     knowledge_base_ids: tuple[UUID, ...] | None = None,
     *,
     max_size: int = 1024,
+    dispatcher: FakeDispatcher | None = None,
 ) -> tuple[DocumentService, AsyncMock, FakeDocumentRepository, LocalFileStorage, UUID]:
     knowledge_base_id = knowledge_base_ids[0] if knowledge_base_ids else uuid4()
     ids = knowledge_base_ids or (knowledge_base_id,)
@@ -165,6 +178,7 @@ def make_service(
         {".md", ".txt"},
         cast(DocumentRepository, repository),
         cast(KnowledgeBaseRepository, FakeKnowledgeBaseRepository(*ids)),
+        parsing_dispatcher=cast(DocumentParsingDispatcher, dispatcher) if dispatcher else None,
     )
     return service, session, repository, storage, knowledge_base_id
 
@@ -312,3 +326,43 @@ async def test_delete_database_failure_restores_directory(tmp_path: Path) -> Non
 
     assert storage.resolve_relative(imported.record.latest_version.storage_path).exists()
     session.rollback.assert_awaited_once()
+
+
+async def test_created_version_is_queued_after_commit(tmp_path: Path) -> None:
+    dispatcher = FakeDispatcher()
+    service, session, _, _, knowledge_base_id = make_service(tmp_path, dispatcher=dispatcher)
+
+    result = await service.import_document(knowledge_base_id, upload("sample.md", b"content"))
+
+    assert result.parsing_queued
+    assert dispatcher.calls == [(result.record.latest_version.id, False)]
+    session.commit.assert_awaited_once()
+
+
+async def test_queue_failure_does_not_rollback_saved_upload(tmp_path: Path) -> None:
+    dispatcher = FakeDispatcher(RuntimeError("redis offline"))
+    service, session, _, storage, knowledge_base_id = make_service(tmp_path, dispatcher=dispatcher)
+
+    result = await service.import_document(knowledge_base_id, upload("sample.md", b"content"))
+
+    assert not result.parsing_queued
+    assert storage.resolve_relative(result.record.latest_version.storage_path).is_file()
+    session.commit.assert_awaited_once()
+    session.rollback.assert_not_awaited()
+
+
+async def test_unchanged_pending_requeues_but_succeeded_does_not(tmp_path: Path) -> None:
+    dispatcher = FakeDispatcher()
+    service, _, _, _, knowledge_base_id = make_service(tmp_path, dispatcher=dispatcher)
+    first = await service.import_document(knowledge_base_id, upload("sample.md", b"same"))
+    dispatcher.calls.clear()
+
+    pending = await service.import_document(knowledge_base_id, upload("sample.md", b"same"))
+    assert pending.parsing_queued
+    assert dispatcher.calls == [(first.record.latest_version.id, False)]
+
+    first.record.latest_version.parse_status = "succeeded"
+    dispatcher.calls.clear()
+    succeeded = await service.import_document(knowledge_base_id, upload("sample.md", b"same"))
+    assert not succeeded.parsing_queued
+    assert dispatcher.calls == []

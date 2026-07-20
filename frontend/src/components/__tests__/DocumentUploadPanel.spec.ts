@@ -13,6 +13,7 @@ const mockedUpload = vi.mocked(uploadDocument)
 function response(action: DocumentImportAction): DocumentImportResponse {
   return {
     import_action: action,
+    parsing_queued: true,
     document: {
       id: 'document-id',
       knowledge_base_id: 'kb-id',
@@ -29,6 +30,15 @@ function response(action: DocumentImportAction): DocumentImportResponse {
         mime_type: 'text/markdown',
         extension: '.md',
         created_at: '2026-07-17T00:00:00Z',
+        parse_status: 'pending',
+        parser_name: null,
+        parser_version: null,
+        chunk_count: 0,
+        parse_started_at: null,
+        parsed_at: null,
+        last_parse_attempt_at: null,
+        parse_error_code: null,
+        parse_error_message: null,
       },
     },
   }
@@ -123,5 +133,16 @@ describe('DocumentUploadPanel', () => {
     resolveUpload?.(response('created'))
     await firstClick
     await flushPromises()
+  })
+
+  it('shows that a saved upload still needs manual parsing when enqueue fails', async () => {
+    const result = response('created')
+    result.parsing_queued = false
+    mockedUpload.mockResolvedValue(result)
+    const wrapper = mountPanel()
+    await selectFiles(wrapper, [new File(['content'], 'sample.md')])
+    await wrapper.get('[data-testid="upload-documents"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('等待手动解析')
   })
 })

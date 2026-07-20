@@ -12,7 +12,7 @@ TraceMind 是一个面向中文开发者的、本地优先、答案可追溯的 
 
 ## 当前状态
 
-- 项目已完成知识库管理和本地文档增量导入
+- 项目已完成知识库管理、本地文档增量导入、异步解析和可追溯 Chunk
 - 尚未发布可用版本
 
 ## 规划技术栈
@@ -44,9 +44,11 @@ TraceMind 是一个面向中文开发者的、本地优先、答案可追溯的 
 - 上传、列出、搜索、下载和删除知识库文档
 - 按文件名和 SHA-256 判断首次导入、内容未变化或创建新版本
 - 查看并下载 DocumentVersion 历史版本
+- 自动或手动解析 Markdown、UTF-8 文本、代码、PDF 文本层和 DOCX
+- 查看解析状态、错误摘要、Chunk 正文及页码、章节和代码行引用
 - 运行前后端单元测试、静态检查与构建
 
-文件已经可以安全导入本地存储，但尚未进行文本解析、Chunking、检索索引或 RAG。
+文件已可导入并解析为结构化 Chunk，但尚未建立 BM25、Embedding、Qdrant、混合检索或 RAG。扫描型 PDF 当前不支持 OCR；JSP/Vue 当前按行解析，不是 AST 解析。
 
 ## 最小启动
 
@@ -78,4 +80,4 @@ npm ci
 npm run dev
 ```
 
-知识库管理页面位于 `http://localhost:5173/knowledge-bases`，每个知识库提供文档入口。更完整的开发步骤见 [开发指南](docs/development.md)，导入规则见 [文档导入说明](docs/document-ingestion.md)，数据库结构见 [数据库设计](docs/database-design.md)。
+知识库管理页面位于 `http://localhost:5173/knowledge-bases`，每个知识库提供文档入口。更完整的开发步骤见 [开发指南](docs/development.md)，导入规则见 [文档导入说明](docs/document-ingestion.md)，解析规则见 [文档解析说明](docs/document-parsing.md)，数据库结构见 [数据库设计](docs/database-design.md)。

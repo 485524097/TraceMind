@@ -23,3 +23,25 @@ def test_document_settings_normalize_root_and_extensions(tmp_path: Path) -> None
 def test_document_size_settings_must_be_positive(field: str) -> None:
     with pytest.raises(ValidationError):
         Settings(**{field: 0})
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "document_parse_max_extracted_chars",
+        "document_parse_max_pdf_pages",
+        "document_parse_stale_after_seconds",
+        "document_chunk_max_chars",
+        "document_chunk_overlap_chars",
+    ],
+)
+def test_parse_settings_must_be_positive(field: str) -> None:
+    with pytest.raises(ValidationError):
+        Settings(**{field: 0})
+
+
+def test_chunk_overlap_and_extraction_limits_are_consistent() -> None:
+    with pytest.raises(ValidationError):
+        Settings(document_chunk_max_chars=100, document_chunk_overlap_chars=100)
+    with pytest.raises(ValidationError):
+        Settings(document_parse_max_extracted_chars=99, document_chunk_max_chars=100)

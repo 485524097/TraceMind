@@ -11,6 +11,7 @@ from app.models.document import Document, DocumentVersion
 from app.repositories.document import DocumentRecord, DocumentRepository
 from app.repositories.knowledge_base import KnowledgeBaseRepository
 from app.schemas.document import DocumentImportAction
+from app.services.document_dispatcher import DocumentParsingDispatcher
 from app.services.exceptions import (
     DocumentImportConflictError,
     DocumentNotFoundError,
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 class DocumentImportResult:
     action: DocumentImportAction
     record: DocumentRecord
+    parsing_queued: bool = False
 
 
 @dataclass(frozen=True)
@@ -44,12 +46,14 @@ class DocumentService:
         allowed_extensions: set[str],
         document_repository: DocumentRepository | None = None,
         knowledge_base_repository: KnowledgeBaseRepository | None = None,
+        parsing_dispatcher: DocumentParsingDispatcher | None = None,
     ) -> None:
         self.session = session
         self.storage = storage
         self.allowed_extensions = allowed_extensions
         self.repository = document_repository or DocumentRepository(session)
         self.knowledge_bases = knowledge_base_repository or KnowledgeBaseRepository(session)
+        self.parsing_dispatcher = parsing_dispatcher
 
     async def import_document(
         self, knowledge_base_id: UUID, upload: UploadFile
@@ -69,7 +73,8 @@ class DocumentService:
                 if current.content_hash == temporary.content_hash:
                     await self.storage.discard_temporary(temporary.path)
                     record = await self._require_record(knowledge_base_id, document.id)
-                    return DocumentImportResult(DocumentImportAction.unchanged, record)
+                    queued = await self._enqueue_if_needed(current)
+                    return DocumentImportResult(DocumentImportAction.unchanged, record, queued)
                 version_number = current.version_number + 1
                 action = DocumentImportAction.version_created
             else:
@@ -93,6 +98,8 @@ class DocumentService:
                 mime_type=upload.content_type,
                 extension=safe_name.extension,
                 storage_path="",
+                parse_status="pending",
+                chunk_count=0,
             )
             version.storage_path = self.storage.final_relative_path(
                 knowledge_base_id, document.id, version.id, safe_name.extension
@@ -109,7 +116,8 @@ class DocumentService:
                 latest_version=version,
                 version_count=version_number,
             )
-            return DocumentImportResult(action, record)
+            queued = await self._enqueue_if_needed(version)
+            return DocumentImportResult(action, record, queued)
         except IntegrityError as exc:
             await self.session.rollback()
             await self._clean_failed_upload(temporary.path, finalized_path)
@@ -200,3 +208,13 @@ class DocumentService:
             await self.storage.remove_final_version(finalized_path)
         else:
             await self.storage.discard_temporary(temporary_path)
+
+    async def _enqueue_if_needed(self, version: DocumentVersion) -> bool:
+        if self.parsing_dispatcher is None or version.parse_status not in {"pending", "failed"}:
+            return False
+        try:
+            await self.parsing_dispatcher.enqueue(version.id)
+        except Exception:
+            logger.warning("Document version was saved but parsing could not be queued")
+            return False
+        return True

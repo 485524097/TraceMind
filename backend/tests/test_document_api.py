@@ -9,16 +9,22 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient, Response
 from sqlalchemy.exc import OperationalError
 
-from app.api.routes.documents import get_document_service
+from app.api.routes.documents import get_document_parsing_service, get_document_service
 from app.core.config import Settings
 from app.main import create_app
-from app.models.document import Document, DocumentVersion
+from app.models.document import Document, DocumentChunk, DocumentVersion
 from app.repositories.document import DocumentRecord
 from app.schemas.document import DocumentImportAction
 from app.services.document import DocumentDownload, DocumentImportResult, DocumentService
+from app.services.document_parsing import (
+    ChunkPage,
+    DocumentParsingService,
+    ParseRequestResult,
+)
 from app.services.exceptions import (
     DocumentImportConflictError,
     DocumentNotFoundError,
+    DocumentParsingQueueError,
     DocumentStorageError,
     DocumentTooLargeError,
     EmptyDocumentError,
@@ -47,6 +53,15 @@ def make_record() -> DocumentRecord:
         mime_type="text/markdown",
         extension=".md",
         storage_path="hidden/path/content.md",
+        parse_status="pending",
+        parser_name=None,
+        parser_version=None,
+        chunk_count=0,
+        parse_started_at=None,
+        parsed_at=None,
+        last_parse_attempt_at=None,
+        parse_error_code=None,
+        parse_error_message=None,
         created_at=now,
     )
     return DocumentRecord(document, version, 1)
@@ -56,9 +71,11 @@ def make_service() -> AsyncMock:
     return AsyncMock(spec=DocumentService)
 
 
-def make_app(service: AsyncMock) -> FastAPI:
+def make_app(service: AsyncMock, parsing_service: AsyncMock | None = None) -> FastAPI:
     app = create_app(Settings(app_env="test"))
     app.dependency_overrides[get_document_service] = lambda: service
+    if parsing_service is not None:
+        app.dependency_overrides[get_document_parsing_service] = lambda: parsing_service
     return app
 
 
@@ -98,6 +115,7 @@ async def test_upload_actions_and_multipart_field(
 
     assert response.status_code == expected_status
     assert response.json()["import_action"] == action.value
+    assert response.json()["parsing_queued"] is False
     assert "storage_path" not in response.text
     uploaded = service.import_document.await_args.args[1]
     assert uploaded.filename == "设计说明.md"
@@ -230,3 +248,86 @@ async def test_internal_errors_return_generic_500(error: Exception) -> None:
     assert response.status_code == 500
     assert "private" not in response.text
     assert "SELECT" not in response.text
+
+
+@pytest.mark.parametrize(("queued", "status_code"), [(True, 202), (False, 200)])
+async def test_manual_parse_dynamic_status(queued: bool, status_code: int) -> None:
+    document_service = make_service()
+    parsing_service = AsyncMock(spec=DocumentParsingService)
+    record = make_record()
+    parsing_service.request_parse.return_value = ParseRequestResult(queued, record.latest_version)
+    path = (
+        f"/api/v1/knowledge-bases/{record.document.knowledge_base_id}"
+        f"/documents/{record.document.id}/versions/{record.latest_version.id}/parse?force=true"
+    )
+
+    response = await request(make_app(document_service, parsing_service), "POST", path)
+
+    assert response.status_code == status_code
+    assert response.json()["queued"] is queued
+    parsing_service.request_parse.assert_awaited_once_with(
+        record.document.knowledge_base_id,
+        record.document.id,
+        record.latest_version.id,
+        force=True,
+    )
+
+
+async def test_manual_parse_queue_unavailable_returns_503() -> None:
+    parsing_service = AsyncMock(spec=DocumentParsingService)
+    parsing_service.request_parse.side_effect = DocumentParsingQueueError("redis://private")
+    record = make_record()
+    path = (
+        f"/api/v1/knowledge-bases/{record.document.knowledge_base_id}"
+        f"/documents/{record.document.id}/versions/{record.latest_version.id}/parse"
+    )
+
+    response = await request(make_app(make_service(), parsing_service), "POST", path)
+
+    assert response.status_code == 503
+    assert "private" not in response.text
+
+
+async def test_parse_status_and_ordered_chunk_page() -> None:
+    parsing_service = AsyncMock(spec=DocumentParsingService)
+    record = make_record()
+    version = record.latest_version
+    version.parse_status = "succeeded"
+    version.parser_name = "markdown"
+    version.parser_version = "1"
+    version.chunk_count = 1
+    now = datetime.now(UTC)
+    chunk = DocumentChunk(
+        id=uuid4(),
+        document_version_id=version.id,
+        chunk_index=0,
+        content="正文",
+        content_hash="b" * 64,
+        char_count=2,
+        page_number=None,
+        start_line=2,
+        end_line=2,
+        section_title="说明",
+        chunk_type="paragraph",
+        language=None,
+        created_at=now,
+    )
+    parsing_service.get_status.return_value = version
+    parsing_service.list_chunks.return_value = ChunkPage(version, [chunk], 1)
+    base = (
+        f"/api/v1/knowledge-bases/{record.document.knowledge_base_id}"
+        f"/documents/{record.document.id}/versions/{version.id}"
+    )
+
+    status_response = await request(
+        make_app(make_service(), parsing_service), "GET", f"{base}/parse-status"
+    )
+    chunks_response = await request(
+        make_app(make_service(), parsing_service), "GET", f"{base}/chunks?offset=0&limit=10"
+    )
+
+    assert status_response.status_code == 200
+    assert status_response.json()["parse_status"] == "succeeded"
+    assert chunks_response.status_code == 200
+    assert chunks_response.json()["items"][0]["section_title"] == "说明"
+    assert "storage_path" not in chunks_response.text

@@ -1,8 +1,10 @@
 import { apiRequest, apiUrl } from './api'
 import type {
+  DocumentChunkListResponse,
   DocumentImportResponse,
   DocumentItem,
   DocumentListResponse,
+  DocumentParseRequestResponse,
   DocumentVersion,
 } from '@/types/document'
 
@@ -42,6 +44,32 @@ export function listDocumentVersions(
   documentId: string,
 ): Promise<DocumentVersion[]> {
   return apiRequest(`${basePath(knowledgeBaseId)}/${documentId}/versions`)
+}
+
+export function requestDocumentParse(
+  knowledgeBaseId: string,
+  documentId: string,
+  versionId: string,
+  force = false,
+): Promise<DocumentParseRequestResponse> {
+  const params = new URLSearchParams({ force: String(force) })
+  return apiRequest(
+    `${basePath(knowledgeBaseId)}/${documentId}/versions/${versionId}/parse?${params}`,
+    { method: 'POST' },
+  )
+}
+
+export function listDocumentChunks(
+  knowledgeBaseId: string,
+  documentId: string,
+  versionId: string,
+  offset = 0,
+  limit = 20,
+): Promise<DocumentChunkListResponse> {
+  const params = new URLSearchParams({ offset: String(offset), limit: String(limit) })
+  return apiRequest(
+    `${basePath(knowledgeBaseId)}/${documentId}/versions/${versionId}/chunks?${params}`,
+  )
 }
 
 export function deleteDocument(knowledgeBaseId: string, documentId: string): Promise<void> {

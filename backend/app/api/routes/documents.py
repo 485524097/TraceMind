@@ -18,19 +18,28 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db_session
+from app.models.document import DocumentVersion
 from app.repositories.document import DocumentRecord
 from app.schemas.document import (
+    DocumentChunkListResponse,
+    DocumentChunkResponse,
     DocumentImportResponse,
     DocumentListResponse,
+    DocumentParseRequestResponse,
+    DocumentParseStatusResponse,
     DocumentResponse,
     DocumentVersionResponse,
 )
 from app.services.document import DocumentService
+from app.services.document_dispatcher import CeleryDocumentParsingDispatcher
+from app.services.document_parsing import DocumentParsingService
 from app.services.exceptions import (
     DocumentImportConflictError,
     DocumentNotFoundError,
+    DocumentParsingQueueError,
     DocumentStorageError,
     DocumentTooLargeError,
+    DocumentVersionNotFoundError,
     EmptyDocumentError,
     InvalidDocumentNameError,
     KnowledgeBaseNotFoundError,
@@ -57,10 +66,31 @@ def get_document_service(request: Request, session: SessionDependency) -> Docume
         session,
         storage,
         set(settings.document_allowed_extensions),
+        parsing_dispatcher=CeleryDocumentParsingDispatcher(),
     )
 
 
 ServiceDependency = Annotated[DocumentService, Depends(get_document_service)]
+
+
+def get_document_parsing_service(
+    request: Request, session: SessionDependency
+) -> DocumentParsingService:
+    settings = request.app.state.settings
+    storage = LocalFileStorage(
+        settings.document_storage_root,
+        max_size=settings.document_max_file_size_bytes,
+        chunk_size=settings.document_upload_chunk_size_bytes,
+    )
+    return DocumentParsingService(
+        session,
+        storage,
+        settings,
+        dispatcher=CeleryDocumentParsingDispatcher(),
+    )
+
+
+ParsingServiceDependency = Annotated[DocumentParsingService, Depends(get_document_parsing_service)]
 
 
 def document_response(record: DocumentRecord) -> DocumentResponse:
@@ -77,8 +107,25 @@ def document_response(record: DocumentRecord) -> DocumentResponse:
     )
 
 
+def parse_status_response(version: DocumentVersion) -> DocumentParseStatusResponse:
+    return DocumentParseStatusResponse(
+        version_id=version.id,
+        parse_status=version.parse_status,
+        parser_name=version.parser_name,
+        parser_version=version.parser_version,
+        chunk_count=version.chunk_count,
+        parse_started_at=version.parse_started_at,
+        parsed_at=version.parsed_at,
+        last_parse_attempt_at=version.last_parse_attempt_at,
+        parse_error_code=version.parse_error_code,
+        parse_error_message=version.parse_error_message,
+    )
+
+
 def raise_document_http_error(exc: Exception) -> NoReturn:
-    if isinstance(exc, (KnowledgeBaseNotFoundError, DocumentNotFoundError)):
+    if isinstance(
+        exc, (KnowledgeBaseNotFoundError, DocumentNotFoundError, DocumentVersionNotFoundError)
+    ):
         raise HTTPException(status_code=404, detail="Knowledge base or document not found")
     if isinstance(exc, DocumentImportConflictError):
         raise HTTPException(status_code=409, detail="Document import conflict; please retry")
@@ -91,6 +138,8 @@ def raise_document_http_error(exc: Exception) -> NoReturn:
     if isinstance(exc, DocumentStorageError):
         logger.exception("Document storage operation failed")
         raise HTTPException(status_code=500, detail="Document storage operation failed")
+    if isinstance(exc, DocumentParsingQueueError):
+        raise HTTPException(status_code=503, detail="Document parsing queue is unavailable")
     if isinstance(exc, SQLAlchemyError):
         logger.exception("Document database operation failed (%s)", type(exc).__name__)
         raise HTTPException(status_code=500, detail="Document operation could not be completed")
@@ -127,6 +176,7 @@ async def import_document(
         response.status_code = status.HTTP_200_OK
     return DocumentImportResponse(
         import_action=result.action,
+        parsing_queued=result.parsing_queued,
         document=document_response(result.record),
     )
 
@@ -191,6 +241,87 @@ async def list_document_versions(
     except Exception as exc:
         raise_document_http_error(exc)
     return [DocumentVersionResponse.model_validate(version) for version in versions]
+
+
+@router.post(
+    "/{document_id}/versions/{version_id}/parse",
+    response_model=DocumentParseRequestResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        404: {"description": "Version not found"},
+        503: {"description": "Queue unavailable"},
+    },
+)
+async def request_document_parse(
+    knowledge_base_id: UUID,
+    document_id: UUID,
+    version_id: UUID,
+    service: ParsingServiceDependency,
+    response: Response,
+    force: bool = Query(False),
+) -> DocumentParseRequestResponse:
+    try:
+        result = await service.request_parse(
+            knowledge_base_id, document_id, version_id, force=force
+        )
+    except Exception as exc:
+        raise_document_http_error(exc)
+    if not result.queued:
+        response.status_code = status.HTTP_200_OK
+    return DocumentParseRequestResponse(
+        queued=result.queued,
+        version=parse_status_response(result.version),
+    )
+
+
+@router.get(
+    "/{document_id}/versions/{version_id}/parse-status",
+    response_model=DocumentParseStatusResponse,
+    responses={404: {"description": "Version not found"}},
+)
+async def get_document_parse_status(
+    knowledge_base_id: UUID,
+    document_id: UUID,
+    version_id: UUID,
+    service: ParsingServiceDependency,
+) -> DocumentParseStatusResponse:
+    try:
+        version = await service.get_status(knowledge_base_id, document_id, version_id)
+    except Exception as exc:
+        raise_document_http_error(exc)
+    return parse_status_response(version)
+
+
+@router.get(
+    "/{document_id}/versions/{version_id}/chunks",
+    response_model=DocumentChunkListResponse,
+    responses={404: {"description": "Version not found"}},
+)
+async def list_document_chunks(
+    knowledge_base_id: UUID,
+    document_id: UUID,
+    version_id: UUID,
+    service: ParsingServiceDependency,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> DocumentChunkListResponse:
+    try:
+        page = await service.list_chunks(
+            knowledge_base_id,
+            document_id,
+            version_id,
+            offset=offset,
+            limit=limit,
+        )
+    except Exception as exc:
+        raise_document_http_error(exc)
+    return DocumentChunkListResponse(
+        items=[DocumentChunkResponse.model_validate(item) for item in page.items],
+        total=page.total,
+        offset=offset,
+        limit=limit,
+        version=parse_status_response(page.version),
+    )
 
 
 @router.get(
