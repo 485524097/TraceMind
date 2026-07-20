@@ -69,6 +69,80 @@ def test_markdown_headings_sections_fences_and_lines(tmp_path: Path) -> None:
     assert parsed.blocks[-1].section_title == "配置"
 
 
+def test_markdown_bare_backtick_fence_preserves_content_and_metadata(tmp_path: Path) -> None:
+    content = "# 简历\n\n项目经历\n\n```\nTraceMind\nFastAPI\nCelery\n```"
+
+    parsed = MarkdownParser().parse(write(tmp_path / "resume.md", content.encode()), CONTEXT)
+    code = next(block for block in parsed.blocks if block.block_type == "code")
+
+    assert code.language is None
+    assert code.block_type == "code"
+    assert code.section_title == "简历"
+    assert (code.start_line, code.end_line) == (5, 9)
+    assert code.text == "```\nTraceMind\nFastAPI\nCelery\n```"
+
+
+def test_markdown_bare_tilde_fence_preserves_content_and_lines(tmp_path: Path) -> None:
+    content = "~~~\nplain content\n~~~"
+
+    parsed = MarkdownParser().parse(write(tmp_path / "plain.md", content.encode()), CONTEXT)
+    code = parsed.blocks[0]
+
+    assert code.block_type == "code"
+    assert code.language is None
+    assert code.text == content
+    assert (code.start_line, code.end_line) == (1, 3)
+
+
+@pytest.mark.parametrize("language", ["python", "java", "javascript"])
+def test_markdown_language_fence_preserves_language(tmp_path: Path, language: str) -> None:
+    content = f'```{language}\nprint("ok")\n```'
+
+    parsed = MarkdownParser().parse(write(tmp_path / "language.md", content.encode()), CONTEXT)
+
+    assert parsed.blocks[0].language == language
+
+
+def test_markdown_fence_uses_first_info_word_as_language(tmp_path: Path) -> None:
+    content = '```python linenums\nprint("ok")\n```'
+
+    parsed = MarkdownParser().parse(write(tmp_path / "info.md", content.encode()), CONTEXT)
+
+    assert parsed.blocks[0].language == "python"
+
+
+def test_markdown_resume_style_document_with_bare_fence(tmp_path: Path) -> None:
+    content = "\n".join(
+        [
+            "# 候选人概览",
+            "",
+            "## 项目经历",
+            "",
+            "- **项目名称**：[TraceMind](https://example.com)",
+            "- 技术栈：Python、FastAPI、Celery",
+            "",
+            "---",
+            "",
+            "```",
+            "uv run pytest",
+            "```",
+            "",
+            "具备中文技术文档整理与问题分析经验。",
+        ]
+    )
+
+    parsed = MarkdownParser().parse(
+        write(tmp_path / "synthetic-resume.md", content.encode()), CONTEXT
+    )
+    code = next(block for block in parsed.blocks if block.block_type == "code")
+
+    assert {block.block_type for block in parsed.blocks} >= {"heading", "paragraph", "code"}
+    assert code.language is None
+    assert code.section_title == "项目经历"
+    assert (code.start_line, code.end_line) == (10, 12)
+    assert code.text == "```\nuv run pytest\n```"
+
+
 @pytest.mark.parametrize(("extension", "language"), sorted(LANGUAGES.items()))
 def test_code_parser_language_indentation_and_lines(
     tmp_path: Path, extension: str, language: str
