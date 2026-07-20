@@ -255,6 +255,9 @@ qdrant-data/
 # Local uploads and models
 uploads/
 storage/uploads/
+/data/uploads/
+**/.upload-tmp/
+**/.trash/
 /models/
 storage/models/
 local-models/

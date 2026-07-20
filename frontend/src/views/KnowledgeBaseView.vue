@@ -4,6 +4,7 @@ import { onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import KnowledgeBaseFormDialog from '@/components/KnowledgeBaseFormDialog.vue'
+import { ApiError } from '@/services/api'
 import { deleteKnowledgeBase, listKnowledgeBases } from '@/services/knowledgeBases'
 import type { KnowledgeBase } from '@/types/knowledgeBase'
 
@@ -66,8 +67,12 @@ async function confirmDelete(knowledgeBase: KnowledgeBase): Promise<void> {
     await deleteKnowledgeBase(knowledgeBase.id)
     ElMessage.success('知识库删除成功')
     await loadKnowledgeBases()
-  } catch {
-    ElMessage.error('知识库删除失败，请稍后重试')
+  } catch (error) {
+    ElMessage.error(
+      error instanceof ApiError && error.status === 409
+        ? '知识库中仍有文档，请先删除文档'
+        : '知识库删除失败，请稍后重试',
+    )
   } finally {
     deletingId.value = null
   }
@@ -114,6 +119,9 @@ onMounted(loadKnowledgeBases)
               <td>{{ formatDate(knowledgeBase.created_at) }}</td>
               <td>{{ formatDate(knowledgeBase.updated_at) }}</td>
               <td class="row-actions">
+                <RouterLink :to="`/knowledge-bases/${knowledgeBase.id}/documents`">
+                  <ElButton size="small">文档</ElButton>
+                </RouterLink>
                 <ElButton size="small" @click="openEditDialog(knowledgeBase)">编辑</ElButton>
                 <ElButton
                   :data-testid="`delete-${knowledgeBase.id}`"

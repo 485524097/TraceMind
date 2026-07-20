@@ -14,6 +14,7 @@ from app.main import create_app
 from app.models.knowledge_base import KnowledgeBase
 from app.services.exceptions import (
     KnowledgeBaseNameConflictError,
+    KnowledgeBaseNotEmptyError,
     KnowledgeBaseNotFoundError,
 )
 from app.services.knowledge_base import KnowledgeBaseService
@@ -150,6 +151,19 @@ async def test_name_conflict_returns_409() -> None:
 
     assert response.status_code == 409
     assert "already exists" in response.json()["detail"]
+
+
+async def test_non_empty_knowledge_base_delete_returns_409() -> None:
+    service = make_service()
+    knowledge_base_id = uuid4()
+    service.delete.side_effect = KnowledgeBaseNotEmptyError(knowledge_base_id)
+
+    response = await request(
+        make_app(service), "DELETE", f"/api/v1/knowledge-bases/{knowledge_base_id}"
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Knowledge base must be empty before deletion"
 
 
 @pytest.mark.parametrize(

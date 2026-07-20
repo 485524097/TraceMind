@@ -77,12 +77,18 @@ services:
       QDRANT_URL: http://qdrant:6333
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}@redis:6379/1
       CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}@redis:6379/2
+      DOCUMENT_STORAGE_ROOT: /app/data/uploads
+      DOCUMENT_MAX_FILE_SIZE_BYTES: ${DOCUMENT_MAX_FILE_SIZE_BYTES:-52428800}
+      DOCUMENT_UPLOAD_CHUNK_SIZE_BYTES: ${DOCUMENT_UPLOAD_CHUNK_SIZE_BYTES:-1048576}
+      DOCUMENT_ALLOWED_EXTENSIONS: ${DOCUMENT_ALLOWED_EXTENSIONS:-.md,.txt,.pdf,.docx,.java,.jsp,.js,.ts,.vue,.sql,.xml,.json,.yaml,.yml,.properties,.py}
     ports:
       - "127.0.0.1:${BACKEND_HOST_PORT:-8000}:8000"
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       qdrant: { condition: service_healthy }
+    volumes:
+      - ${DOCUMENT_STORAGE_HOST_PATH:-./data/uploads}:/app/data/uploads
     networks: [tracemind]
 
   celery-worker:
@@ -103,8 +109,14 @@ services:
       QDRANT_URL: http://qdrant:6333
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}@redis:6379/1
       CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}@redis:6379/2
+      DOCUMENT_STORAGE_ROOT: /app/data/uploads
+      DOCUMENT_MAX_FILE_SIZE_BYTES: ${DOCUMENT_MAX_FILE_SIZE_BYTES:-52428800}
+      DOCUMENT_UPLOAD_CHUNK_SIZE_BYTES: ${DOCUMENT_UPLOAD_CHUNK_SIZE_BYTES:-1048576}
+      DOCUMENT_ALLOWED_EXTENSIONS: ${DOCUMENT_ALLOWED_EXTENSIONS:-.md,.txt,.pdf,.docx,.java,.jsp,.js,.ts,.vue,.sql,.xml,.json,.yaml,.yml,.properties,.py}
     depends_on:
       redis: { condition: service_healthy }
+    volumes:
+      - ${DOCUMENT_STORAGE_HOST_PATH:-./data/uploads}:/app/data/uploads
     networks: [tracemind]
 
 volumes:

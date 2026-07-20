@@ -1,0 +1,157 @@
+<script setup lang="ts">
+import { ElAlert, ElButton, ElEmpty, ElMessage, ElMessageBox } from 'element-plus'
+import { onMounted, ref } from 'vue'
+import { RouterLink, useRoute } from 'vue-router'
+
+import DocumentUploadPanel from '@/components/DocumentUploadPanel.vue'
+import DocumentVersionDialog from '@/components/DocumentVersionDialog.vue'
+import {
+  deleteDocument,
+  downloadCurrentDocument,
+  listDocuments,
+} from '@/services/documents'
+import { getKnowledgeBase } from '@/services/knowledgeBases'
+import type { DocumentItem } from '@/types/document'
+
+const route = useRoute()
+const knowledgeBaseId = String(route.params.knowledgeBaseId)
+const knowledgeBaseName = ref('')
+const items = ref<DocumentItem[]>([])
+const query = ref('')
+const loading = ref(false)
+const errorMessage = ref('')
+const deletingId = ref<string | null>(null)
+const versionDialogVisible = ref(false)
+const selectedDocument = ref<DocumentItem | null>(null)
+
+function formatDate(value: string): string {
+  return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(
+    new Date(value),
+  )
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+async function loadDocuments(): Promise<void> {
+  if (loading.value) return
+  loading.value = true
+  errorMessage.value = ''
+  try {
+    const response = await listDocuments(knowledgeBaseId, query.value)
+    items.value = response.items
+  } catch {
+    errorMessage.value = '文档列表加载失败，请检查知识库或后端服务后重试'
+  } finally {
+    loading.value = false
+  }
+}
+
+async function loadPage(): Promise<void> {
+  try {
+    knowledgeBaseName.value = (await getKnowledgeBase(knowledgeBaseId)).name
+  } catch {
+    errorMessage.value = '知识库不存在或加载失败'
+  }
+  await loadDocuments()
+}
+
+function showVersions(document: DocumentItem): void {
+  selectedDocument.value = document
+  versionDialogVisible.value = true
+}
+
+async function confirmDelete(document: DocumentItem): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除文档“${document.name}”及全部历史版本吗？此操作无法撤销。`,
+      '删除确认',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  if (deletingId.value) return
+  deletingId.value = document.id
+  try {
+    await deleteDocument(knowledgeBaseId, document.id)
+    ElMessage.success('文档删除成功')
+    await loadDocuments()
+  } catch {
+    ElMessage.error('文档删除失败，请稍后重试')
+  } finally {
+    deletingId.value = null
+  }
+}
+
+onMounted(loadPage)
+</script>
+
+<template>
+  <main class="management-page document-page">
+    <header class="management-header">
+      <div>
+        <RouterLink to="/knowledge-bases" class="back-link">← 返回知识库列表</RouterLink>
+        <p class="eyebrow">DOCUMENT INGESTION</p>
+        <h1>{{ knowledgeBaseName || '文档管理' }}</h1>
+        <p>管理原始文件与历史版本；文件导入后尚未进行解析或索引。</p>
+      </div>
+      <ElButton :loading="loading" @click="loadDocuments">刷新</ElButton>
+    </header>
+
+    <DocumentUploadPanel :knowledge-base-id="knowledgeBaseId" @completed="loadDocuments" />
+
+    <section class="document-toolbar">
+      <form @submit.prevent="loadDocuments">
+        <input v-model="query" aria-label="文档名称搜索" placeholder="按名称搜索文档" />
+        <ElButton native-type="submit" :loading="loading">搜索</ElButton>
+      </form>
+    </section>
+
+    <ElAlert v-if="errorMessage" :title="errorMessage" type="error" show-icon :closable="false" />
+
+    <section class="knowledge-panel" :aria-busy="loading">
+      <div v-if="loading && items.length === 0" class="loading-state">正在加载文档…</div>
+      <ElEmpty v-else-if="items.length === 0 && !errorMessage" description="暂无文档" />
+      <div v-else class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>文件名</th><th>版本</th><th>大小</th><th>版本数</th><th>创建</th><th>更新</th><th></th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="document in items" :key="document.id">
+              <td class="name-cell">{{ document.name }}</td>
+              <td>{{ document.latest_version.extension }} · V{{ document.latest_version.version_number }}</td>
+              <td>{{ formatSize(document.latest_version.file_size) }}</td>
+              <td>{{ document.version_count }}</td>
+              <td>{{ formatDate(document.created_at) }}</td>
+              <td>{{ formatDate(document.updated_at) }}</td>
+              <td class="row-actions document-actions">
+                <ElButton size="small" @click="downloadCurrentDocument(knowledgeBaseId, document.id)">下载</ElButton>
+                <ElButton size="small" @click="showVersions(document)">版本</ElButton>
+                <ElButton
+                  :data-testid="`delete-document-${document.id}`"
+                  size="small"
+                  type="danger"
+                  plain
+                  :loading="deletingId === document.id"
+                  :disabled="deletingId !== null"
+                  @click="confirmDelete(document)"
+                >删除</ElButton>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <DocumentVersionDialog
+      v-model="versionDialogVisible"
+      :knowledge-base-id="knowledgeBaseId"
+      :document="selectedDocument"
+    />
+  </main>
+</template>

@@ -11,11 +11,12 @@ export class ApiError extends Error {
 }
 
 export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const hasFormData = init?.body instanceof FormData
   const response = await fetch(`${apiBaseUrl}${path}`, {
     ...init,
     headers: {
       Accept: 'application/json',
-      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(init?.body && !hasFormData ? { 'Content-Type': 'application/json' } : {}),
       ...init?.headers,
     },
   })
@@ -29,4 +30,8 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
     throw new ApiError(response.status, body?.detail ?? '请求失败，请稍后重试')
   }
   return body as T
+}
+
+export function apiUrl(path: string): string {
+  return `${apiBaseUrl}${path}`
 }

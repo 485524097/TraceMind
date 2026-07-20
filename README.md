@@ -12,7 +12,7 @@ TraceMind 是一个面向中文开发者的、本地优先、答案可追溯的 
 
 ## 当前状态
 
-- 项目已完成知识库管理的第一个业务垂直功能
+- 项目已完成知识库管理和本地文档增量导入
 - 尚未发布可用版本
 
 ## 规划技术栈
@@ -41,9 +41,12 @@ TraceMind 是一个面向中文开发者的、本地优先、答案可追溯的 
 - 启动 Vue 3 首页并检查后端存活状态
 - 创建、查询、修改和删除知识库
 - 在 Vue 3 管理页面维护知识库名称与描述
+- 上传、列出、搜索、下载和删除知识库文档
+- 按文件名和 SHA-256 判断首次导入、内容未变化或创建新版本
+- 查看并下载 DocumentVersion 历史版本
 - 运行前后端单元测试、静态检查与构建
 
-文件导入与解析、Document/Chunk、检索和 RAG 等业务能力尚未实现。
+文件已经可以安全导入本地存储，但尚未进行文本解析、Chunking、检索索引或 RAG。
 
 ## 最小启动
 
@@ -75,4 +78,4 @@ npm ci
 npm run dev
 ```
 
-知识库管理页面位于 `http://localhost:5173/knowledge-bases`。更完整的 Windows、macOS 和 Linux 开发步骤见 [开发指南](docs/development.md)，当前架构边界见 [架构说明](docs/architecture.md)，数据库结构见 [数据库设计](docs/database-design.md)。
+知识库管理页面位于 `http://localhost:5173/knowledge-bases`，每个知识库提供文档入口。更完整的开发步骤见 [开发指南](docs/development.md)，导入规则见 [文档导入说明](docs/document-ingestion.md)，数据库结构见 [数据库设计](docs/database-design.md)。

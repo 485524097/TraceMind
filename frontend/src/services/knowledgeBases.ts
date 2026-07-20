@@ -17,6 +17,10 @@ export function createKnowledgeBase(payload: KnowledgeBaseCreate): Promise<Knowl
   return apiRequest(basePath, { method: 'POST', body: JSON.stringify(payload) })
 }
 
+export function getKnowledgeBase(knowledgeBaseId: string): Promise<KnowledgeBase> {
+  return apiRequest(`${basePath}/${knowledgeBaseId}`)
+}
+
 export function updateKnowledgeBase(
   knowledgeBaseId: string,
   payload: KnowledgeBaseUpdate,

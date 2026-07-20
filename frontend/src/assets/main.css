@@ -175,6 +175,84 @@ th {
   font-size: 14px;
 }
 
+.upload-panel,
+.document-toolbar {
+  max-width: 1200px;
+  margin: 0 auto 20px;
+  padding: 22px;
+  border: 1px solid #e3e8ef;
+  border-radius: 18px;
+  background: #fff;
+}
+
+.upload-panel h2 {
+  margin: 0;
+}
+
+.upload-panel p {
+  color: #68748a;
+}
+
+.file-picker {
+  display: inline-flex;
+  margin-right: 12px;
+  padding: 8px 15px;
+  border: 1px solid #cfd7e3;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.file-picker input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.upload-list {
+  display: grid;
+  gap: 8px;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.upload-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  background: #f7f9fb;
+}
+
+.upload-list [data-state='failed'] {
+  color: #c24141;
+}
+
+.upload-list [data-state='created'],
+.upload-list [data-state='version_created'],
+.upload-list [data-state='unchanged'] {
+  color: #16865c;
+}
+
+.document-toolbar form {
+  display: flex;
+  gap: 10px;
+}
+
+.document-toolbar input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid #cfd7e3;
+  border-radius: 6px;
+  font: inherit;
+}
+
+.document-actions {
+  min-width: 230px;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
