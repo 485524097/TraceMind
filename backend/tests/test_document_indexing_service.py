@@ -289,9 +289,9 @@ async def test_force_reindex_replaces_generation_and_cleans_previous() -> None:
     assert not await service.index_version(version.id)
 
 
-async def test_force_reindex_failure_preserves_usable_active_generation() -> None:
+async def test_partial_batch_failure_preserves_usable_active_generation() -> None:
     service, _, _, gateway, _, version = make_service(
-        gateway=FakeGateway(upsert_error=VectorIndexError("partial"))
+        gateway=FakeGateway(upsert_error=VectorIndexError("second batch failed"))
     )
     active = uuid4()
     version.index_status = "succeeded"

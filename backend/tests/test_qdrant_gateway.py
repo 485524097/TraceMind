@@ -3,25 +3,38 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from httpx import Headers
 from qdrant_client import AsyncQdrantClient, models
+from qdrant_client.http.exceptions import UnexpectedResponse
 
-from app.indexing import IncompatibleCollectionError, QdrantGateway, VectorPoint
+from app.indexing import (
+    IncompatibleCollectionError,
+    QdrantGateway,
+    VectorIndexError,
+    VectorPoint,
+)
 
 
-def gateway(client: AsyncMock) -> QdrantGateway:
+def gateway(client: AsyncMock, *, batch_size: int = 64) -> QdrantGateway:
     return QdrantGateway(
         client,
         collection_name="tracemind_chunks",
         vector_name="dense_v1",
         dimension=3,
+        upsert_batch_size=batch_size,
     )
 
 
-def collection_info(*, size: int = 3, distance: models.Distance = models.Distance.COSINE):
+def collection_info(
+    *,
+    size: int = 3,
+    distance: models.Distance = models.Distance.COSINE,
+    payload_schema: dict[str, object] | None = None,
+):
     vectors = {"dense_v1": models.VectorParams(size=size, distance=distance)}
     return SimpleNamespace(
         config=SimpleNamespace(params=SimpleNamespace(vectors=vectors)),
-        payload_schema={},
+        payload_schema=payload_schema or {},
     )
 
 
@@ -57,15 +70,87 @@ async def test_incompatible_collection_is_rejected_without_rebuild(
     client.create_collection.assert_not_called()
 
 
-async def test_point_upsert_uses_named_vector_and_complete_payload() -> None:
+async def test_concurrent_collection_creation_is_rechecked() -> None:
     client = AsyncMock(spec=AsyncQdrantClient)
-    point_id = uuid4()
-    payload = {"knowledge_base_id": str(uuid4()), "content": "traceable"}
+    client.collection_exists.side_effect = [False, True]
+    client.create_collection.side_effect = UnexpectedResponse(409, "Conflict", b"exists", Headers())
+    client.get_collection.return_value = collection_info()
 
-    await gateway(client).upsert([VectorPoint(point_id, [1.0, 0.0, 0.0], payload)])
+    await gateway(client).ensure_collection()
 
-    sent = client.upsert.await_args.kwargs["points"][0]
-    assert sent.id == point_id
-    assert sent.vector == {"dense_v1": [1.0, 0.0, 0.0]}
-    assert sent.payload == payload
-    assert client.upsert.await_args.kwargs["wait"] is True
+    client.get_collection.assert_awaited_once_with("tracemind_chunks")
+    assert client.create_payload_index.await_count == 6
+
+
+async def test_concurrent_payload_index_creation_is_rechecked() -> None:
+    client = AsyncMock(spec=AsyncQdrantClient)
+    existing = set(QdrantGateway.payload_indexes) - {"knowledge_base_id"}
+    client.collection_exists.return_value = True
+    client.get_collection.side_effect = [
+        collection_info(payload_schema={name: object() for name in existing}),
+        collection_info(payload_schema={name: object() for name in QdrantGateway.payload_indexes}),
+    ]
+    client.create_payload_index.side_effect = UnexpectedResponse(
+        409, "Conflict", b"exists", Headers()
+    )
+
+    await gateway(client).ensure_collection()
+
+    client.create_payload_index.assert_awaited_once()
+    assert client.get_collection.await_count == 2
+
+
+async def test_collection_network_failure_is_not_treated_as_existing() -> None:
+    client = AsyncMock(spec=AsyncQdrantClient)
+    client.collection_exists.return_value = False
+    client.create_collection.side_effect = RuntimeError("network unavailable")
+
+    with pytest.raises(VectorIndexError, match="could not be prepared"):
+        await gateway(client).ensure_collection()
+
+    client.get_collection.assert_not_called()
+
+
+def make_points(count: int) -> list[VectorPoint]:
+    return [
+        VectorPoint(
+            uuid4(),
+            [1.0, 0.0, 0.0],
+            {"knowledge_base_id": str(uuid4()), "content": f"traceable {index}"},
+        )
+        for index in range(count)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("count", "batch_lengths"),
+    [(0, []), (1, [1]), (64, [64]), (65, [64, 1]), (130, [64, 64, 2])],
+)
+async def test_point_upsert_is_sequentially_batched(count: int, batch_lengths: list[int]) -> None:
+    client = AsyncMock(spec=AsyncQdrantClient)
+    points = make_points(count)
+
+    await gateway(client).upsert(points)
+
+    assert client.upsert.await_count == len(batch_lengths)
+    for call, expected_length in zip(client.upsert.await_args_list, batch_lengths, strict=True):
+        sent = call.kwargs["points"]
+        assert len(sent) == expected_length
+        assert call.kwargs["wait"] is True
+        for point in sent:
+            assert point.vector == {"dense_v1": [1.0, 0.0, 0.0]}
+            original = next(item for item in points if item.id == point.id)
+            assert point.payload == original.payload
+
+
+async def test_second_upsert_batch_failure_uses_safe_error() -> None:
+    client = AsyncMock(spec=AsyncQdrantClient)
+    client.upsert.side_effect = [None, RuntimeError("http://private:6333 secret document")]
+
+    with pytest.raises(VectorIndexError) as caught:
+        await gateway(client).upsert(make_points(65))
+
+    assert str(caught.value) == "Qdrant points could not be written"
+    assert "private" not in str(caught.value)
+    assert "document" not in str(caught.value)
+    assert client.upsert.await_count == 2

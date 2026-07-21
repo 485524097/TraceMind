@@ -3,6 +3,7 @@ from typing import Any
 from uuid import UUID
 
 from qdrant_client import AsyncQdrantClient, models
+from qdrant_client.http.exceptions import UnexpectedResponse
 
 
 class VectorIndexError(Exception):
@@ -43,24 +44,32 @@ class QdrantGateway:
         collection_name: str,
         vector_name: str,
         dimension: int,
+        upsert_batch_size: int,
     ) -> None:
         self.client = client
         self.collection_name = collection_name
         self.vector_name = vector_name
         self.dimension = dimension
+        self.upsert_batch_size = upsert_batch_size
 
     async def ensure_collection(self) -> None:
         try:
             if not await self.client.collection_exists(self.collection_name):
-                await self.client.create_collection(
-                    self.collection_name,
-                    vectors_config={
-                        self.vector_name: models.VectorParams(
-                            size=self.dimension,
-                            distance=models.Distance.COSINE,
-                        )
-                    },
-                )
+                try:
+                    await self.client.create_collection(
+                        self.collection_name,
+                        vectors_config={
+                            self.vector_name: models.VectorParams(
+                                size=self.dimension,
+                                distance=models.Distance.COSINE,
+                            )
+                        },
+                    )
+                except UnexpectedResponse as exc:
+                    if exc.status_code not in {400, 409} or not await self.client.collection_exists(
+                        self.collection_name
+                    ):
+                        raise
             info = await self.client.get_collection(self.collection_name)
             vectors = info.config.params.vectors
             if not isinstance(vectors, dict):
@@ -79,31 +88,42 @@ class QdrantGateway:
             existing_indexes = set(info.payload_schema)
             for field_name in self.payload_indexes:
                 if field_name not in existing_indexes:
-                    await self.client.create_payload_index(
-                        self.collection_name,
-                        field_name=field_name,
-                        field_schema=models.PayloadSchemaType.KEYWORD,
-                        wait=True,
-                    )
+                    try:
+                        await self.client.create_payload_index(
+                            self.collection_name,
+                            field_name=field_name,
+                            field_schema=models.PayloadSchemaType.KEYWORD,
+                            wait=True,
+                        )
+                    except UnexpectedResponse as exc:
+                        if exc.status_code not in {400, 409}:
+                            raise
+                        refreshed = await self.client.get_collection(self.collection_name)
+                        if field_name not in refreshed.payload_schema:
+                            raise
         except VectorIndexError:
             raise
         except Exception as exc:
             raise VectorIndexError("Qdrant collection could not be prepared") from exc
 
     async def upsert(self, points: list[VectorPoint]) -> None:
+        if not points:
+            return
         try:
-            await self.client.upsert(
-                self.collection_name,
-                points=[
-                    models.PointStruct(
-                        id=point.id,
-                        vector={self.vector_name: point.vector},
-                        payload=point.payload,
-                    )
-                    for point in points
-                ],
-                wait=True,
-            )
+            for start in range(0, len(points), self.upsert_batch_size):
+                batch = points[start : start + self.upsert_batch_size]
+                await self.client.upsert(
+                    self.collection_name,
+                    points=[
+                        models.PointStruct(
+                            id=point.id,
+                            vector={self.vector_name: point.vector},
+                            payload=point.payload,
+                        )
+                        for point in batch
+                    ],
+                    wait=True,
+                )
         except Exception as exc:
             raise VectorIndexError("Qdrant points could not be written") from exc
 

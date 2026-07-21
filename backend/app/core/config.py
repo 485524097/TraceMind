@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://127.0.0.1:6333"
     qdrant_collection_name: str = "tracemind_chunks"
     qdrant_dense_vector_name: str = "dense_v1"
+    qdrant_operation_timeout_seconds: int = 60
+    qdrant_upsert_batch_size: int = 64
     embedding_model_name: str = "Qwen/Qwen3-Embedding-0.6B"
     embedding_dimension: int = 1_024
     embedding_batch_size: int = 16
@@ -124,6 +126,8 @@ class Settings(BaseSettings):
             "EMBEDDING_DIMENSION": self.embedding_dimension,
             "EMBEDDING_BATCH_SIZE": self.embedding_batch_size,
             "DOCUMENT_INDEX_STALE_AFTER_SECONDS": self.document_index_stale_after_seconds,
+            "QDRANT_OPERATION_TIMEOUT_SECONDS": self.qdrant_operation_timeout_seconds,
+            "QDRANT_UPSERT_BATCH_SIZE": self.qdrant_upsert_batch_size,
         }
         invalid_index = [name for name, value in index_values.items() if value <= 0]
         if invalid_index:

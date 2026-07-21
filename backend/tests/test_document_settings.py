@@ -56,6 +56,30 @@ def test_index_settings_must_be_positive(field: str) -> None:
         Settings(**{field: 0})
 
 
+def test_qdrant_operation_defaults_and_environment_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    defaults = Settings(_env_file=None)
+    assert defaults.qdrant_operation_timeout_seconds == 60
+    assert defaults.qdrant_upsert_batch_size == 64
+
+    monkeypatch.setenv("QDRANT_OPERATION_TIMEOUT_SECONDS", "90")
+    monkeypatch.setenv("QDRANT_UPSERT_BATCH_SIZE", "32")
+    overridden = Settings(_env_file=None)
+    assert overridden.qdrant_operation_timeout_seconds == 90
+    assert overridden.qdrant_upsert_batch_size == 32
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["qdrant_operation_timeout_seconds", "qdrant_upsert_batch_size"],
+)
+@pytest.mark.parametrize("value", [0, -1])
+def test_qdrant_operation_settings_must_be_positive(field: str, value: int) -> None:
+    with pytest.raises(ValidationError):
+        Settings(**{field: value})
+
+
 @pytest.mark.parametrize(
     "field",
     ["qdrant_collection_name", "qdrant_dense_vector_name", "embedding_model_name"],

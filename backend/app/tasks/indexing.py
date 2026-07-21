@@ -44,6 +44,7 @@ async def _index_document_version(document_version_id: UUID, *, force: bool) -> 
         collection_name=settings.qdrant_collection_name,
         vector_name=settings.qdrant_dense_vector_name,
         dimension=settings.embedding_dimension,
+        upsert_batch_size=settings.qdrant_upsert_batch_size,
     )
     try:
         async with database.session_factory() as session:

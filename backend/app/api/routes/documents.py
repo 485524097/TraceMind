@@ -68,6 +68,7 @@ def get_document_service(request: Request, session: SessionDependency) -> Docume
         collection_name=settings.qdrant_collection_name,
         vector_name=settings.qdrant_dense_vector_name,
         dimension=settings.embedding_dimension,
+        upsert_batch_size=settings.qdrant_upsert_batch_size,
     )
     return DocumentService(
         session,
