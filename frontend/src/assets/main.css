@@ -110,6 +110,141 @@
   word-break: break-word;
 }
 
+.rag-answer-panel {
+  margin-bottom: 1.5rem;
+}
+
+.rag-answer-content {
+  padding: clamp(24px, 4vw, 40px);
+}
+
+.rag-answer-content h2 {
+  margin: 0;
+  font-size: clamp(26px, 4vw, 34px);
+}
+
+.rag-answer-content > header > p:last-child {
+  margin: 10px 0 0;
+  color: #68748a;
+}
+
+.rag-answer-form {
+  display: grid;
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) 180px auto;
+  gap: 12px;
+  margin: 24px 0;
+}
+
+.rag-answer-form label,
+.rag-answer-form input {
+  width: 100%;
+  min-width: 0;
+}
+
+.rag-answer-form input {
+  padding: 10px 12px;
+  border: 1px solid #cfd7e3;
+  border-radius: 8px;
+  font: inherit;
+}
+
+.rag-answer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.rag-streaming-status,
+.rag-trace-id {
+  color: #68748a;
+}
+
+.rag-answer-card,
+.rag-source-card {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid #e3e8ef;
+  border-radius: 12px;
+  background: #fbfcfe;
+}
+
+.rag-answer-card h3,
+.rag-source-list h3 {
+  margin-top: 0;
+}
+
+.rag-answer-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.75;
+}
+
+.rag-citation {
+  margin: 0 2px;
+  padding: 1px 5px;
+  border: 1px solid #a9bfff;
+  border-radius: 5px;
+  color: #2456c8;
+  background: #eef3ff;
+  cursor: pointer;
+}
+
+.rag-source-list {
+  display: grid;
+  gap: 14px;
+  margin-top: 24px;
+}
+
+.rag-source-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.rag-source-header strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.rag-source-header span,
+.rag-source-card > p {
+  color: #68748a;
+  font-size: 14px;
+}
+
+.rag-source-header span {
+  flex-shrink: 0;
+}
+
+.rag-source-content {
+  max-height: 240px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.rag-grounding-warning {
+  margin: 16px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: #7a5400;
+  background: #fff7db;
+}
+
+.rag-empty-state {
+  text-align: center;
+}
+
+.panel-section-label {
+  max-width: 1200px;
+  margin: 28px auto 0;
+  color: #68748a;
+  font-weight: 700;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -471,6 +606,24 @@ th {
 }
 
 @media (max-width: 720px) {
+  .rag-answer-form {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .rag-answer-actions,
+  .rag-answer-actions .el-button {
+    width: 100%;
+  }
+
+  .rag-answer-actions {
+    flex-direction: column;
+  }
+
+  .rag-source-header {
+    flex-wrap: wrap;
+  }
+
   .semantic-search-form {
     align-items: stretch;
     grid-template-columns: 1fr;

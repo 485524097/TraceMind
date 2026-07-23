@@ -150,6 +150,23 @@ npm run test:unit -- --run
 npm run build
 ```
 
+## 单轮 RAG 配置
+
+在 `.env` 中同时设置 `LLM_BASE_URL` 和 `LLM_MODEL` 可启用 RAG；`LLM_API_KEY` 对不校验
+Key 的本地 OpenAI-compatible 服务可以为空。其余参数及 SSE 事件见
+[RAG 说明](rag.md)。未配置时应用正常启动，RAG API 返回受控 503。
+
+本机 CUDA 环境只安装新增 SDK，避免同步替换 Torch：
+
+```powershell
+cd backend
+uv lock
+uv pip install --python .venv\Scripts\python.exe "openai>=2.46,<3"
+uv run --no-sync pytest -m "not integration"
+```
+
+测试使用 Fake Provider，不需要真实 LLM，也不得将 API Key 写入仓库。
+
 也可在仓库根目录运行 `scripts/verify.ps1`（Windows PowerShell）或 `scripts/verify.sh`（macOS/Linux）执行完整检查。脚本不会创建或覆盖 `.env`。
 
 ## 使用应用容器

@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Annotated, Self
 from urllib.parse import quote_plus
 
-from pydantic import field_validator, model_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -36,6 +36,14 @@ class Settings(BaseSettings):
     qdrant_operation_timeout_seconds: int = 60
     qdrant_upsert_batch_size: int = 64
     semantic_search_score_threshold: float = 0.50
+    llm_base_url: str | None = None
+    llm_api_key: SecretStr | None = None
+    llm_model: str | None = None
+    llm_timeout_seconds: float = 120
+    llm_temperature: float = 0.1
+    llm_max_tokens: int = 1_200
+    rag_retrieval_limit: int = 5
+    rag_max_context_chars: int = 12_000
     embedding_model_name: str = "Qwen/Qwen3-Embedding-0.6B"
     embedding_dimension: int = 1_024
     embedding_batch_size: int = 16
@@ -83,6 +91,20 @@ class Settings(BaseSettings):
     def parse_document_extensions(cls, value: object) -> object:
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @field_validator("llm_base_url", "llm_model", mode="before")
+    @classmethod
+    def normalize_optional_string(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip() or None
+        return value
+
+    @field_validator("llm_api_key", mode="before")
+    @classmethod
+    def normalize_optional_secret(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip() or None
         return value
 
     @field_validator("document_allowed_extensions")
@@ -137,6 +159,18 @@ class Settings(BaseSettings):
             )
         if not 0.0 < self.semantic_search_score_threshold <= 1.0:
             raise ValueError("SEMANTIC_SEARCH_SCORE_THRESHOLD must be greater than 0 and at most 1")
+        if (self.llm_base_url is None) != (self.llm_model is None):
+            raise ValueError("LLM_BASE_URL and LLM_MODEL must be configured together")
+        if self.llm_timeout_seconds <= 0:
+            raise ValueError("LLM_TIMEOUT_SECONDS must be greater than zero")
+        if not 0 <= self.llm_temperature <= 2:
+            raise ValueError("LLM_TEMPERATURE must be between 0 and 2")
+        if self.llm_max_tokens <= 0:
+            raise ValueError("LLM_MAX_TOKENS must be greater than zero")
+        if not 1 <= self.rag_retrieval_limit <= 10:
+            raise ValueError("RAG_RETRIEVAL_LIMIT must be between 1 and 10")
+        if self.rag_max_context_chars < 1_000:
+            raise ValueError("RAG_MAX_CONTEXT_CHARS must be at least 1000")
         if self.document_max_file_size_bytes <= 0:
             raise ValueError("DOCUMENT_MAX_FILE_SIZE_BYTES must be greater than zero")
         if self.document_upload_chunk_size_bytes <= 0:
@@ -156,6 +190,10 @@ class Settings(BaseSettings):
         if self.document_parse_max_extracted_chars < self.document_chunk_max_chars:
             raise ValueError("Parse character limit must not be smaller than chunk max chars")
         return self
+
+    @property
+    def rag_llm_enabled(self) -> bool:
+        return self.llm_base_url is not None and self.llm_model is not None
 
     @property
     def resolved_database_url(self) -> str:

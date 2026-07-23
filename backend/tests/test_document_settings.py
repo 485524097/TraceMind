@@ -106,3 +106,43 @@ def test_qdrant_operation_settings_must_be_positive(field: str, value: int) -> N
 def test_index_names_must_not_be_empty(field: str) -> None:
     with pytest.raises(ValidationError):
         Settings(**{field: " "})
+
+
+def test_rag_settings_default_to_disabled_and_normalize_empty_values() -> None:
+    settings = Settings(_env_file=None, llm_base_url=" ", llm_model="", llm_api_key=" ")
+    assert settings.rag_llm_enabled is False
+    assert settings.llm_base_url is None
+    assert settings.llm_model is None
+    assert settings.llm_api_key is None
+
+
+def test_rag_settings_allow_empty_key_and_require_url_model_pair() -> None:
+    settings = Settings(llm_base_url="http://localhost:11434/v1", llm_model="local")
+    assert settings.rag_llm_enabled is True
+    assert settings.llm_api_key is None
+    with pytest.raises(ValidationError):
+        Settings(llm_base_url="http://localhost:11434/v1")
+    with pytest.raises(ValidationError):
+        Settings(llm_model="local")
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("llm_timeout_seconds", 0),
+        ("llm_temperature", -0.1),
+        ("llm_temperature", 2.1),
+        ("llm_max_tokens", 0),
+        ("rag_retrieval_limit", 0),
+        ("rag_retrieval_limit", 11),
+        ("rag_max_context_chars", 999),
+    ],
+)
+def test_rag_settings_reject_invalid_limits(field: str, value: float) -> None:
+    with pytest.raises(ValidationError):
+        Settings(**{field: value})
+
+
+def test_llm_secret_is_redacted() -> None:
+    settings = Settings(llm_api_key="private-test-key")
+    assert "private-test-key" not in repr(settings)

@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -10,6 +11,9 @@ from app.core.logging import configure_logging
 from app.db.session import Database
 from app.integrations.qdrant import QdrantClient
 from app.integrations.redis import RedisClient
+from app.llm import OpenAICompatibleLLMProvider
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -22,9 +26,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.database = Database(app_settings)
         app.state.redis_client = RedisClient(app_settings)
         app.state.qdrant_client = QdrantClient(app_settings)
+        app.state.llm_provider = (
+            OpenAICompatibleLLMProvider(
+                base_url=app_settings.llm_base_url or "",
+                api_key=(
+                    app_settings.llm_api_key.get_secret_value()
+                    if app_settings.llm_api_key is not None
+                    else None
+                ),
+                model=app_settings.llm_model or "",
+                timeout=app_settings.llm_timeout_seconds,
+                temperature=app_settings.llm_temperature,
+                max_tokens=app_settings.llm_max_tokens,
+            )
+            if app_settings.rag_llm_enabled
+            else None
+        )
         try:
             yield
         finally:
+            if app.state.llm_provider is not None:
+                try:
+                    await app.state.llm_provider.close()
+                except Exception:
+                    logger.warning("LLM provider did not close cleanly")
             await app.state.qdrant_client.close()
             await app.state.redis_client.close()
             await app.state.database.close()

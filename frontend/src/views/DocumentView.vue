@@ -6,6 +6,7 @@ import { RouterLink, useRoute } from 'vue-router'
 import DocumentUploadPanel from '@/components/DocumentUploadPanel.vue'
 import DocumentChunkDialog from '@/components/DocumentChunkDialog.vue'
 import DocumentVersionDialog from '@/components/DocumentVersionDialog.vue'
+import RagAnswerPanel from '@/components/RagAnswerPanel.vue'
 import SemanticSearchPanel from '@/components/SemanticSearchPanel.vue'
 import { ApiError } from '@/services/api'
 import {
@@ -205,6 +206,8 @@ onBeforeUnmount(() => {
     </header>
 
     <DocumentUploadPanel :knowledge-base-id="knowledgeBaseId" @completed="loadDocuments" />
+    <RagAnswerPanel :knowledge-base-id="knowledgeBaseId" />
+    <p class="panel-section-label">Dense 检索调试</p>
     <SemanticSearchPanel :knowledge-base-id="knowledgeBaseId" />
 
     <section class="document-toolbar">

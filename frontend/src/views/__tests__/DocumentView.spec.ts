@@ -130,6 +130,8 @@ describe('DocumentView', () => {
     expect(wrapper.text()).toContain('2.0 KB')
     expect(wrapper.text()).toContain('解析完成')
     expect(wrapper.text()).toContain('2')
+    const html = wrapper.html()
+    expect(html.indexOf('rag-answer-panel')).toBeLessThan(html.indexOf('semantic-search-panel'))
   })
 
   it('shows an empty state', async () => {
