@@ -40,6 +40,8 @@
 
 ## 暂不实现的功能
 
+当前 Dense 语义检索阶段明确暂不实现 BM25、Sparse Vector、Hybrid Search、Reranker、RAG 和 LLM Answer。
+
 - 完整知识图谱
 - 多用户权限系统
 - 手机客户端

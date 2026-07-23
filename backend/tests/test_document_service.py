@@ -10,6 +10,7 @@ from fastapi import UploadFile
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.indexing import QdrantGateway, VectorIndexError
 from app.models.document import Document, DocumentVersion
 from app.models.knowledge_base import KnowledgeBase
 from app.repositories.document import DocumentRecord, DocumentRepository
@@ -160,12 +161,24 @@ class FakeDispatcher:
             raise self.error
 
 
+class FakeIndexGateway:
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.deleted: list[UUID] = []
+
+    async def delete_document(self, document_id: UUID) -> None:
+        self.deleted.append(document_id)
+        if self.error is not None:
+            raise self.error
+
+
 def make_service(
     tmp_path: Path,
     knowledge_base_ids: tuple[UUID, ...] | None = None,
     *,
     max_size: int = 1024,
     dispatcher: FakeDispatcher | None = None,
+    index_gateway: FakeIndexGateway | None = None,
 ) -> tuple[DocumentService, AsyncMock, FakeDocumentRepository, LocalFileStorage, UUID]:
     knowledge_base_id = knowledge_base_ids[0] if knowledge_base_ids else uuid4()
     ids = knowledge_base_ids or (knowledge_base_id,)
@@ -179,6 +192,7 @@ def make_service(
         cast(DocumentRepository, repository),
         cast(KnowledgeBaseRepository, FakeKnowledgeBaseRepository(*ids)),
         parsing_dispatcher=cast(DocumentParsingDispatcher, dispatcher) if dispatcher else None,
+        index_gateway=cast(QdrantGateway, index_gateway) if index_gateway else None,
     )
     return service, session, repository, storage, knowledge_base_id
 
@@ -313,6 +327,21 @@ async def test_delete_success_removes_database_and_files(tmp_path: Path) -> None
     assert imported.record.document.id not in repository.documents
     assert not (storage.root / str(knowledge_base_id) / str(imported.record.document.id)).exists()
     assert list(storage.trash_root.iterdir()) == []
+
+
+async def test_delete_qdrant_failure_does_not_restore_document(tmp_path: Path) -> None:
+    gateway = FakeIndexGateway(VectorIndexError("offline"))
+    service, _, repository, storage, knowledge_base_id = make_service(
+        tmp_path, index_gateway=gateway
+    )
+    imported = await service.import_document(knowledge_base_id, upload("sample.md", b"content"))
+    document_id = imported.record.document.id
+
+    await service.delete_document(knowledge_base_id, document_id)
+
+    assert gateway.deleted == [document_id]
+    assert document_id not in repository.documents
+    assert not (storage.root / str(knowledge_base_id) / str(document_id)).exists()
 
 
 async def test_delete_database_failure_restores_directory(tmp_path: Path) -> None:

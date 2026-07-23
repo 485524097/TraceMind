@@ -8,6 +8,7 @@
     "build": "npm run type-check && npm run build-only",
     "preview": "vite preview",
     "test:unit": "vitest",
+    "test": "vitest",
     "build-only": "vite build",
     "type-check": "vue-tsc --build",
     "lint": "eslint . --cache",

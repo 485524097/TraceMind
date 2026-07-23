@@ -12,7 +12,7 @@ TraceMind 是一个面向中文开发者的、本地优先、答案可追溯的 
 
 ## 当前状态
 
-- 项目已完成知识库管理、本地文档增量导入、异步解析和可追溯 Chunk
+- 项目已完成知识库管理、本地文档增量导入、异步解析、可追溯 Chunk 和 Dense 语义检索
 - 尚未发布可用版本
 
 ## 规划技术栈
@@ -46,9 +46,10 @@ TraceMind 是一个面向中文开发者的、本地优先、答案可追溯的 
 - 查看并下载 DocumentVersion 历史版本
 - 自动或手动解析 Markdown、UTF-8 文本、代码、PDF 文本层和 DOCX
 - 查看解析状态、错误摘要、Chunk 正文及页码、章节和代码行引用
+- 使用 Qwen3 Embedding 和 Qdrant 建立 Dense 索引并进行可追溯语义检索
 - 运行前后端单元测试、静态检查与构建
 
-文件已可导入并解析为结构化 Chunk，但尚未建立 BM25、Embedding、Qdrant、混合检索或 RAG。扫描型 PDF 当前不支持 OCR；JSP/Vue 当前按行解析，不是 AST 解析。
+文件可导入、解析并建立 Dense Embedding/Qdrant 索引。当前尚无 BM25、Hybrid Search、Reranker、RAG 或 LLM Answer。首次实际索引或查询会下载 Embedding 模型，CI 不下载真实模型。扫描型 PDF 当前不支持 OCR；JSP/Vue 当前按行解析，不是 AST 解析。
 
 ## 最小启动
 
@@ -80,4 +81,4 @@ npm ci
 npm run dev
 ```
 
-知识库管理页面位于 `http://localhost:5173/knowledge-bases`，每个知识库提供文档入口。更完整的开发步骤见 [开发指南](docs/development.md)，导入规则见 [文档导入说明](docs/document-ingestion.md)，解析规则见 [文档解析说明](docs/document-parsing.md)，数据库结构见 [数据库设计](docs/database-design.md)。
+知识库管理页面位于 `http://localhost:5173/knowledge-bases`，每个知识库提供文档入口。更完整的开发步骤见 [开发指南](docs/development.md)，导入规则见 [文档导入说明](docs/document-ingestion.md)，解析规则见 [文档解析说明](docs/document-parsing.md)，数据库结构见 [数据库设计](docs/database-design.md)，Dense 索引边界见 [向量索引说明](docs/vector-indexing.md)。

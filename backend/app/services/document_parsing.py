@@ -13,6 +13,7 @@ from app.parsing import DeterministicChunker, ParseContext, ParserRegistry
 from app.parsing.exceptions import DocumentParseError, NoExtractableTextError
 from app.repositories.document_parsing import DocumentParsingRepository
 from app.services.document_dispatcher import DocumentParsingDispatcher
+from app.services.document_index_dispatcher import DocumentIndexingDispatcher
 from app.services.exceptions import (
     DocumentParsingQueueError,
     DocumentStorageError,
@@ -44,6 +45,7 @@ class DocumentParsingService:
         settings: Settings,
         *,
         dispatcher: DocumentParsingDispatcher | None = None,
+        indexing_dispatcher: DocumentIndexingDispatcher | None = None,
         repository: DocumentParsingRepository | None = None,
         registry: ParserRegistry | None = None,
         chunker: DeterministicChunker | None = None,
@@ -52,6 +54,7 @@ class DocumentParsingService:
         self.storage = storage
         self.settings = settings
         self.dispatcher = dispatcher
+        self.indexing_dispatcher = indexing_dispatcher
         self.repository = repository or DocumentParsingRepository(session)
         self.registry = registry or ParserRegistry()
         self.chunker = chunker or DeterministicChunker(
@@ -166,6 +169,7 @@ class DocumentParsingService:
                 parsed_at=datetime.now(UTC),
             )
             await self.session.commit()
+            await self._enqueue_index(version_id)
             return True
         except Exception as exc:
             await self.session.rollback()
@@ -243,3 +247,11 @@ class DocumentParsingService:
         if version is None:
             raise DocumentVersionNotFoundError("Document version was not found")
         return version
+
+    async def _enqueue_index(self, version_id: UUID) -> None:
+        if self.indexing_dispatcher is None:
+            return
+        try:
+            await self.indexing_dispatcher.enqueue(version_id)
+        except Exception:
+            logger.warning("Parsed document was saved but indexing could not be queued")

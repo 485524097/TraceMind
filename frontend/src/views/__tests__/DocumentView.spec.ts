@@ -7,6 +7,7 @@ import {
   downloadCurrentDocument,
   listDocuments,
   requestDocumentParse,
+  requestDocumentIndex,
 } from '@/services/documents'
 import { getKnowledgeBase } from '@/services/knowledgeBases'
 import type { DocumentItem, DocumentListResponse } from '@/types/document'
@@ -24,6 +25,8 @@ vi.mock('@/services/documents', () => ({
   downloadDocumentVersion: vi.fn(),
   listDocumentVersions: vi.fn(),
   requestDocumentParse: vi.fn(),
+  requestDocumentIndex: vi.fn(),
+  semanticSearch: vi.fn(),
   listDocumentChunks: vi.fn(),
   uploadDocument: vi.fn(),
 }))
@@ -33,6 +36,7 @@ const mockedList = vi.mocked(listDocuments)
 const mockedDelete = vi.mocked(deleteDocument)
 const mockedDownload = vi.mocked(downloadCurrentDocument)
 const mockedParse = vi.mocked(requestDocumentParse)
+const mockedIndex = vi.mocked(requestDocumentIndex)
 const mockedKnowledgeBase = vi.mocked(getKnowledgeBase)
 const document: DocumentItem = {
   id: 'document-id',
@@ -59,6 +63,16 @@ const document: DocumentItem = {
     last_parse_attempt_at: '2026-07-17T01:00:00Z',
     parse_error_code: null,
     parse_error_message: null,
+    index_status: 'succeeded',
+    active_index_generation: 'generation-id',
+    index_started_at: '2026-07-17T01:00:30Z',
+    indexed_at: '2026-07-17T01:01:00Z',
+    last_index_attempt_at: '2026-07-17T01:00:30Z',
+    indexed_chunk_count: 2,
+    embedding_model: 'fake',
+    embedding_dimension: 3,
+    index_error_code: null,
+    index_error_message: null,
   },
 }
 
@@ -88,6 +102,7 @@ describe('DocumentView', () => {
     mockedDelete.mockReset()
     mockedDownload.mockReset()
     mockedParse.mockReset()
+    mockedIndex.mockReset()
     mockedKnowledgeBase.mockReset()
     mockedKnowledgeBase.mockResolvedValue({
       id: 'kb-id',
@@ -227,6 +242,23 @@ describe('DocumentView', () => {
     const chunks = wrapper.findAll('button').find((button) => button.text() === 'Chunk')
     await chunks?.trigger('click')
     expect(wrapper.find('[data-testid="chunk-dialog"]').exists()).toBe(true)
+  })
+
+  it('shows index state and requests a force reindex', async () => {
+    mockedList.mockResolvedValue(response([document]))
+    mockedIndex.mockResolvedValue({
+      queued: true,
+      version: { version_id: document.latest_version.id, ...document.latest_version },
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('索引完成')
+    const reindex = wrapper.findAll('button').find((button) => button.text() === '重新索引')
+    await reindex?.trigger('click')
+    await flushPromises()
+
+    expect(mockedIndex).toHaveBeenCalledWith('kb-id', 'document-id', 'version-id', true)
   })
 
   it('shows a clear queue unavailable message', async () => {

@@ -80,6 +80,18 @@ class DocumentParsingQueueError(DocumentError):
     pass
 
 
+class DocumentIndexingQueueError(DocumentError):
+    pass
+
+
+class DocumentNotReadyForIndexError(DocumentError):
+    pass
+
+
+class SemanticSearchUnavailableError(DocumentError):
+    pass
+
+
 __all__ = [
     "DocumentAlreadyParsedError",
     "DocumentAlreadyProcessingError",

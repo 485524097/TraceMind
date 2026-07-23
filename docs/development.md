@@ -52,6 +52,8 @@ uv run uvicorn app.main:app --reload
 
 解析上限通过 `DOCUMENT_PARSE_MAX_EXTRACTED_CHARS`、`DOCUMENT_PARSE_MAX_PDF_PAGES`、`DOCUMENT_PARSE_STALE_AFTER_SECONDS`、`DOCUMENT_CHUNK_MAX_CHARS` 和 `DOCUMENT_CHUNK_OVERLAP_CHARS` 配置。backend 与 celery-worker 必须使用相同值。
 
+Dense 索引配置使用 `QDRANT_COLLECTION_NAME`、`QDRANT_DENSE_VECTOR_NAME`、`QDRANT_OPERATION_TIMEOUT_SECONDS`、`QDRANT_UPSERT_BATCH_SIZE`、`SEMANTIC_SEARCH_SCORE_THRESHOLD`、`EMBEDDING_MODEL_NAME`、`EMBEDDING_DIMENSION`、`EMBEDDING_BATCH_SIZE`、`EMBEDDING_DEVICE` 和 `DOCUMENT_INDEX_STALE_AFTER_SECONDS`。默认相似度阈值 0.50 是当前 Dense Baseline，需结合本地资料评估。Qdrant 健康检查仍由 `HEALTHCHECK_TIMEOUT_SECONDS` 单独限制。backend 与 celery-worker 必须保持一致。首次实际调用 SentenceTransformer 会下载模型；CI 单元测试使用 FakeEmbeddingProvider，不下载模型。
+
 ## 启动前端
 
 在 `frontend` 目录运行：
@@ -71,7 +73,7 @@ npm run dev
 uv run celery -A app.worker.celery_app:celery_app worker --loglevel=INFO
 ```
 
-Worker 注册 `app.tasks.documents.parse_document_version`。任务只接收 DocumentVersion UUID 与 force 标量，并为每次执行创建独立 AsyncEngine/Session。
+Worker 注册 `app.tasks.documents.parse_document_version` 和 `app.tasks.indexing.index_document_version`。任务只接收 DocumentVersion UUID 与 force 标量，并为每次执行创建独立 AsyncEngine/Session。
 
 ## 后端检查
 
@@ -127,6 +129,16 @@ uv run alembic upgrade head
 uv run alembic downgrade 20260717_0002
 uv run alembic upgrade head
 ```
+
+Dense indexing migration 往返命令：
+
+```bash
+uv run alembic upgrade head
+uv run alembic downgrade 20260717_0003
+uv run alembic upgrade head
+```
+
+真实 Qdrant integration test 使用显式 `TEST_QDRANT_URL`，但仍使用固定 Fake Embedding 向量，不下载模型。
 
 ## 前端检查
 

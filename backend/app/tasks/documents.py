@@ -4,6 +4,7 @@ from uuid import UUID
 
 from app.core.config import get_settings
 from app.db.session import Database
+from app.services.document_index_dispatcher import CeleryDocumentIndexingDispatcher
 from app.services.document_parsing import DocumentParsingService
 from app.storage.local import LocalFileStorage
 from app.worker.celery_app import celery_app
@@ -37,7 +38,12 @@ async def _parse_document_version(document_version_id: UUID, *, force: bool) -> 
     )
     try:
         async with database.session_factory() as session:
-            service = DocumentParsingService(session, storage, settings)
+            service = DocumentParsingService(
+                session,
+                storage,
+                settings,
+                indexing_dispatcher=CeleryDocumentIndexingDispatcher(),
+            )
             return await service.parse_version(document_version_id, force=force)
     finally:
         await database.close()

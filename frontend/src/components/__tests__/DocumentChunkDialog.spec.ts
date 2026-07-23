@@ -33,6 +33,16 @@ const document: DocumentItem = {
     last_parse_attempt_at: '2026-07-20T00:00:00Z',
     parse_error_code: null,
     parse_error_message: null,
+    index_status: 'succeeded',
+    active_index_generation: 'generation-id',
+    index_started_at: '2026-07-20T00:00:01Z',
+    indexed_at: '2026-07-20T00:00:02Z',
+    last_index_attempt_at: '2026-07-20T00:00:01Z',
+    indexed_chunk_count: 1,
+    embedding_model: 'fake',
+    embedding_dimension: 3,
+    index_error_code: null,
+    index_error_message: null,
   },
 }
 

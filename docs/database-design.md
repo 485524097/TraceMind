@@ -22,14 +22,16 @@
 
 ## DocumentVersion
 
-`document_versions` 保存不可变文件版本元数据，并保存该版本独立的解析状态、Parser 标识、Chunk 数量、解析时间及安全错误摘要。
+`document_versions` 保存不可变文件版本元数据，并保存该版本独立的解析与 Dense 索引状态、安全错误摘要及 active generation。
 
 - `(document_id, version_number)` 唯一。
 - Document 外键使用 ON DELETE CASCADE。
 - 当前版本是最大 `version_number`，不增加循环 `current_version_id`。
-- 数据库不保存 storage root、绝对路径、解析正文或索引状态。
+- 数据库不保存 storage root、绝对路径、解析正文或向量值。
 
 解析状态为 `pending`、`processing`、`succeeded` 或 `failed`。`chunk_count >= 0`；`processing` 使用 `parse_started_at` 支持超时接管，`succeeded` 的 Chunk 可预览但尚不代表已建立检索索引。
+
+索引状态同样为 `pending`、`processing`、`succeeded` 或 `failed`。`active_index_generation` 在 processing 时是 attempt token，在 succeeded 时是检索必须使用的 active generation。另存索引起止时间、尝试时间、Chunk 数、Embedding 模型和维度以及安全错误摘要；`indexed_chunk_count >= 0`，Embedding 维度为空或为正数。
 
 ## DocumentChunk
 
@@ -50,6 +52,8 @@
 第二条 migration `20260717_0002_create_documents.py` 创建 documents、document_versions、外键、唯一/检查约束和索引；downgrade 回到 `20260717_0001` 时只移除这两张表。
 
 第三条 migration `20260717_0003_create_document_chunks.py` 扩展 document_versions 的解析字段并创建 document_chunks；downgrade 到 `20260717_0002` 只移除解析字段和 Chunk 表，不触发文件解析或 Celery。
+
+第四条 migration `20260720_0004_add_document_vector_indexing.py` 增加 DocumentVersion 的 Dense 索引状态、generation、模型元数据和约束；不在 PostgreSQL 保存向量。
 
 ## 当前关系边界
 

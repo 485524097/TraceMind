@@ -62,6 +62,16 @@ def make_record() -> DocumentRecord:
         last_parse_attempt_at=None,
         parse_error_code=None,
         parse_error_message=None,
+        index_status="pending",
+        active_index_generation=None,
+        index_started_at=None,
+        indexed_at=None,
+        last_index_attempt_at=None,
+        indexed_chunk_count=0,
+        embedding_model=None,
+        embedding_dimension=None,
+        index_error_code=None,
+        index_error_message=None,
         created_at=now,
     )
     return DocumentRecord(document, version, 1)

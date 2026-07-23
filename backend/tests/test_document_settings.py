@@ -45,3 +45,64 @@ def test_chunk_overlap_and_extraction_limits_are_consistent() -> None:
         Settings(document_chunk_max_chars=100, document_chunk_overlap_chars=100)
     with pytest.raises(ValidationError):
         Settings(document_parse_max_extracted_chars=99, document_chunk_max_chars=100)
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["embedding_dimension", "embedding_batch_size", "document_index_stale_after_seconds"],
+)
+def test_index_settings_must_be_positive(field: str) -> None:
+    with pytest.raises(ValidationError):
+        Settings(**{field: 0})
+
+
+def test_qdrant_operation_defaults_and_environment_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    defaults = Settings(_env_file=None)
+    assert defaults.qdrant_operation_timeout_seconds == 60
+    assert defaults.qdrant_upsert_batch_size == 64
+
+    monkeypatch.setenv("QDRANT_OPERATION_TIMEOUT_SECONDS", "90")
+    monkeypatch.setenv("QDRANT_UPSERT_BATCH_SIZE", "32")
+    overridden = Settings(_env_file=None)
+    assert overridden.qdrant_operation_timeout_seconds == 90
+    assert overridden.qdrant_upsert_batch_size == 32
+
+
+def test_semantic_search_threshold_defaults_and_environment_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert Settings(_env_file=None).semantic_search_score_threshold == 0.50
+    monkeypatch.setenv("SEMANTIC_SEARCH_SCORE_THRESHOLD", "0.72")
+    assert Settings(_env_file=None).semantic_search_score_threshold == 0.72
+
+
+@pytest.mark.parametrize("value", [0, -0.1, 1.01])
+def test_semantic_search_threshold_rejects_invalid_values(value: float) -> None:
+    with pytest.raises(ValidationError):
+        Settings(semantic_search_score_threshold=value)
+
+
+@pytest.mark.parametrize("value", [0.01, 0.5, 1.0])
+def test_semantic_search_threshold_accepts_valid_values(value: float) -> None:
+    assert Settings(semantic_search_score_threshold=value).semantic_search_score_threshold == value
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["qdrant_operation_timeout_seconds", "qdrant_upsert_batch_size"],
+)
+@pytest.mark.parametrize("value", [0, -1])
+def test_qdrant_operation_settings_must_be_positive(field: str, value: int) -> None:
+    with pytest.raises(ValidationError):
+        Settings(**{field: value})
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["qdrant_collection_name", "qdrant_dense_vector_name", "embedding_model_name"],
+)
+def test_index_names_must_not_be_empty(field: str) -> None:
+    with pytest.raises(ValidationError):
+        Settings(**{field: " "})

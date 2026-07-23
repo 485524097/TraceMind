@@ -41,7 +41,7 @@ async def test_task_uses_fresh_database_session_and_disposes_engine(
     parse = AsyncMock(return_value=True)
 
     class FakeService:
-        def __init__(self, session: AsyncSession, *_args: object) -> None:
+        def __init__(self, session: AsyncSession, *_args: object, **_kwargs: object) -> None:
             assert session is FakeDatabase.instances[-1].session
 
         parse_version = parse
@@ -60,7 +60,7 @@ async def test_task_uses_fresh_database_session_and_disposes_engine(
 
 async def test_task_disposes_engine_when_service_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeService:
-        def __init__(self, *_args: object) -> None:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
             pass
 
         async def parse_version(self, *_args: object, **_kwargs: object) -> bool:

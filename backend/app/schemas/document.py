@@ -30,6 +30,17 @@ class DocumentVersionResponse(BaseModel):
     last_parse_attempt_at: datetime | None
     parse_error_code: str | None
     parse_error_message: str | None
+    index_status: str
+    active_index_generation: UUID | None
+    index_attempt_generation: UUID | None
+    index_started_at: datetime | None
+    indexed_at: datetime | None
+    last_index_attempt_at: datetime | None
+    indexed_chunk_count: int
+    embedding_model: str | None
+    embedding_dimension: int | None
+    index_error_code: str | None
+    index_error_message: str | None
 
 
 class DocumentResponse(BaseModel):

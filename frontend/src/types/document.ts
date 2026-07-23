@@ -1,5 +1,6 @@
 export type DocumentImportAction = 'created' | 'version_created' | 'unchanged'
 export type DocumentParseStatus = 'pending' | 'processing' | 'succeeded' | 'failed'
+export type DocumentIndexStatus = 'pending' | 'processing' | 'succeeded' | 'failed'
 
 export interface DocumentVersion {
   id: string
@@ -18,6 +19,16 @@ export interface DocumentVersion {
   last_parse_attempt_at: string | null
   parse_error_code: string | null
   parse_error_message: string | null
+  index_status: DocumentIndexStatus
+  active_index_generation: string | null
+  index_started_at: string | null
+  indexed_at: string | null
+  last_index_attempt_at: string | null
+  indexed_chunk_count: number
+  embedding_model: string | null
+  embedding_dimension: number | null
+  index_error_code: string | null
+  index_error_message: string | null
 }
 
 export interface DocumentItem {
@@ -83,4 +94,47 @@ export interface DocumentChunkListResponse {
   offset: number
   limit: number
   version: DocumentParseStatusResponse
+}
+
+export interface DocumentIndexStatusResponse {
+  version_id: string
+  index_status: DocumentIndexStatus
+  active_index_generation: string | null
+  index_started_at: string | null
+  indexed_at: string | null
+  last_index_attempt_at: string | null
+  indexed_chunk_count: number
+  embedding_model: string | null
+  embedding_dimension: number | null
+  index_error_code: string | null
+  index_error_message: string | null
+}
+
+export interface DocumentIndexRequestResponse {
+  queued: boolean
+  version: DocumentIndexStatusResponse
+}
+
+export interface SemanticSearchResult {
+  score: number
+  content: string
+  knowledge_base_id: string
+  document_id: string
+  document_version_id: string
+  chunk_id: string
+  index_generation: string
+  document_name: string
+  version_number: number
+  chunk_index: number
+  content_hash: string
+  chunk_type: string
+  language: string | null
+  section_title: string | null
+  page_number: number | null
+  start_line: number | null
+  end_line: number | null
+}
+
+export interface SemanticSearchResponse {
+  items: SemanticSearchResult[]
 }

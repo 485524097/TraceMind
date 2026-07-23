@@ -15,6 +15,7 @@ from app.parsing.chunker import ChunkDraft
 from app.parsing.exceptions import DocumentEncodingError
 from app.repositories.document_parsing import DocumentParsingRepository, ParsingVersionRecord
 from app.services.document_dispatcher import DocumentParsingDispatcher
+from app.services.document_index_dispatcher import DocumentIndexingDispatcher
 from app.services.document_parsing import DocumentParsingService
 from app.services.exceptions import DocumentParsingQueueError, DocumentVersionNotFoundError
 from app.storage.local import LocalFileStorage
@@ -131,6 +132,9 @@ class FakeParsingRepository:
         version.parsed_at = parsed_at
         version.parse_error_code = None
         version.parse_error_message = None
+        version.index_status = "pending"
+        version.index_error_code = None
+        version.index_error_message = None
 
     async def mark_failed(
         self,
@@ -165,6 +169,10 @@ class FakeDispatcher:
         self.calls.append((document_version_id, force))
         if self.error is not None:
             raise self.error
+
+
+class FakeIndexDispatcher(FakeDispatcher):
+    pass
 
 
 def make_version(
@@ -209,6 +217,7 @@ def make_service(
     chunks: int = 0,
     parser: FakeParser | None = None,
     dispatcher: FakeDispatcher | None = None,
+    index_dispatcher: FakeIndexDispatcher | None = None,
 ) -> tuple[
     DocumentParsingService,
     AsyncMock,
@@ -228,6 +237,9 @@ def make_service(
             document_chunk_overlap_chars=5,
         ),
         dispatcher=cast(DocumentParsingDispatcher, dispatcher) if dispatcher else None,
+        indexing_dispatcher=(
+            cast(DocumentIndexingDispatcher, index_dispatcher) if index_dispatcher else None
+        ),
         repository=cast(DocumentParsingRepository, repository),
         registry=cast(object, FakeRegistry(parser or FakeParser())),
     )
@@ -240,11 +252,24 @@ async def test_pending_processing_succeeded_creates_chunks(tmp_path: Path) -> No
     assert await service.parse_version(version.id)
 
     assert version.parse_status == "succeeded"
+    assert version.index_status == "pending"
     assert version.chunk_count == 1
     assert version.parser_name == "fake"
     assert repository.deleted == repository.created == 1
     assert repository.chunks[0].start_line == 1
     assert session.commit.await_count == 2
+
+
+async def test_parse_success_queues_index_and_queue_failure_does_not_rollback(
+    tmp_path: Path,
+) -> None:
+    dispatcher = FakeIndexDispatcher(RuntimeError("offline"))
+    service, session, _, _, version = make_service(tmp_path, index_dispatcher=dispatcher)
+
+    assert await service.parse_version(version.id)
+    assert version.parse_status == "succeeded"
+    assert dispatcher.calls == [(version.id, False)]
+    assert session.rollback.await_count == 0
 
 
 async def test_initial_parse_failure_marks_failed_with_safe_error(tmp_path: Path) -> None:

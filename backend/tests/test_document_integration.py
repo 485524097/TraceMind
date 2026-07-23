@@ -27,6 +27,7 @@ from app.models.knowledge_base import KnowledgeBase
 from app.parsing import ParseContext, ParsedBlock, ParsedDocument, ParserRegistry
 from app.parsing.chunker import ChunkDraft
 from app.repositories.document import DocumentRepository
+from app.repositories.document_indexing import DocumentIndexingRepository
 from app.repositories.document_parsing import DocumentParsingRepository
 from app.services.document_parsing import DocumentParsingService
 from app.storage.local import LocalFileStorage
@@ -310,6 +311,10 @@ def test_document_migration_upgrade_downgrade_upgrade() -> None:
         "ck_document_versions_hash_length",
         "ck_document_versions_chunk_count_nonnegative",
         "ck_document_versions_parse_status",
+        "ck_document_versions_index_status",
+        "ck_document_versions_index_attempt_state",
+        "ck_document_versions_indexed_chunk_count_nonnegative",
+        "ck_document_versions_embedding_dimension_positive",
     }.issubset(checks)
     assert {
         "ck_document_chunks_index_nonnegative",
@@ -322,6 +327,7 @@ def test_document_migration_upgrade_downgrade_upgrade() -> None:
     assert timezone_columns
     assert any(item.startswith("content_hash:CHAR(64)") for item in version_column_types)
     assert any(item.startswith("file_size:BIGINT") for item in version_column_types)
+    assert any(item.startswith("index_attempt_generation:UUID") for item in version_column_types)
     get_settings.cache_clear()
 
 
@@ -373,6 +379,121 @@ async def test_document_chunks_constraints_and_cascade(
     )
     assert remaining.scalars().all() == []
     await session.delete(await session.get(KnowledgeBase, knowledge_base_id))
+    await session.commit()
+
+
+async def test_search_generations_use_only_current_document_version(
+    database: tuple[AsyncSession, AsyncEngine],
+) -> None:
+    session, _ = database
+    knowledge_base = KnowledgeBase(name=f"Current index {uuid4()}")
+    session.add(knowledge_base)
+    await session.flush()
+    document = make_document(knowledge_base.id, "versions.md")
+    session.add(document)
+    await session.flush()
+    old_version = make_version(document.id, 1, "a")
+    current_version = make_version(document.id, 2, "b")
+    old_generation, current_generation = uuid4(), uuid4()
+    now = datetime.now(UTC)
+    for version, generation in (
+        (old_version, old_generation),
+        (current_version, current_generation),
+    ):
+        version.index_status = "succeeded"
+        version.active_index_generation = generation
+        version.parsed_at = now
+        version.indexed_at = now
+        version.indexed_chunk_count = 1
+        version.embedding_model = "fake"
+        version.embedding_dimension = 3
+    current_version.index_status = "processing"
+    current_version.index_attempt_generation = uuid4()
+    current_version.index_started_at = now
+    session.add_all([old_version, current_version])
+    await session.commit()
+
+    generations = await DocumentIndexingRepository(session).list_active_generations(
+        knowledge_base.id, document_id=None
+    )
+
+    assert [(item.version_id, item.generation) for item in generations] == [
+        (current_version.id, current_generation)
+    ]
+
+    current_version.index_status = "pending"
+    current_version.index_attempt_generation = None
+    current_version.parsed_at = now + timedelta(seconds=1)
+    await session.commit()
+    assert (
+        await DocumentIndexingRepository(session).list_active_generations(
+            knowledge_base.id, document_id=None
+        )
+        == []
+    )
+
+    await session.delete(document)
+    await session.commit()
+    await session.delete(knowledge_base)
+    await session.commit()
+
+
+@pytest.mark.parametrize(
+    ("status", "attempt"),
+    [
+        ("processing", None),
+        ("succeeded", uuid4()),
+        ("failed", uuid4()),
+    ],
+)
+async def test_index_attempt_state_constraint_rejects_invalid_states(
+    database: tuple[AsyncSession, AsyncEngine], status: str, attempt: object
+) -> None:
+    session, _ = database
+    knowledge_base = KnowledgeBase(name=f"Invalid attempt {uuid4()}")
+    session.add(knowledge_base)
+    await session.flush()
+    document = make_document(knowledge_base.id, "invalid.md")
+    session.add(document)
+    await session.flush()
+    version = make_version(document.id, 1)
+    version.index_status = status
+    version.index_attempt_generation = attempt
+    session.add(version)
+
+    with pytest.raises(IntegrityError):
+        await session.commit()
+    await session.rollback()
+
+
+@pytest.mark.parametrize(
+    ("status", "attempt"),
+    [
+        ("pending", None),
+        ("processing", uuid4()),
+        ("succeeded", None),
+        ("failed", None),
+    ],
+)
+async def test_index_attempt_state_constraint_accepts_valid_states(
+    database: tuple[AsyncSession, AsyncEngine], status: str, attempt: object
+) -> None:
+    session, _ = database
+    knowledge_base = KnowledgeBase(name=f"Valid attempt {uuid4()}")
+    session.add(knowledge_base)
+    await session.flush()
+    document = make_document(knowledge_base.id, "valid.md")
+    session.add(document)
+    await session.flush()
+    version = make_version(document.id, 1)
+    version.index_status = status
+    version.index_attempt_generation = attempt
+    session.add(version)
+    await session.commit()
+
+    await session.delete(document)
+    await session.commit()
+    await session.delete(knowledge_base)
     await session.commit()
 
 
