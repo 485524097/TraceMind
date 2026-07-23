@@ -66,6 +66,17 @@ def deterministic_point_id(version_id: UUID, generation: UUID, chunk_index: int)
     return uuid5(NAMESPACE_URL, f"{version_id}:{generation}:{chunk_index}")
 
 
+def build_document_embedding_text(record: IndexingVersionRecord, chunk: DocumentChunk) -> str:
+    lines = [f"Document: {record.document.name}"]
+    if chunk.section_title:
+        lines.append(f"Section: {chunk.section_title}")
+    lines.append(f"Type: {chunk.chunk_type}")
+    if chunk.language:
+        lines.append(f"Language: {chunk.language}")
+    lines.extend(("Content:", chunk.content))
+    return "\n".join(lines)
+
+
 class DocumentIndexingService:
     def __init__(
         self,
@@ -127,7 +138,8 @@ class DocumentIndexingService:
                 raise DocumentNotReadyForIndexError("Document version has no parsed chunks")
             await self.gateway.ensure_collection()
             vectors = await asyncio.to_thread(
-                self.provider.embed_documents, [chunk.content for chunk in chunks]
+                self.provider.embed_documents,
+                [build_document_embedding_text(claim.record, chunk) for chunk in chunks],
             )
             validate_embeddings(vectors, dimension=self.provider.dimension)
             if len(vectors) != len(chunks):
@@ -257,6 +269,8 @@ class DocumentIndexingService:
                 limit=limit,
                 language=language,
                 document_id=document_id,
+                score_threshold=self.settings.semantic_search_score_threshold,
+                excluded_chunk_types=("heading",),
             )
             return [self._search_result(hit.score, hit.payload) for hit in hits]
         except (EmbeddingError, VectorIndexError) as exc:

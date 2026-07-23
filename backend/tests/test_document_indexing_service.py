@@ -17,7 +17,11 @@ from app.repositories.document_indexing import (
     IndexSnapshot,
 )
 from app.services.document_index_dispatcher import DocumentIndexingDispatcher
-from app.services.document_indexing import DocumentIndexingService, deterministic_point_id
+from app.services.document_indexing import (
+    DocumentIndexingService,
+    build_document_embedding_text,
+    deterministic_point_id,
+)
 from app.services.exceptions import DocumentVersionNotFoundError, SemanticSearchUnavailableError
 
 
@@ -33,8 +37,10 @@ class FakeProvider:
     ) -> None:
         self.error = error
         self.on_embed = on_embed
+        self.document_inputs: list[str] = []
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        self.document_inputs = texts
         if self.on_embed is not None:
             self.on_embed()
         if self.error is not None:
@@ -240,7 +246,8 @@ def make_service(
 
 
 async def test_successful_index_writes_traceable_point_and_activates_generation() -> None:
-    service, session, _, gateway, document, version = make_service()
+    provider = FakeProvider()
+    service, session, repository, gateway, document, version = make_service(provider=provider)
 
     assert await service.index_version(version.id)
 
@@ -253,7 +260,33 @@ async def test_successful_index_writes_traceable_point_and_activates_generation(
     assert gateway.points[0].id == deterministic_point_id(version.id, generation, 0)
     assert gateway.points[0].payload["knowledge_base_id"] == str(document.knowledge_base_id)
     assert gateway.points[0].payload["section_title"] == "Architecture"
+    assert gateway.points[0].payload["content"] == repository.chunks[0].content
+    assert gateway.points[0].payload["content_hash"] == repository.chunks[0].content_hash
+    assert provider.document_inputs == [
+        "Document: sample.md\n"
+        "Section: Architecture\n"
+        "Type: paragraph\n"
+        "Language: python\n"
+        "Content:\n"
+        "TraceMind service"
+    ]
     assert session.commit.await_count == 2
+
+
+def test_document_embedding_text_omits_missing_optional_context_without_mutation() -> None:
+    document, version, chunks = make_version()
+    chunk = chunks[0]
+    chunk.section_title = None
+    chunk.language = None
+    original_content = chunk.content
+
+    text = build_document_embedding_text(IndexingVersionRecord(document, version), chunk)
+
+    assert text == "Document: sample.md\nType: paragraph\nContent:\nTraceMind service"
+    assert text.count(original_content) == 1
+    assert "Section:" not in text
+    assert "Language:" not in text
+    assert chunk.content == original_content
 
 
 async def test_force_reindex_replaces_generation_and_cleans_previous() -> None:
@@ -542,6 +575,25 @@ async def test_search_uses_database_generations_and_filters() -> None:
     assert call["generations"] == [generation]
     assert call["language"] == "python"
     assert call["document_id"] == document.id
+    assert call["score_threshold"] == 0.50
+    assert call["excluded_chunk_types"] == ("heading",)
+
+
+async def test_search_returns_empty_when_gateway_has_no_results_above_threshold() -> None:
+    service, _, repository, gateway, document, version = make_service()
+    repository.active = [ActiveGeneration(document.id, version.id, uuid4())]
+    gateway.hits = []
+
+    results = await service.search(
+        document.knowledge_base_id,
+        query="unanswered question",
+        limit=5,
+        language=None,
+        document_id=None,
+    )
+
+    assert results == []
+    assert gateway.search_calls[0]["score_threshold"] == 0.50
 
 
 async def test_search_returns_empty_without_database_active_generation() -> None:

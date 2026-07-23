@@ -41,7 +41,7 @@ def test_document_embedding_uses_batching_normalization_and_no_prompt() -> None:
     assert kwargs["prompt"] is None
 
 
-def test_query_embedding_uses_developer_retrieval_instruction() -> None:
+def test_query_embedding_uses_general_knowledge_retrieval_instruction() -> None:
     model = FakeModel([[1.0, 0.0, 0.0]])
     provider = provider_with(model)
 
@@ -50,6 +50,10 @@ def test_query_embedding_uses_developer_retrieval_instruction() -> None:
     texts, kwargs = model.calls[0]
     prompt = str(kwargs["prompt"])
     assert prompt.startswith("Instruct:")
+    assert "personal profiles" in prompt
+    assert "software projects" in prompt
+    assert "code" in prompt
+    assert "technical documents" in prompt
     assert "Query:" in prompt
     assert (prompt + "".join(texts)).count(query) == 1
     assert QUERY_INSTRUCTION in prompt

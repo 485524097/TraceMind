@@ -70,6 +70,25 @@ def test_qdrant_operation_defaults_and_environment_overrides(
     assert overridden.qdrant_upsert_batch_size == 32
 
 
+def test_semantic_search_threshold_defaults_and_environment_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert Settings(_env_file=None).semantic_search_score_threshold == 0.50
+    monkeypatch.setenv("SEMANTIC_SEARCH_SCORE_THRESHOLD", "0.72")
+    assert Settings(_env_file=None).semantic_search_score_threshold == 0.72
+
+
+@pytest.mark.parametrize("value", [0, -0.1, 1.01])
+def test_semantic_search_threshold_rejects_invalid_values(value: float) -> None:
+    with pytest.raises(ValidationError):
+        Settings(semantic_search_score_threshold=value)
+
+
+@pytest.mark.parametrize("value", [0.01, 0.5, 1.0])
+def test_semantic_search_threshold_accepts_valid_values(value: float) -> None:
+    assert Settings(semantic_search_score_threshold=value).semantic_search_score_threshold == value
+
+
 @pytest.mark.parametrize(
     "field",
     ["qdrant_operation_timeout_seconds", "qdrant_upsert_batch_size"],

@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     qdrant_dense_vector_name: str = "dense_v1"
     qdrant_operation_timeout_seconds: int = 60
     qdrant_upsert_batch_size: int = 64
+    semantic_search_score_threshold: float = 0.50
     embedding_model_name: str = "Qwen/Qwen3-Embedding-0.6B"
     embedding_dimension: int = 1_024
     embedding_batch_size: int = 16
@@ -134,6 +135,8 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"Indexing settings must be greater than zero: {', '.join(invalid_index)}"
             )
+        if not 0.0 < self.semantic_search_score_threshold <= 1.0:
+            raise ValueError("SEMANTIC_SEARCH_SCORE_THRESHOLD must be greater than 0 and at most 1")
         if self.document_max_file_size_bytes <= 0:
             raise ValueError("DOCUMENT_MAX_FILE_SIZE_BYTES must be greater than zero")
         if self.document_upload_chunk_size_bytes <= 0:

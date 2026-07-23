@@ -1,3 +1,4 @@
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -156,6 +157,8 @@ class QdrantGateway:
         limit: int,
         language: str | None,
         document_id: UUID | None,
+        score_threshold: float,
+        excluded_chunk_types: Collection[str],
     ) -> list[VectorSearchHit]:
         must: list[models.Condition] = [
             self._equal_condition("knowledge_base_id", knowledge_base_id),
@@ -168,13 +171,22 @@ class QdrantGateway:
             must.append(self._equal_condition("language", language))
         if document_id is not None:
             must.append(self._equal_condition("document_id", document_id))
+        must_not: list[models.Condition] = []
+        if excluded_chunk_types:
+            must_not.append(
+                models.FieldCondition(
+                    key="chunk_type",
+                    match=models.MatchAny(any=list(excluded_chunk_types)),
+                )
+            )
         try:
             response = await self.client.query_points(
                 self.collection_name,
                 query=vector,
                 using=self.vector_name,
-                query_filter=models.Filter(must=must),
+                query_filter=models.Filter(must=must, must_not=must_not),
                 limit=limit,
+                score_threshold=score_threshold,
                 with_payload=True,
                 with_vectors=False,
             )

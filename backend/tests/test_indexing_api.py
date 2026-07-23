@@ -143,3 +143,19 @@ async def test_qdrant_unavailable_returns_controlled_503() -> None:
 
     assert response.status_code == 503
     assert "private" not in response.text
+
+
+async def test_semantic_search_empty_results_return_success() -> None:
+    service = AsyncMock(spec=DocumentIndexingService)
+    service.search.return_value = []
+    knowledge_base_id = uuid4()
+    app = make_app(service)
+
+    async for client in client_for(app):
+        response = await client.post(
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/search/semantic",
+            json={"query": "unanswered question", "limit": 5},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"items": []}

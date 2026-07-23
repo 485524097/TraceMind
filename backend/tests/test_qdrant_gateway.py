@@ -154,3 +154,59 @@ async def test_second_upsert_batch_failure_uses_safe_error() -> None:
     assert "private" not in str(caught.value)
     assert "document" not in str(caught.value)
     assert client.upsert.await_count == 2
+
+
+async def test_search_passes_threshold_and_heading_exclusion_with_existing_filters() -> None:
+    client = AsyncMock(spec=AsyncQdrantClient)
+    client.query_points.return_value = SimpleNamespace(
+        points=[SimpleNamespace(score=0.82, payload={"content": "result"})]
+    )
+    knowledge_base_id, document_id = uuid4(), uuid4()
+    generations = [uuid4(), uuid4()]
+
+    hits = await gateway(client).search(
+        [1.0, 0.0, 0.0],
+        knowledge_base_id=knowledge_base_id,
+        generations=generations,
+        limit=5,
+        language="java",
+        document_id=document_id,
+        score_threshold=0.5,
+        excluded_chunk_types=("heading",),
+    )
+
+    assert hits[0].score == 0.82
+    call = client.query_points.await_args.kwargs
+    assert call["score_threshold"] == 0.5
+    query_filter = call["query_filter"]
+    must_keys = {condition.key for condition in query_filter.must}
+    assert must_keys == {"knowledge_base_id", "index_generation", "language", "document_id"}
+    generation_condition = next(
+        condition for condition in query_filter.must if condition.key == "index_generation"
+    )
+    assert set(generation_condition.match.any) == {str(value) for value in generations}
+    assert len(query_filter.must_not) == 1
+    assert query_filter.must_not[0].key == "chunk_type"
+    assert query_filter.must_not[0].match.any == ["heading"]
+
+
+async def test_search_returns_empty_and_converts_client_errors() -> None:
+    client = AsyncMock(spec=AsyncQdrantClient)
+    client.query_points.return_value = SimpleNamespace(points=[])
+    search_kwargs = {
+        "knowledge_base_id": uuid4(),
+        "generations": [uuid4()],
+        "limit": 5,
+        "language": None,
+        "document_id": None,
+        "score_threshold": 0.5,
+        "excluded_chunk_types": ("heading",),
+    }
+
+    assert await gateway(client).search([1.0, 0.0, 0.0], **search_kwargs) == []
+
+    client.query_points.side_effect = RuntimeError("http://private sensitive query")
+    with pytest.raises(VectorIndexError) as caught:
+        await gateway(client).search([1.0, 0.0, 0.0], **search_kwargs)
+    assert str(caught.value) == "Semantic search is unavailable"
+    assert "private" not in str(caught.value)

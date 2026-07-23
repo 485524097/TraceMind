@@ -4,8 +4,8 @@ from typing import Any
 from app.embedding.base import EmbeddingError, validate_embeddings
 
 QUERY_INSTRUCTION = (
-    "Instruct: Given a developer knowledge-base query, retrieve relevant code and "
-    "documentation chunks."
+    "Instruct: Given a query over personal profiles, software projects, code, and "
+    "technical documents, retrieve passages that directly answer the query."
 )
 _MODEL_CACHE: dict[tuple[str, str], Any] = {}
 _MODEL_LOCK = threading.Lock()

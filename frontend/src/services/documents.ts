@@ -77,7 +77,7 @@ export function semanticSearch(
   knowledgeBaseId: string,
   query: string,
   language: string | null,
-  limit = 10,
+  limit = 5,
 ): Promise<SemanticSearchResponse> {
   return apiRequest(`/api/v1/knowledge-bases/${knowledgeBaseId}/search/semantic`, {
     method: 'POST',

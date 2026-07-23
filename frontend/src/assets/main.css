@@ -17,29 +17,97 @@
   margin-bottom: 1.5rem;
 }
 
-.semantic-search-panel form {
+.semantic-search-content {
+  padding: clamp(24px, 4vw, 40px);
+}
+
+.semantic-search-heading h2 {
+  margin: 0;
+  font-size: clamp(26px, 4vw, 34px);
+}
+
+.semantic-search-heading > div > p:last-child {
+  margin: 10px 0 0;
+  color: #68748a;
+}
+
+.semantic-search-form {
+  display: grid;
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) 180px auto;
+  gap: 12px;
+  margin: 24px 0;
+}
+
+.semantic-search-form label,
+.semantic-search-form input {
+  width: 100%;
+  min-width: 0;
+}
+
+.semantic-search-form input {
+  padding: 10px 12px;
+  border: 1px solid #cfd7e3;
+  border-radius: 8px;
+  font: inherit;
+}
+
+.semantic-search-empty {
+  color: #68748a;
+  text-align: center;
+}
+
+.semantic-search-empty > p {
+  margin: -18px 0 12px;
+}
+
+.semantic-search-results {
+  display: grid;
+  gap: 16px;
+}
+
+.search-result-card {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid #e3e8ef;
+  border-radius: 12px;
+  background: #fbfcfe;
+}
+
+.search-result-header {
   display: flex;
-  gap: 0.75rem;
-  margin: 1rem 0;
-}
-
-.semantic-search-panel input:first-child {
-  flex: 1;
-}
-
-.search-result {
-  border-top: 1px solid var(--border-color, #dcdfe6);
-  padding: 1rem 0;
-}
-
-.search-result header {
-  display: flex;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: 16px;
 }
 
-.search-result pre {
+.search-result-header strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.search-result-score {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: #2456c8;
+  background: #eaf0ff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.search-result-reference {
+  margin: 10px 0;
+  color: #68748a;
+  font-size: 14px;
+}
+
+.search-result-content {
+  max-height: 240px;
+  margin: 0;
   overflow: auto;
   white-space: pre-wrap;
+  word-break: break-word;
 }
 
 * {
@@ -399,5 +467,20 @@ th {
 
   .header-actions > * {
     flex: 1;
+  }
+}
+
+@media (max-width: 720px) {
+  .semantic-search-form {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .semantic-search-form .el-button {
+    width: 100%;
+  }
+
+  .search-result-header {
+    flex-wrap: wrap;
   }
 }
