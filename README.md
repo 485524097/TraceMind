@@ -81,4 +81,4 @@ npm ci
 npm run dev
 ```
 
-知识库管理页面位于 `http://localhost:5173/knowledge-bases`，每个知识库提供文档入口。更完整的开发步骤见 [开发指南](docs/development.md)，导入规则见 [文档导入说明](docs/document-ingestion.md)，解析规则见 [文档解析说明](docs/document-parsing.md)，数据库结构见 [数据库设计](docs/database-design.md)，Dense 索引边界见 [向量索引说明](docs/vector-indexing.md)。
+知识库管理页面位于 `http://localhost:5173/knowledge-bases`，每个知识库提供文档入口。更完整的开发步骤见 [开发指南](docs/development.md)，导入规则见 [文档导入说明](docs/document-ingestion.md)，解析规则见 [文档解析说明](docs/document-parsing.md)，数据库结构见 [数据库设计](docs/database-design.md)，Dense 索引边界见 [向量索引说明](docs/vector-indexing.md)，单轮流式问答见 [RAG 说明](docs/rag.md)。

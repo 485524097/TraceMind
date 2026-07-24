@@ -71,3 +71,9 @@
 - 展示从资料导入、解析、检索到带引用问答的完整闭环。
 - 展示对 Java 项目资料、文档与历史问题的联合检索能力。
 - 展示清晰的工程分层、可验证引用和可复用的开发经验沉淀。
+
+## 第一阶段 RAG 边界
+
+第一条问答链路为单轮、无状态的 Citation-grounded Streaming RAG。Dense Retrieval 是
+唯一召回方式；无足够相关来源时不调用 LLM。回答提供 `[Sx]` 与原始 Chunk 定位，但
+当前不实现对话历史、Agent、Tools、Hybrid Search 或 Reranker。
