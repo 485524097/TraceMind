@@ -52,7 +52,9 @@ uv run uvicorn app.main:app --reload
 
 解析上限通过 `DOCUMENT_PARSE_MAX_EXTRACTED_CHARS`、`DOCUMENT_PARSE_MAX_PDF_PAGES`、`DOCUMENT_PARSE_STALE_AFTER_SECONDS`、`DOCUMENT_CHUNK_MAX_CHARS` 和 `DOCUMENT_CHUNK_OVERLAP_CHARS` 配置。backend 与 celery-worker 必须使用相同值。
 
-Dense 索引配置使用 `QDRANT_COLLECTION_NAME`、`QDRANT_DENSE_VECTOR_NAME`、`QDRANT_OPERATION_TIMEOUT_SECONDS`、`QDRANT_UPSERT_BATCH_SIZE`、`SEMANTIC_SEARCH_SCORE_THRESHOLD`、`EMBEDDING_MODEL_NAME`、`EMBEDDING_DIMENSION`、`EMBEDDING_BATCH_SIZE`、`EMBEDDING_DEVICE` 和 `DOCUMENT_INDEX_STALE_AFTER_SECONDS`。默认相似度阈值 0.50 是当前 Dense Baseline，需结合本地资料评估。Qdrant 健康检查仍由 `HEALTHCHECK_TIMEOUT_SECONDS` 单独限制。backend 与 celery-worker 必须保持一致。首次实际调用 SentenceTransformer 会下载模型；CI 单元测试使用 FakeEmbeddingProvider，不下载模型。
+索引配置使用 `QDRANT_COLLECTION_NAME`、`QDRANT_DENSE_VECTOR_NAME`、`QDRANT_SPARSE_VECTOR_NAME`、`QDRANT_BM25_MODEL`、`QDRANT_BM25_TOKENIZER`、`QDRANT_BM25_LANGUAGE`、`QDRANT_OPERATION_TIMEOUT_SECONDS`、`QDRANT_UPSERT_BATCH_SIZE`、`SEMANTIC_SEARCH_SCORE_THRESHOLD`、`HYBRID_DENSE_PREFETCH_LIMIT`、`HYBRID_SPARSE_PREFETCH_LIMIT`、`EMBEDDING_MODEL_NAME`、`EMBEDDING_DIMENSION`、`EMBEDDING_BATCH_SIZE`、`EMBEDDING_DEVICE` 和 `DOCUMENT_INDEX_STALE_AFTER_SECONDS`。默认 Dense 阈值 0.50 只应用于 Dense 查询或 Hybrid 的 Dense Prefetch；BM25 Prefetch 与最终 RRF 不应用该阈值。Qdrant 健康检查仍由 `HEALTHCHECK_TIMEOUT_SECONDS` 单独限制。backend 与 celery-worker 必须保持一致。
+
+首次实际调用 SentenceTransformer 会下载 Embedding 模型；BM25 使用本地 Qdrant Server 的 `qdrant/bm25`、`multilingual` tokenizer 和 `language=none`，不安装 FastEmbed、不下载 BM25 模型，也不访问 Qdrant Cloud。已有 Dense-only Point 可继续查询；对已有文档执行“强制重新索引”后才会补齐 `bm25_v1`。
 
 ## 启动前端
 
@@ -138,7 +140,7 @@ uv run alembic downgrade 20260717_0003
 uv run alembic upgrade head
 ```
 
-真实 Qdrant integration test 使用显式 `TEST_QDRANT_URL`，但仍使用固定 Fake Embedding 向量，不下载模型。
+真实 Qdrant integration test 使用显式 `TEST_QDRANT_URL` 和独立临时 Collection，使用固定手工 Dense 向量，不下载模型，也不修改正式 `tracemind_chunks`。
 
 ## 前端检查
 

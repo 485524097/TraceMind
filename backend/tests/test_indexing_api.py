@@ -15,7 +15,7 @@ from app.services.document_indexing import (
     IndexRequestResult,
     SemanticSearchResult,
 )
-from app.services.exceptions import SemanticSearchUnavailableError
+from app.services.exceptions import HybridSearchUnavailableError, SemanticSearchUnavailableError
 
 
 async def client_for(app: FastAPI) -> AsyncIterator[AsyncClient]:
@@ -159,3 +159,33 @@ async def test_semantic_search_empty_results_return_success() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"items": []}
+
+
+async def test_hybrid_search_path_and_safe_error() -> None:
+    service = AsyncMock(spec=DocumentIndexingService)
+    service.hybrid_search.return_value = []
+    knowledge_base_id = uuid4()
+    app = make_app(service)
+    path = f"/api/v1/knowledge-bases/{knowledge_base_id}/search/hybrid"
+
+    async for client in client_for(app):
+        response = await client.post(
+            path,
+            json={"query": "DiscoveryClient", "limit": 5, "language": "java"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"items": []}
+    service.hybrid_search.assert_awaited_once_with(
+        knowledge_base_id,
+        query="DiscoveryClient",
+        limit=5,
+        language="java",
+        document_id=None,
+    )
+
+    service.hybrid_search.side_effect = HybridSearchUnavailableError("Hybrid search is unavailable")
+    async for client in client_for(app):
+        failed = await client.post(path, json={"query": "private query"})
+    assert failed.status_code == 503
+    assert "private query" not in failed.text

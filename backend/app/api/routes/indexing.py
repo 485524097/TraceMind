@@ -22,6 +22,7 @@ from app.services.exceptions import (
     DocumentIndexingQueueError,
     DocumentNotReadyForIndexError,
     DocumentVersionNotFoundError,
+    HybridSearchUnavailableError,
     SemanticSearchUnavailableError,
 )
 
@@ -43,8 +44,14 @@ def get_document_indexing_service(
         request.app.state.qdrant_client.client,
         collection_name=settings.qdrant_collection_name,
         vector_name=settings.qdrant_dense_vector_name,
+        sparse_vector_name=settings.qdrant_sparse_vector_name,
+        bm25_model=settings.qdrant_bm25_model,
+        bm25_tokenizer=settings.qdrant_bm25_tokenizer,
+        bm25_language=settings.qdrant_bm25_language,
         dimension=settings.embedding_dimension,
         upsert_batch_size=settings.qdrant_upsert_batch_size,
+        dense_prefetch_limit=settings.hybrid_dense_prefetch_limit,
+        sparse_prefetch_limit=settings.hybrid_sparse_prefetch_limit,
     )
     return DocumentIndexingService(
         session,
@@ -82,7 +89,14 @@ def raise_index_http_error(exc: Exception) -> NoReturn:
         raise HTTPException(status_code=404, detail="Document version not found")
     if isinstance(exc, DocumentNotReadyForIndexError):
         raise HTTPException(status_code=409, detail="Document version is not ready for indexing")
-    if isinstance(exc, (DocumentIndexingQueueError, SemanticSearchUnavailableError)):
+    if isinstance(
+        exc,
+        (
+            DocumentIndexingQueueError,
+            SemanticSearchUnavailableError,
+            HybridSearchUnavailableError,
+        ),
+    ):
         raise HTTPException(status_code=503, detail=str(exc))
     raise exc
 
@@ -139,6 +153,32 @@ async def semantic_search(
 ) -> SemanticSearchResponse:
     try:
         results = await service.search(
+            knowledge_base_id,
+            query=body.query,
+            limit=body.limit,
+            language=body.language,
+            document_id=body.document_id,
+        )
+    except Exception as exc:
+        raise_index_http_error(exc)
+    return SemanticSearchResponse(
+        items=[SemanticSearchResultResponse.model_validate(result.__dict__) for result in results]
+    )
+
+
+@router.post(
+    "/search/hybrid",
+    response_model=SemanticSearchResponse,
+    summary="Dense + BM25 RRF hybrid search",
+    description="Returns Qdrant RRF ranking scores, not cosine similarity.",
+)
+async def hybrid_search(
+    knowledge_base_id: UUID,
+    body: SemanticSearchRequest,
+    service: IndexingServiceDependency,
+) -> SemanticSearchResponse:
+    try:
+        results = await service.hybrid_search(
             knowledge_base_id,
             query=body.query,
             limit=body.limit,

@@ -20,6 +20,7 @@ from app.services.document_index_dispatcher import DocumentIndexingDispatcher
 from app.services.document_indexing import (
     DocumentIndexingService,
     build_document_embedding_text,
+    build_sparse_document_text,
     deterministic_point_id,
 )
 from app.services.exceptions import DocumentVersionNotFoundError, SemanticSearchUnavailableError
@@ -77,6 +78,12 @@ class FakeGateway:
 
     async def search(self, vector: list[float], **kwargs: object) -> list[VectorSearchHit]:
         self.search_calls.append({"vector": vector, **kwargs})
+        return self.hits
+
+    async def hybrid_search(
+        self, vector: list[float], query: str, **kwargs: object
+    ) -> list[VectorSearchHit]:
+        self.search_calls.append({"vector": vector, "query": query, "hybrid": True, **kwargs})
         return self.hits
 
 
@@ -262,6 +269,8 @@ async def test_successful_index_writes_traceable_point_and_activates_generation(
     assert gateway.points[0].payload["section_title"] == "Architecture"
     assert gateway.points[0].payload["content"] == repository.chunks[0].content
     assert gateway.points[0].payload["content_hash"] == repository.chunks[0].content_hash
+    assert gateway.points[0].dense_vector == [1.0, 0.0, 0.0]
+    assert gateway.points[0].sparse_text == "sample.md\nArchitecture\nTraceMind service"
     assert provider.document_inputs == [
         "Document: sample.md\n"
         "Section: Architecture\n"
@@ -287,6 +296,22 @@ def test_document_embedding_text_omits_missing_optional_context_without_mutation
     assert "Section:" not in text
     assert "Language:" not in text
     assert chunk.content == original_content
+
+
+def test_sparse_document_text_preserves_exact_identifiers_and_optional_section() -> None:
+    document, version, chunks = make_version()
+    chunk = chunks[0]
+    chunk.content = "spring.cloud.nacos.discovery.server-addr DiscoveryClient SELECT_FOR_UPDATE"
+    record = IndexingVersionRecord(document, version)
+
+    text = build_sparse_document_text(record, chunk)
+
+    assert text == (
+        "sample.md\nArchitecture\n"
+        "spring.cloud.nacos.discovery.server-addr DiscoveryClient SELECT_FOR_UPDATE"
+    )
+    chunk.section_title = None
+    assert build_sparse_document_text(record, chunk) == f"sample.md\n{chunk.content}"
 
 
 async def test_force_reindex_replaces_generation_and_cleans_previous() -> None:
@@ -594,6 +619,27 @@ async def test_search_returns_empty_when_gateway_has_no_results_above_threshold(
 
     assert results == []
     assert gateway.search_calls[0]["score_threshold"] == 0.50
+
+
+async def test_hybrid_search_uses_active_generations_and_rrf_gateway() -> None:
+    service, _, repository, gateway, document, version = make_service()
+    generation = uuid4()
+    repository.active = [ActiveGeneration(document.id, version.id, generation)]
+
+    results = await service.hybrid_search(
+        document.knowledge_base_id,
+        query="DiscoveryClient",
+        limit=5,
+        language="java",
+        document_id=document.id,
+    )
+
+    assert results == []
+    call = gateway.search_calls[0]
+    assert call["hybrid"] is True
+    assert call["query"] == "DiscoveryClient"
+    assert call["generations"] == [generation]
+    assert call["dense_score_threshold"] == 0.50
 
 
 async def test_search_returns_empty_without_database_active_generation() -> None:

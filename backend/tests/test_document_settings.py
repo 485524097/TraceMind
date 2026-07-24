@@ -117,13 +117,18 @@ def test_rag_settings_default_to_disabled_and_normalize_empty_values() -> None:
 
 
 def test_rag_settings_allow_empty_key_and_require_url_model_pair() -> None:
-    settings = Settings(llm_base_url="http://localhost:11434/v1", llm_model="local")
+    settings = Settings(
+        _env_file=None,
+        llm_base_url="http://localhost:11434/v1",
+        llm_model="local",
+        llm_api_key=None,
+    )
     assert settings.rag_llm_enabled is True
     assert settings.llm_api_key is None
     with pytest.raises(ValidationError):
-        Settings(llm_base_url="http://localhost:11434/v1")
+        Settings(_env_file=None, llm_base_url="http://localhost:11434/v1")
     with pytest.raises(ValidationError):
-        Settings(llm_model="local")
+        Settings(_env_file=None, llm_model="local")
 
 
 @pytest.mark.parametrize(
@@ -146,3 +151,36 @@ def test_rag_settings_reject_invalid_limits(field: str, value: float) -> None:
 def test_llm_secret_is_redacted() -> None:
     settings = Settings(llm_api_key="private-test-key")
     assert "private-test-key" not in repr(settings)
+
+
+def test_hybrid_settings_defaults() -> None:
+    settings = Settings(_env_file=None)
+    assert settings.qdrant_sparse_vector_name == "bm25_v1"
+    assert settings.qdrant_bm25_model == "qdrant/bm25"
+    assert settings.qdrant_bm25_tokenizer == "multilingual"
+    assert settings.qdrant_bm25_language == "none"
+    assert settings.hybrid_dense_prefetch_limit == 20
+    assert settings.hybrid_sparse_prefetch_limit == 20
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("qdrant_sparse_vector_name", ""),
+        ("qdrant_bm25_model", ""),
+        ("qdrant_bm25_tokenizer", ""),
+        ("qdrant_bm25_language", ""),
+        ("hybrid_dense_prefetch_limit", 0),
+        ("hybrid_dense_prefetch_limit", 101),
+        ("hybrid_sparse_prefetch_limit", 0),
+        ("hybrid_sparse_prefetch_limit", 101),
+    ],
+)
+def test_hybrid_settings_reject_invalid_values(field: str, value: object) -> None:
+    with pytest.raises(ValidationError):
+        Settings(**{field: value})
+
+
+def test_dense_and_sparse_names_must_differ() -> None:
+    with pytest.raises(ValidationError):
+        Settings(qdrant_dense_vector_name="same", qdrant_sparse_vector_name="same")

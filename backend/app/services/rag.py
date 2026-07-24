@@ -47,7 +47,7 @@ class RagService:
     ) -> PreparedRag:
         started_at = perf_counter()
         trace_id = uuid4()
-        results = await self.indexing_service.search(
+        results = await self.indexing_service.hybrid_search(
             knowledge_base_id,
             query=query,
             limit=self.settings.rag_retrieval_limit,
@@ -57,7 +57,7 @@ class RagService:
         retrieval_latency_ms = round((perf_counter() - started_at) * 1_000)
         context = build_rag_context(results, self.settings.rag_max_context_chars)
         logger.info(
-            "RAG retrieval trace_id=%s knowledge_base_id=%s query_length=%s "
+            "RAG retrieval trace_id=%s knowledge_base_id=%s retrieval_mode=hybrid query_length=%s "
             "retrieval_count=%s retrieval_latency_ms=%s",
             trace_id,
             knowledge_base_id,

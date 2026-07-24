@@ -1,14 +1,14 @@
 # Citation-grounded Streaming RAG
 
-TraceMind 当前提供单轮、无状态的引用约束 RAG。它只使用现有 Dense Semantic Search
-召回当前版本的 active generation，不包含对话历史、Agent、Tools、Hybrid Search 或
-Reranker。
+TraceMind 当前提供单轮、无状态的引用约束 RAG。它默认使用 Dense + BM25 RRF Hybrid
+Search 召回当前版本的 active generation，不包含对话历史、Agent、Tools 或 Reranker。
 
 ## 请求链路
 
 `POST /api/v1/knowledge-bases/{knowledge_base_id}/rag/stream` 接收问题、可选语言和
-Document ID。服务复用 `DocumentIndexingService.search()` 及其 score threshold；没有
-达到阈值的来源时返回 `no_answer`，不会调用 LLM。
+Document ID。服务复用 `DocumentIndexingService.hybrid_search()`。Dense Prefetch 使用
+现有阈值，BM25 Prefetch 和最终 RRF 不使用固定阈值；没有来源时返回 `no_answer`，
+不会调用 LLM。RRF score 只表示融合排名，不表示回答置信度。
 
 Context Builder 保持检索顺序并按 Chunk ID 去重，只加入完整 Chunk。后续 Chunk超过
 `RAG_MAX_CONTEXT_CHARS` 时跳过，不从正文中间截断。Prompt 使用
@@ -68,4 +68,5 @@ uv run --no-sync pytest -m "not integration"
 OpenAI-compatible 服务后，可以在文档页面输入问题，确认答案逐步出现、引用按钮定位
 到原始 Chunk、停止按钮终止生成，并检查日志不包含问题、来源、答案或密钥。
 
-当前不保存页面刷新前后的问答历史。
+当前不保存页面刷新前后的问答历史。Dense Search API 仍保留用于检索调试对比；当前
+没有 Reranker、Weighted RRF 或检索评测集自动调参。

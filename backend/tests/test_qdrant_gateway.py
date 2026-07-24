@@ -20,8 +20,14 @@ def gateway(client: AsyncMock, *, batch_size: int = 64) -> QdrantGateway:
         client,
         collection_name="tracemind_chunks",
         vector_name="dense_v1",
+        sparse_vector_name="bm25_v1",
+        bm25_model="qdrant/bm25",
+        bm25_tokenizer="multilingual",
+        bm25_language="none",
         dimension=3,
         upsert_batch_size=batch_size,
+        dense_prefetch_limit=20,
+        sparse_prefetch_limit=20,
     )
 
 
@@ -30,10 +36,21 @@ def collection_info(
     size: int = 3,
     distance: models.Distance = models.Distance.COSINE,
     payload_schema: dict[str, object] | None = None,
+    sparse: bool = True,
+    sparse_modifier: models.Modifier | None = models.Modifier.IDF,
 ):
     vectors = {"dense_v1": models.VectorParams(size=size, distance=distance)}
     return SimpleNamespace(
-        config=SimpleNamespace(params=SimpleNamespace(vectors=vectors)),
+        config=SimpleNamespace(
+            params=SimpleNamespace(
+                vectors=vectors,
+                sparse_vectors=(
+                    {"bm25_v1": models.SparseVectorParams(modifier=sparse_modifier)}
+                    if sparse
+                    else {}
+                ),
+            )
+        ),
         payload_schema=payload_schema or {},
     )
 
@@ -49,6 +66,8 @@ async def test_collection_is_created_with_named_cosine_vector_and_payload_indexe
     vectors = client.create_collection.await_args.kwargs["vectors_config"]
     assert vectors["dense_v1"].size == 3
     assert vectors["dense_v1"].distance == models.Distance.COSINE
+    sparse = client.create_collection.await_args.kwargs["sparse_vectors_config"]
+    assert sparse["bm25_v1"].modifier == models.Modifier.IDF
     assert client.create_payload_index.await_count == 6
 
 
@@ -116,6 +135,7 @@ def make_points(count: int) -> list[VectorPoint]:
         VectorPoint(
             uuid4(),
             [1.0, 0.0, 0.0],
+            f"traceable {index}",
             {"knowledge_base_id": str(uuid4()), "content": f"traceable {index}"},
         )
         for index in range(count)
@@ -138,7 +158,11 @@ async def test_point_upsert_is_sequentially_batched(count: int, batch_lengths: l
         assert len(sent) == expected_length
         assert call.kwargs["wait"] is True
         for point in sent:
-            assert point.vector == {"dense_v1": [1.0, 0.0, 0.0]}
+            assert point.vector["dense_v1"] == [1.0, 0.0, 0.0]
+            document = point.vector["bm25_v1"]
+            assert document.text.startswith("traceable")
+            assert document.model == "qdrant/bm25"
+            assert document.options == {"language": "none", "tokenizer": "multilingual"}
             original = next(item for item in points if item.id == point.id)
             assert point.payload == original.payload
 
@@ -154,6 +178,84 @@ async def test_second_upsert_batch_failure_uses_safe_error() -> None:
     assert "private" not in str(caught.value)
     assert "document" not in str(caught.value)
     assert client.upsert.await_count == 2
+
+
+async def test_existing_dense_collection_adds_and_verifies_sparse_vector() -> None:
+    client = AsyncMock(spec=AsyncQdrantClient)
+    client.collection_exists.return_value = True
+    client.get_collection.side_effect = [
+        collection_info(sparse=False),
+        collection_info(),
+    ]
+
+    await gateway(client).ensure_collection()
+
+    config = client.create_vector_name.await_args.kwargs["vector_name_config"]
+    assert config.sparse.modifier == models.Modifier.IDF
+
+
+async def test_concurrent_sparse_vector_creation_is_rechecked() -> None:
+    client = AsyncMock(spec=AsyncQdrantClient)
+    client.collection_exists.return_value = True
+    client.get_collection.side_effect = [
+        collection_info(sparse=False),
+        collection_info(),
+    ]
+    client.create_vector_name.side_effect = UnexpectedResponse(
+        409, "Conflict", b"exists", Headers()
+    )
+
+    await gateway(client).ensure_collection()
+
+    assert client.get_collection.await_count == 2
+
+
+async def test_incompatible_sparse_vector_is_rejected_without_rebuild() -> None:
+    client = AsyncMock(spec=AsyncQdrantClient)
+    client.collection_exists.return_value = True
+    client.get_collection.return_value = collection_info(sparse_modifier=None)
+
+    with pytest.raises(IncompatibleCollectionError):
+        await gateway(client).ensure_collection()
+
+    client.delete_collection.assert_not_called()
+    client.create_collection.assert_not_called()
+    client.create_vector_name.assert_not_called()
+
+
+async def test_hybrid_search_uses_shared_filters_and_rrf() -> None:
+    client = AsyncMock(spec=AsyncQdrantClient)
+    client.query_points.return_value = SimpleNamespace(
+        points=[SimpleNamespace(score=0.7, payload={"content": "result"})]
+    )
+    knowledge_base_id, document_id, generation = uuid4(), uuid4(), uuid4()
+
+    hits = await gateway(client).hybrid_search(
+        [1.0, 0.0, 0.0],
+        "DiscoveryClient",
+        knowledge_base_id=knowledge_base_id,
+        generations=[generation],
+        limit=5,
+        language="java",
+        document_id=document_id,
+        dense_score_threshold=0.5,
+        excluded_chunk_types=("heading",),
+    )
+
+    assert hits[0].score == 0.7
+    call = client.query_points.await_args.kwargs
+    assert call["query"].fusion == models.Fusion.RRF
+    assert "score_threshold" not in call
+    dense, sparse = call["prefetch"]
+    assert dense.using == "dense_v1"
+    assert dense.score_threshold == 0.5
+    assert dense.limit == 20
+    assert sparse.using == "bm25_v1"
+    assert sparse.score_threshold is None
+    assert sparse.limit == 20
+    assert sparse.query.text == "DiscoveryClient"
+    assert sparse.query.options == {"language": "none", "tokenizer": "multilingual"}
+    assert dense.filter == sparse.filter
 
 
 async def test_search_passes_threshold_and_heading_exclusion_with_existing_filters() -> None:

@@ -21,6 +21,7 @@ from app.services.exceptions import (
     DocumentIndexingQueueError,
     DocumentNotReadyForIndexError,
     DocumentVersionNotFoundError,
+    HybridSearchUnavailableError,
     SemanticSearchUnavailableError,
 )
 
@@ -75,6 +76,14 @@ def build_document_embedding_text(record: IndexingVersionRecord, chunk: Document
         lines.append(f"Language: {chunk.language}")
     lines.extend(("Content:", chunk.content))
     return "\n".join(lines)
+
+
+def build_sparse_document_text(record: IndexingVersionRecord, chunk: DocumentChunk) -> str:
+    parts = [record.document.name]
+    if chunk.section_title:
+        parts.append(chunk.section_title)
+    parts.append(chunk.content)
+    return "\n".join(parts)
 
 
 class DocumentIndexingService:
@@ -276,6 +285,39 @@ class DocumentIndexingService:
         except (EmbeddingError, VectorIndexError) as exc:
             raise SemanticSearchUnavailableError("Semantic search is unavailable") from exc
 
+    async def hybrid_search(
+        self,
+        knowledge_base_id: UUID,
+        *,
+        query: str,
+        limit: int,
+        language: str | None,
+        document_id: UUID | None,
+    ) -> list[SemanticSearchResult]:
+        generations = await self.repository.list_active_generations(
+            knowledge_base_id, document_id=document_id
+        )
+        if not generations:
+            return []
+        try:
+            await self.gateway.ensure_collection()
+            vector = await asyncio.to_thread(self.provider.embed_query, query)
+            validate_embeddings([vector], dimension=self.provider.dimension)
+            hits = await self.gateway.hybrid_search(
+                vector,
+                query,
+                knowledge_base_id=knowledge_base_id,
+                generations=[item.generation for item in generations],
+                limit=limit,
+                language=language,
+                document_id=document_id,
+                dense_score_threshold=self.settings.semantic_search_score_threshold,
+                excluded_chunk_types=("heading",),
+            )
+            return [self._search_result(hit.score, hit.payload) for hit in hits]
+        except (EmbeddingError, VectorIndexError) as exc:
+            raise HybridSearchUnavailableError("Hybrid search is unavailable") from exc
+
     async def _claim(self, version_id: UUID, *, force: bool) -> IndexClaim | None:
         record = await self.repository.lock_version(version_id)
         if record is None:
@@ -387,7 +429,8 @@ class DocumentIndexingService:
         version = record.version
         return VectorPoint(
             id=deterministic_point_id(version.id, generation, chunk.chunk_index),
-            vector=vector,
+            dense_vector=vector,
+            sparse_text=build_sparse_document_text(record, chunk),
             payload={
                 "knowledge_base_id": str(document.knowledge_base_id),
                 "document_id": str(document.id),
