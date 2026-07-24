@@ -3,12 +3,17 @@ import { ElMessage } from 'element-plus'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import SemanticSearchPanel from '@/components/SemanticSearchPanel.vue'
-import { hybridSearch, semanticSearch } from '@/services/documents'
+import { hybridSearch, rerankedSearch, semanticSearch } from '@/services/documents'
 import type { SemanticSearchResult } from '@/types/document'
 
-vi.mock('@/services/documents', () => ({ hybridSearch: vi.fn(), semanticSearch: vi.fn() }))
+vi.mock('@/services/documents', () => ({
+  hybridSearch: vi.fn(),
+  rerankedSearch: vi.fn(),
+  semanticSearch: vi.fn(),
+}))
 const mockedSearch = vi.mocked(semanticSearch)
 const mockedHybridSearch = vi.mocked(hybridSearch)
+const mockedRerankedSearch = vi.mocked(rerankedSearch)
 
 function result(content = 'class DocumentService'): SemanticSearchResult {
   return {
@@ -29,6 +34,10 @@ function result(content = 'class DocumentService'): SemanticSearchResult {
     page_number: null,
     start_line: 10,
     end_line: 14,
+    ranking_mode: 'reranker',
+    retrieval_score: 0.71,
+    rerank_score: 0.91234,
+    retrieval_rank: 2,
   }
 }
 
@@ -42,11 +51,12 @@ describe('SemanticSearchPanel', () => {
   beforeEach(() => {
     mockedSearch.mockReset()
     mockedHybridSearch.mockReset()
+    mockedRerankedSearch.mockReset()
     vi.spyOn(ElMessage, 'error').mockImplementation(() => ({ close: vi.fn() }))
   })
 
   it('uses the dedicated layout, limit five, language filter, and traceable result cards', async () => {
-    mockedHybridSearch.mockResolvedValue({ items: [result()] })
+    mockedRerankedSearch.mockResolvedValue({ items: [result()] })
     const wrapper = mount(SemanticSearchPanel, { props: { knowledgeBaseId: 'kb-id' } })
 
     expect(wrapper.find('.semantic-search-content').exists()).toBe(true)
@@ -55,17 +65,19 @@ describe('SemanticSearchPanel', () => {
     await wrapper.get('input[aria-label="语言过滤"]').setValue('python')
     await submit(wrapper)
 
-    expect(mockedHybridSearch).toHaveBeenCalledWith('kb-id', 'service layer', 'python', 5)
+    expect(mockedRerankedSearch).toHaveBeenCalledWith('kb-id', 'service layer', 'python', 5)
     expect(wrapper.findAll('.search-result-card')).toHaveLength(1)
     expect(wrapper.text()).toContain('service.py · V2')
-    expect(wrapper.text()).toContain('RRF 分数 0.9123')
+    expect(wrapper.text()).toContain('Reranker 原始分数 0.9123')
+    expect(wrapper.text()).toContain('原 RRF 分数 0.7100')
+    expect(wrapper.text()).toContain('原 RRF 排名 2')
     expect(wrapper.text()).toContain('Document service')
     expect(wrapper.text()).toContain('第 10-14 行')
     expect(wrapper.text()).toContain('class DocumentService')
   })
 
   it('shows a neutral empty state when no result clears the threshold', async () => {
-    mockedHybridSearch.mockResolvedValue({ items: [] })
+    mockedRerankedSearch.mockResolvedValue({ items: [] })
     const wrapper = mount(SemanticSearchPanel, { props: { knowledgeBaseId: 'kb-id' } })
 
     await submit(wrapper, 'unanswered question')
@@ -76,18 +88,18 @@ describe('SemanticSearchPanel', () => {
   })
 
   it('keeps API failures separate from an empty result', async () => {
-    mockedHybridSearch.mockRejectedValue(new Error('unavailable'))
+    mockedRerankedSearch.mockRejectedValue(new Error('unavailable'))
     const wrapper = mount(SemanticSearchPanel, { props: { knowledgeBaseId: 'kb-id' } })
 
     await submit(wrapper)
 
-    expect(ElMessage.error).toHaveBeenCalledWith('检索暂时不可用，请稍后重试')
+    expect(ElMessage.error).toHaveBeenCalledWith('Reranker 暂时不可用，可切换到混合检索')
     expect(wrapper.text()).not.toContain('未找到足够相关的内容')
   })
 
   it('keeps long original content once in the DOM without rendering HTML', async () => {
     const longContent = `<strong>unsafe</strong>\n${'完整正文 '.repeat(400)}`
-    mockedHybridSearch.mockResolvedValue({ items: [result(longContent)] })
+    mockedRerankedSearch.mockResolvedValue({ items: [result(longContent)] })
     const wrapper = mount(SemanticSearchPanel, { props: { knowledgeBaseId: 'kb-id' } })
 
     await submit(wrapper)
@@ -98,14 +110,22 @@ describe('SemanticSearchPanel', () => {
     expect(wrapper.findAll('.search-result-card')).toHaveLength(1)
   })
 
-  it('defaults to hybrid and switches to dense while clearing old results', async () => {
+  it('defaults to reranker and switches through hybrid and dense while clearing results', async () => {
+    mockedRerankedSearch.mockResolvedValue({ items: [result()] })
     mockedHybridSearch.mockResolvedValue({ items: [result()] })
     mockedSearch.mockResolvedValue({ items: [result('dense result')] })
     const wrapper = mount(SemanticSearchPanel, { props: { knowledgeBaseId: 'kb-id' } })
 
     const modeSelect = wrapper.get('select[aria-label="检索模式"]')
-    expect((modeSelect.element as HTMLSelectElement).value).toBe('hybrid')
+    expect((modeSelect.element as HTMLSelectElement).value).toBe('reranker')
     await submit(wrapper)
+    expect(wrapper.text()).toContain('Reranker 原始分数')
+
+    await modeSelect.setValue('hybrid')
+    await flushPromises()
+    expect(wrapper.findAll('.search-result-card')).toHaveLength(0)
+    await submit(wrapper)
+    expect(mockedHybridSearch).toHaveBeenCalledWith('kb-id', 'service layer', null, 5)
     expect(wrapper.text()).toContain('RRF 分数')
 
     await modeSelect.setValue('dense')

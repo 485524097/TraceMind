@@ -41,3 +41,7 @@ class RagSource(BaseModel):
     page_number: int | None
     start_line: int | None
     end_line: int | None
+    ranking_mode: str | None = None
+    retrieval_score: float | None = None
+    rerank_score: float | None = None
+    retrieval_rank: int | None = None

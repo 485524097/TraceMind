@@ -9,7 +9,9 @@ from uuid import UUID, uuid4
 from app.core.config import Settings
 from app.llm import LLMMessage, LLMProvider, LLMProviderError
 from app.rag import RagContext, StreamingCitationGuard, build_rag_context, build_rag_messages
+from app.reranker import RerankerError, RerankerUnavailableError
 from app.services.document_indexing import DocumentIndexingService
+from app.services.document_reranking import DocumentRerankingService
 
 logger = logging.getLogger(__name__)
 NO_ANSWER_MESSAGE = "知识库中未找到足够相关的信息。"
@@ -23,6 +25,9 @@ class PreparedRag:
     context: RagContext
     messages: list[LLMMessage] | None
     retrieval_latency_ms: int
+    retrieval_mode: str
+    rerank_latency_ms: int
+    reranker_fallback: bool
     started_at: float
 
 
@@ -32,10 +37,12 @@ class RagService:
         indexing_service: DocumentIndexingService,
         provider: LLMProvider,
         settings: Settings,
+        reranking_service: DocumentRerankingService | None = None,
     ) -> None:
         self.indexing_service = indexing_service
         self.provider = provider
         self.settings = settings
+        self.reranking_service = reranking_service
 
     async def prepare(
         self,
@@ -47,23 +54,56 @@ class RagService:
     ) -> PreparedRag:
         started_at = perf_counter()
         trace_id = uuid4()
-        results = await self.indexing_service.hybrid_search(
+        candidates = await self.indexing_service.hybrid_search(
             knowledge_base_id,
             query=query,
-            limit=self.settings.rag_retrieval_limit,
+            limit=self.settings.rag_rerank_candidate_limit,
             language=language,
             document_id=document_id,
         )
+        results = candidates[: self.settings.rag_retrieval_limit]
+        retrieval_mode = "hybrid"
+        rerank_latency_ms = 0
+        reranker_fallback = False
+        fallback_reason: str | None = None
+        if candidates and self.settings.reranker_enabled:
+            rerank_started_at = perf_counter()
+            try:
+                if self.reranking_service is None:
+                    raise RerankerUnavailableError(reason="unavailable")
+                results = await self.reranking_service.rerank(
+                    query,
+                    candidates,
+                    limit=min(self.settings.rag_retrieval_limit, len(candidates)),
+                )
+                retrieval_mode = "hybrid_reranker"
+            except RerankerUnavailableError as exc:
+                results = candidates[: self.settings.rag_retrieval_limit]
+                retrieval_mode = "hybrid_fallback"
+                reranker_fallback = True
+                fallback_reason = exc.reason
+            except RerankerError:
+                results = candidates[: self.settings.rag_retrieval_limit]
+                retrieval_mode = "hybrid_fallback"
+                reranker_fallback = True
+                fallback_reason = "internal_error"
+            rerank_latency_ms = round((perf_counter() - rerank_started_at) * 1_000)
         retrieval_latency_ms = round((perf_counter() - started_at) * 1_000)
         context = build_rag_context(results, self.settings.rag_max_context_chars)
         logger.info(
-            "RAG retrieval trace_id=%s knowledge_base_id=%s retrieval_mode=hybrid query_length=%s "
-            "retrieval_count=%s retrieval_latency_ms=%s",
+            "RAG retrieval trace_id=%s knowledge_base_id=%s retrieval_mode=%s query_length=%s "
+            "candidate_count=%s final_count=%s retrieval_latency_ms=%s rerank_latency_ms=%s "
+            "reranker_fallback=%s fallback_reason=%s",
             trace_id,
             knowledge_base_id,
+            retrieval_mode,
             len(query),
+            len(candidates),
             len(context.sources),
             retrieval_latency_ms,
+            rerank_latency_ms,
+            reranker_fallback,
+            fallback_reason,
         )
         messages = build_rag_messages(query, context) if context.sources else None
         return PreparedRag(
@@ -72,6 +112,9 @@ class RagService:
             context,
             messages,
             retrieval_latency_ms,
+            retrieval_mode,
+            rerank_latency_ms,
+            reranker_fallback,
             started_at,
         )
 
@@ -163,6 +206,9 @@ class RagService:
             "valid_citation_count": valid_count,
             "invalid_citation_count": invalid_count,
             "retrieval_latency_ms": prepared.retrieval_latency_ms,
+            "retrieval_mode": prepared.retrieval_mode,
+            "rerank_latency_ms": prepared.rerank_latency_ms,
+            "reranker_fallback": prepared.reranker_fallback,
             "llm_latency_ms": llm_latency_ms,
             "total_latency_ms": round((perf_counter() - prepared.started_at) * 1_000),
         }

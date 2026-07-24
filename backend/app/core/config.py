@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Self
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 
 from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -49,11 +49,30 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.1
     llm_max_tokens: int = 1_200
     rag_retrieval_limit: int = 5
+    rag_rerank_candidate_limit: int = 10
     rag_max_context_chars: int = 12_000
+    reranker_enabled: bool = False
+    reranker_base_url: str = "http://127.0.0.1:8011"
+    reranker_timeout_seconds: float = 12
+    reranker_model_name: str = "Qwen/Qwen3-Reranker-0.6B"
+    reranker_device: str = "cuda"
+    reranker_dtype: str = "float16"
+    reranker_max_length: int = 1_024
+    reranker_batch_size: int = 2
+    reranker_max_candidates: int = 20
+    reranker_max_concurrency: int = 1
+    reranker_local_files_only: bool = True
+    reranker_cache_folder: Path | None = None
+    reranker_instruction: str = (
+        "Given a query over software projects, source code, configuration, and technical "
+        "documents, determine whether the document directly answers the query."
+    )
     embedding_model_name: str = "Qwen/Qwen3-Embedding-0.6B"
     embedding_dimension: int = 1_024
     embedding_batch_size: int = 16
     embedding_device: str = "auto"
+    query_embedding_device: str | None = None
+    index_embedding_device: str | None = None
     document_index_stale_after_seconds: int = 1_800
     celery_broker_url: str = "redis://127.0.0.1:6379/1"
     celery_result_backend: str = "redis://127.0.0.1:6379/2"
@@ -99,11 +118,35 @@ class Settings(BaseSettings):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
 
-    @field_validator("llm_base_url", "llm_model", mode="before")
+    @field_validator(
+        "llm_base_url",
+        "llm_model",
+        "query_embedding_device",
+        "index_embedding_device",
+        mode="before",
+    )
     @classmethod
     def normalize_optional_string(cls, value: object) -> object:
         if isinstance(value, str):
             return value.strip() or None
+        return value
+
+    @field_validator("reranker_base_url")
+    @classmethod
+    def normalize_reranker_base_url(cls, value: str) -> str:
+        value = value.strip().rstrip("/")
+        parsed = urlparse(value)
+        if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost"}:
+            raise ValueError("RERANKER_BASE_URL must use local HTTP loopback")
+        if parsed.path or parsed.params or parsed.query or parsed.fragment:
+            raise ValueError("RERANKER_BASE_URL must not contain a path, query, or fragment")
+        return value
+
+    @field_validator("reranker_cache_folder", mode="before")
+    @classmethod
+    def normalize_reranker_cache_folder(cls, value: object) -> object:
+        if isinstance(value, str):
+            return Path(value).expanduser() if value.strip() else None
         return value
 
     @field_validator("llm_api_key", mode="before")
@@ -151,6 +194,9 @@ class Settings(BaseSettings):
             "QDRANT_BM25_TOKENIZER": self.qdrant_bm25_tokenizer,
             "QDRANT_BM25_LANGUAGE": self.qdrant_bm25_language,
             "EMBEDDING_MODEL_NAME": self.embedding_model_name,
+            "RERANKER_MODEL_NAME": self.reranker_model_name,
+            "RERANKER_DEVICE": self.reranker_device,
+            "RERANKER_INSTRUCTION": self.reranker_instruction,
         }
         missing = [name for name, value in required.items() if not str(value).strip()]
         if missing:
@@ -187,6 +233,22 @@ class Settings(BaseSettings):
             raise ValueError("LLM_MAX_TOKENS must be greater than zero")
         if not 1 <= self.rag_retrieval_limit <= 10:
             raise ValueError("RAG_RETRIEVAL_LIMIT must be between 1 and 10")
+        if not 1 <= self.reranker_max_candidates <= 20:
+            raise ValueError("RERANKER_MAX_CANDIDATES must be between 1 and 20")
+        if not self.rag_retrieval_limit <= self.rag_rerank_candidate_limit:
+            raise ValueError("RAG_RERANK_CANDIDATE_LIMIT must not be smaller than final limit")
+        if self.rag_rerank_candidate_limit > self.reranker_max_candidates:
+            raise ValueError("RAG_RERANK_CANDIDATE_LIMIT exceeds RERANKER_MAX_CANDIDATES")
+        if self.reranker_timeout_seconds <= 0:
+            raise ValueError("RERANKER_TIMEOUT_SECONDS must be greater than zero")
+        if not 1 <= self.reranker_batch_size <= 8:
+            raise ValueError("RERANKER_BATCH_SIZE must be between 1 and 8")
+        if not 128 <= self.reranker_max_length <= 2_048:
+            raise ValueError("RERANKER_MAX_LENGTH must be between 128 and 2048")
+        if self.reranker_max_concurrency != 1:
+            raise ValueError("RERANKER_MAX_CONCURRENCY must be 1")
+        if self.reranker_dtype not in {"float16", "float32", "bfloat16"}:
+            raise ValueError("RERANKER_DTYPE must be float16, float32, or bfloat16")
         if self.rag_max_context_chars < 1_000:
             raise ValueError("RAG_MAX_CONTEXT_CHARS must be at least 1000")
         if self.document_max_file_size_bytes <= 0:
@@ -212,6 +274,14 @@ class Settings(BaseSettings):
     @property
     def rag_llm_enabled(self) -> bool:
         return self.llm_base_url is not None and self.llm_model is not None
+
+    @property
+    def resolved_query_embedding_device(self) -> str:
+        return self.query_embedding_device or self.embedding_device
+
+    @property
+    def resolved_index_embedding_device(self) -> str:
+        return self.index_embedding_device or self.embedding_device
 
     @property
     def resolved_database_url(self) -> str:

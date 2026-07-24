@@ -12,7 +12,7 @@ TraceMind 是一个面向中文开发者的、本地优先、答案可追溯的 
 
 ## 当前状态
 
-- 项目已完成知识库管理、本地文档增量导入、异步解析、可追溯 Chunk、Dense/BM25 混合检索和单轮流式 RAG
+- 项目已完成知识库管理、本地文档增量导入、异步解析、可追溯 Chunk、Dense/BM25 混合检索、本地 Cross-Encoder 重排和单轮流式 RAG
 - 尚未发布可用版本
 
 ## 规划技术栈
@@ -48,10 +48,11 @@ TraceMind 是一个面向中文开发者的、本地优先、答案可追溯的 
 - 查看解析状态、错误摘要、Chunk 正文及页码、章节和代码行引用
 - 使用 Qwen3 Embedding 和 Qdrant 建立 Dense 索引并进行可追溯语义检索
 - 使用 Qdrant 服务端 BM25 与 RRF 进行关键词、技术标识和语义混合检索
+- 使用独立本地 Qwen3 Cross-Encoder 服务进行二阶段重排，并在不可用时安全回退
 - 使用带来源引用的单轮流式 RAG 问答
 - 运行前后端单元测试、静态检查与构建
 
-文件可导入、解析并建立 Dense Embedding 与服务端 BM25 双向量索引。RAG 默认使用 Dense + BM25 RRF 混合检索，Dense API 仍保留用于调试对比。当前尚无 Reranker、Weighted RRF 或对话历史。首次实际索引或查询会下载 Embedding 模型；BM25 由本地 Qdrant Server 执行，不使用 FastEmbed，也不下载 BM25 模型。扫描型 PDF 当前不支持 OCR；JSP/Vue 当前按行解析，不是 AST 解析。
+文件可导入、解析并建立 Dense Embedding 与服务端 BM25 双向量索引。RAG 默认使用 Hybrid Top 10 → 本地 Reranker → Top 5，Reranker 故障时回退 Hybrid。Dense、Hybrid 和 Reranked API 均保留用于调试对比。当前尚无 Weighted RRF、Reranker 训练或对话历史。首次实际索引或查询会下载 Embedding 模型；BM25 由本地 Qdrant Server 执行。
 
 ## 最小启动
 
@@ -83,4 +84,4 @@ npm ci
 npm run dev
 ```
 
-知识库管理页面位于 `http://localhost:5173/knowledge-bases`，每个知识库提供文档入口。更完整的开发步骤见 [开发指南](docs/development.md)，导入规则见 [文档导入说明](docs/document-ingestion.md)，解析规则见 [文档解析说明](docs/document-parsing.md)，数据库结构见 [数据库设计](docs/database-design.md)，索引边界见 [向量索引说明](docs/vector-indexing.md)，Dense + BM25 RRF 设计见 [混合检索说明](docs/hybrid-retrieval.md)，单轮流式问答见 [RAG 说明](docs/rag.md)。
+知识库管理页面位于 `http://localhost:5173/knowledge-bases`。更完整的开发步骤见 [开发指南](docs/development.md)，索引边界见 [向量索引说明](docs/vector-indexing.md)，Dense + BM25 RRF 设计见 [混合检索说明](docs/hybrid-retrieval.md)，二阶段排序见 [Reranker 说明](docs/reranker.md)，单轮流式问答见 [RAG 说明](docs/rag.md)。

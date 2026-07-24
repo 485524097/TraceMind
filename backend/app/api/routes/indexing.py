@@ -8,6 +8,7 @@ from app.db.session import get_db_session
 from app.embedding import SentenceTransformerEmbeddingProvider
 from app.indexing import QdrantGateway
 from app.models.document import DocumentVersion
+from app.reranker import InvalidRerankerInputError, RerankerUnavailableError
 from app.schemas.indexing import (
     DocumentIndexRequest,
     DocumentIndexRequestResponse,
@@ -18,6 +19,7 @@ from app.schemas.indexing import (
 )
 from app.services.document_index_dispatcher import CeleryDocumentIndexingDispatcher
 from app.services.document_indexing import DocumentIndexingService
+from app.services.document_reranking import DocumentRerankingService
 from app.services.exceptions import (
     DocumentIndexingQueueError,
     DocumentNotReadyForIndexError,
@@ -38,7 +40,7 @@ def get_document_indexing_service(
         settings.embedding_model_name,
         settings.embedding_dimension,
         settings.embedding_batch_size,
-        settings.embedding_device,
+        settings.resolved_query_embedding_device,
     )
     gateway = QdrantGateway(
         request.app.state.qdrant_client.client,
@@ -67,6 +69,18 @@ IndexingServiceDependency = Annotated[
 ]
 
 
+def get_document_reranking_service(request: Request) -> DocumentRerankingService:
+    provider = request.app.state.reranker_provider
+    if not request.app.state.settings.reranker_enabled or provider is None:
+        raise HTTPException(status_code=503, detail="Reranker is unavailable")
+    return DocumentRerankingService(provider)
+
+
+RerankingServiceDependency = Annotated[
+    DocumentRerankingService, Depends(get_document_reranking_service)
+]
+
+
 def index_status_response(version: DocumentVersion) -> DocumentIndexStatusResponse:
     return DocumentIndexStatusResponse(
         version_id=version.id,
@@ -89,12 +103,15 @@ def raise_index_http_error(exc: Exception) -> NoReturn:
         raise HTTPException(status_code=404, detail="Document version not found")
     if isinstance(exc, DocumentNotReadyForIndexError):
         raise HTTPException(status_code=409, detail="Document version is not ready for indexing")
+    if isinstance(exc, InvalidRerankerInputError):
+        raise HTTPException(status_code=422, detail="Reranker request is invalid")
     if isinstance(
         exc,
         (
             DocumentIndexingQueueError,
             SemanticSearchUnavailableError,
             HybridSearchUnavailableError,
+            RerankerUnavailableError,
         ),
     ):
         raise HTTPException(status_code=503, detail=str(exc))
@@ -184,6 +201,45 @@ async def hybrid_search(
             limit=body.limit,
             language=body.language,
             document_id=body.document_id,
+        )
+    except Exception as exc:
+        raise_index_http_error(exc)
+    return SemanticSearchResponse(
+        items=[SemanticSearchResultResponse.model_validate(result.__dict__) for result in results]
+    )
+
+
+@router.post(
+    "/search/reranked",
+    response_model=SemanticSearchResponse,
+    summary="Hybrid search with local Cross-Encoder reranking",
+    description="Returns raw Cross-Encoder logits for ranking; scores are not probabilities.",
+)
+async def reranked_search(
+    knowledge_base_id: UUID,
+    body: SemanticSearchRequest,
+    request: Request,
+    indexing_service: IndexingServiceDependency,
+    reranking_service: RerankingServiceDependency,
+) -> SemanticSearchResponse:
+    candidate_limit = request.app.state.settings.rag_rerank_candidate_limit
+    if body.limit > candidate_limit:
+        raise HTTPException(
+            status_code=422,
+            detail="limit must not exceed the configured rerank candidate limit",
+        )
+    try:
+        candidates = await indexing_service.hybrid_search(
+            knowledge_base_id,
+            query=body.query,
+            limit=candidate_limit,
+            language=body.language,
+            document_id=body.document_id,
+        )
+        results = await reranking_service.rerank(
+            body.query,
+            candidates,
+            limit=min(body.limit, len(candidates)),
         )
     except Exception as exc:
         raise_index_http_error(exc)

@@ -54,6 +54,11 @@ uv run uvicorn app.main:app --reload
 
 索引配置使用 `QDRANT_COLLECTION_NAME`、`QDRANT_DENSE_VECTOR_NAME`、`QDRANT_SPARSE_VECTOR_NAME`、`QDRANT_BM25_MODEL`、`QDRANT_BM25_TOKENIZER`、`QDRANT_BM25_LANGUAGE`、`QDRANT_OPERATION_TIMEOUT_SECONDS`、`QDRANT_UPSERT_BATCH_SIZE`、`SEMANTIC_SEARCH_SCORE_THRESHOLD`、`HYBRID_DENSE_PREFETCH_LIMIT`、`HYBRID_SPARSE_PREFETCH_LIMIT`、`EMBEDDING_MODEL_NAME`、`EMBEDDING_DIMENSION`、`EMBEDDING_BATCH_SIZE`、`EMBEDDING_DEVICE` 和 `DOCUMENT_INDEX_STALE_AFTER_SECONDS`。默认 Dense 阈值 0.50 只应用于 Dense 查询或 Hybrid 的 Dense Prefetch；BM25 Prefetch 与最终 RRF 不应用该阈值。Qdrant 健康检查仍由 `HEALTHCHECK_TIMEOUT_SECONDS` 单独限制。backend 与 celery-worker 必须保持一致。
 
+Query 与 Index Embedding 分别使用 `QUERY_EMBEDDING_DEVICE` 和
+`INDEX_EMBEDDING_DEVICE`，正式默认均为 CPU；未配置时回退旧
+`EMBEDDING_DEVICE`。本地 Reranker 的配置、单 Worker启动命令、离线缓存和 GTX 1650
+运行模式见 [Reranker 说明](reranker.md)。
+
 首次实际调用 SentenceTransformer 会下载 Embedding 模型；BM25 使用本地 Qdrant Server 的 `qdrant/bm25`、`multilingual` tokenizer 和 `language=none`，不安装 FastEmbed、不下载 BM25 模型，也不访问 Qdrant Cloud。已有 Dense-only Point 可继续查询；对已有文档执行“强制重新索引”后才会补齐 `bm25_v1`。
 
 ## 启动前端
@@ -168,6 +173,21 @@ uv run --no-sync pytest -m "not integration"
 ```
 
 测试使用 Fake Provider，不需要真实 LLM，也不得将 API Key 写入仓库。
+
+## 启动本地 Reranker
+
+Reranker 只允许本机单 Worker运行：
+
+```cmd
+set HF_HOME=E:\ai-cache\huggingface
+set HF_HUB_OFFLINE=1
+set TRANSFORMERS_OFFLINE=1
+uv run --no-sync uvicorn app.reranker_server:app --host 127.0.0.1 --port 8011 --workers 1
+```
+
+确认 `/health/live` 和 `/health/ready` 后，再设置 `RERANKER_ENABLED=true` 启动主
+Backend。禁止使用 `--workers 2` 或监听 `0.0.0.0`。GPU 索引前必须先停止 Reranker；
+完整切换流程见 [Reranker 说明](reranker.md)。
 
 也可在仓库根目录运行 `scripts/verify.ps1`（Windows PowerShell）或 `scripts/verify.sh`（macOS/Linux）执行完整检查。脚本不会创建或覆盖 `.env`。
 

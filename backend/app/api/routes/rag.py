@@ -13,6 +13,7 @@ from app.api.routes.indexing import (
 )
 from app.llm import LLMProvider
 from app.schemas.rag import RagStreamRequest
+from app.services.document_reranking import DocumentRerankingService
 from app.services.exceptions import HybridSearchUnavailableError
 from app.services.rag import PreparedRag, RagService
 
@@ -31,6 +32,11 @@ def get_rag_service(
         indexing_service,
         cast(LLMProvider, provider),
         request.app.state.settings,
+        (
+            DocumentRerankingService(request.app.state.reranker_provider)
+            if request.app.state.reranker_provider is not None
+            else None
+        ),
     )
 
 
