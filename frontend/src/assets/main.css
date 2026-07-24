@@ -112,6 +112,13 @@
   font-weight: 700;
 }
 
+.search-result-ranking,
+.rag-source-ranking {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
 .search-result-reference {
   margin: 10px 0;
   color: #68748a;

@@ -29,6 +29,13 @@ function location(source: RagSource): string {
   return `Chunk ${source.chunk_index}`
 }
 
+function sourceScore(source: RagSource): string {
+  if (source.ranking_mode === 'reranker') {
+    return `Reranker 原始分数 ${source.score.toFixed(4)}`
+  }
+  return `RRF 分数 ${source.score.toFixed(4)}`
+}
+
 function reset(): void {
   answer.value = ''
   sources.value = []
@@ -149,8 +156,12 @@ onBeforeUnmount(stop)
         >
           <header class="rag-source-header">
             <strong>[{{ source.source_id }}] {{ source.document_name }} · V{{ source.version_number }}</strong>
-            <span>{{ source.score.toFixed(4) }}</span>
+            <span>{{ sourceScore(source) }}</span>
           </header>
+          <p v-if="source.ranking_mode === 'reranker'" class="rag-source-ranking">
+            原 RRF 分数 {{ source.retrieval_score?.toFixed(4) ?? '—' }} · 原 RRF 排名
+            {{ source.retrieval_rank ?? '—' }}
+          </p>
           <p>
             {{ source.section_title || '未命名章节' }} · {{ location(source) }} ·
             {{ source.chunk_type }}<template v-if="source.language"> · {{ source.language }}</template>

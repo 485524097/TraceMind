@@ -2,7 +2,7 @@
 import { ElButton, ElEmpty, ElMessage } from 'element-plus'
 import { ref, watch } from 'vue'
 
-import { hybridSearch, semanticSearch } from '@/services/documents'
+import { hybridSearch, rerankedSearch, semanticSearch } from '@/services/documents'
 import type { SemanticSearchResult } from '@/types/document'
 
 const props = defineProps<{ knowledgeBaseId: string }>()
@@ -11,7 +11,7 @@ const language = ref('')
 const loading = ref(false)
 const searched = ref(false)
 const results = ref<SemanticSearchResult[]>([])
-const mode = ref<'hybrid' | 'dense'>('hybrid')
+const mode = ref<'reranker' | 'hybrid' | 'dense'>('reranker')
 
 watch(mode, () => {
   results.value = []
@@ -28,7 +28,12 @@ async function search(): Promise<void> {
   if (!query.value.trim() || loading.value) return
   loading.value = true
   try {
-    const searchFunction = mode.value === 'hybrid' ? hybridSearch : semanticSearch
+    const searchFunction =
+      mode.value === 'reranker'
+        ? rerankedSearch
+        : mode.value === 'hybrid'
+          ? hybridSearch
+          : semanticSearch
     const response = await searchFunction(
       props.knowledgeBaseId,
       query.value.trim(),
@@ -38,7 +43,11 @@ async function search(): Promise<void> {
     results.value = response.items
     searched.value = true
   } catch {
-    ElMessage.error('检索暂时不可用，请稍后重试')
+    ElMessage.error(
+      mode.value === 'reranker'
+        ? 'Reranker 暂时不可用，可切换到混合检索'
+        : '检索暂时不可用，请稍后重试',
+    )
   } finally {
     loading.value = false
   }
@@ -52,12 +61,13 @@ async function search(): Promise<void> {
         <div>
           <p class="eyebrow">RETRIEVAL DEBUG</p>
           <h2>检索调试</h2>
-          <p>对比 Dense 语义检索与 Dense + BM25 RRF 混合检索。</p>
+          <p>对比 Dense、Dense + BM25 RRF 与本地 Cross-Encoder 二阶段重排。</p>
         </div>
       </header>
       <label class="retrieval-mode-control">
         <span>检索模式</span>
         <select v-model="mode" aria-label="检索模式">
+          <option value="reranker">Reranker</option>
           <option value="hybrid">混合检索</option>
           <option value="dense">Dense 检索</option>
         </select>
@@ -81,10 +91,17 @@ async function search(): Promise<void> {
         <article v-for="result in results" :key="result.chunk_id" class="search-result-card">
           <header class="search-result-header">
             <strong>{{ result.document_name }} · V{{ result.version_number }}</strong>
-            <span class="search-result-score">
+            <span v-if="mode === 'reranker'" class="search-result-score">
+              Reranker 原始分数 {{ result.score.toFixed(4) }}
+            </span>
+            <span v-else class="search-result-score">
               {{ mode === 'hybrid' ? 'RRF 分数' : '余弦分数' }} {{ result.score.toFixed(4) }}
             </span>
           </header>
+          <p v-if="mode === 'reranker'" class="search-result-ranking">
+            原 RRF 分数 {{ result.retrieval_score?.toFixed(4) ?? '—' }} · 原 RRF 排名
+            {{ result.retrieval_rank ?? '—' }}
+          </p>
           <p class="search-result-reference">
             {{ result.section_title || '未命名章节' }} · {{ reference(result) }}
           </p>

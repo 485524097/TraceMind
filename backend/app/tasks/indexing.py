@@ -37,7 +37,7 @@ async def _index_document_version(document_version_id: UUID, *, force: bool) -> 
         settings.embedding_model_name,
         settings.embedding_dimension,
         settings.embedding_batch_size,
-        settings.embedding_device,
+        settings.resolved_index_embedding_device,
     )
     gateway = QdrantGateway(
         qdrant.client,

@@ -184,3 +184,69 @@ def test_hybrid_settings_reject_invalid_values(field: str, value: object) -> Non
 def test_dense_and_sparse_names_must_differ() -> None:
     with pytest.raises(ValidationError):
         Settings(qdrant_dense_vector_name="same", qdrant_sparse_vector_name="same")
+
+
+def test_reranker_defaults_and_embedding_device_fallbacks() -> None:
+    settings = Settings(_env_file=None)
+    assert settings.reranker_enabled is False
+    assert settings.reranker_base_url == "http://127.0.0.1:8011"
+    assert settings.rag_rerank_candidate_limit == 10
+    assert settings.reranker_max_candidates == 20
+    assert settings.reranker_batch_size == 2
+    assert settings.reranker_max_length == 1024
+    assert settings.reranker_dtype == "float16"
+    assert settings.reranker_max_concurrency == 1
+    assert settings.resolved_query_embedding_device == "auto"
+    assert settings.resolved_index_embedding_device == "auto"
+
+    fallback = Settings(
+        _env_file=None,
+        embedding_device="cuda",
+        query_embedding_device=None,
+        index_embedding_device=None,
+    )
+    assert fallback.resolved_query_embedding_device == "cuda"
+    assert fallback.resolved_index_embedding_device == "cuda"
+    split = Settings(
+        _env_file=None,
+        embedding_device="auto",
+        query_embedding_device="cpu",
+        index_embedding_device="cuda",
+    )
+    assert split.resolved_query_embedding_device == "cpu"
+    assert split.resolved_index_embedding_device == "cuda"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("reranker_timeout_seconds", 0),
+        ("reranker_batch_size", 0),
+        ("reranker_batch_size", 9),
+        ("reranker_max_length", 127),
+        ("reranker_max_length", 2049),
+        ("reranker_max_candidates", 0),
+        ("reranker_max_candidates", 21),
+        ("reranker_max_concurrency", 2),
+        ("reranker_dtype", "int8"),
+        ("rag_rerank_candidate_limit", 4),
+        ("rag_rerank_candidate_limit", 21),
+    ],
+)
+def test_reranker_settings_reject_invalid_values(field: str, value: object) -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **{field: value})
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "https://127.0.0.1:8011",
+        "http://0.0.0.0:8011",
+        "http://reranker:8011",
+        "http://localhost:8011/path",
+    ],
+)
+def test_reranker_base_url_must_be_local_http(value: str) -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, reranker_base_url=value)

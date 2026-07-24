@@ -27,6 +27,10 @@ const source: RagSource = {
   page_number: null,
   start_line: 10,
   end_line: 14,
+  ranking_mode: 'reranker',
+  retrieval_score: 0.7,
+  rerank_score: 0.91,
+  retrieval_rank: 2,
 }
 
 describe('RagAnswerPanel', () => {
@@ -68,6 +72,9 @@ describe('RagAnswerPanel', () => {
     expect(wrapper.text()).toContain('使用 Spring [S1]')
     expect(wrapper.text()).toContain('sample.md · V2')
     expect(wrapper.text()).toContain('第 10-14 行')
+    expect(wrapper.text()).toContain('Reranker 原始分数 0.9100')
+    expect(wrapper.text()).toContain('原 RRF 分数 0.7000')
+    expect(wrapper.text()).not.toContain('置信度')
     expect(wrapper.get('.rag-source-content').text()).toContain('<script>not html</script>')
     expect(wrapper.find('script').exists()).toBe(false)
     await wrapper.get('.rag-citation').trigger('click')

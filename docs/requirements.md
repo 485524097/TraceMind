@@ -40,7 +40,7 @@
 
 ## 暂不实现的功能
 
-当前阶段明确暂不实现 Reranker、Weighted RRF、检索评测集自动调参、Query Rewrite、Multi-query、HyDE、GraphRAG 和多轮对话历史。
+当前阶段明确暂不实现 Reranker 训练/微调、BGE 备用模型、Weighted RRF、检索评测集自动调参、Query Rewrite、Multi-query、HyDE、GraphRAG 和多轮对话历史。
 
 - 完整知识图谱
 - 多用户权限系统
@@ -74,7 +74,8 @@
 
 ## 第一阶段 RAG 边界
 
-第一条问答链路为单轮、无状态的 Citation-grounded Streaming RAG。默认召回方式为
-Dense + BM25 RRF Hybrid Retrieval；无来源时不调用 LLM。Sparse 召回可能改变
+第一条问答链路为单轮、无状态的 Citation-grounded Streaming RAG。默认检索方式为
+Dense + BM25 RRF Top 10 后使用本地 Cross-Encoder 重排到 Top 5；Reranker 不可用时
+回退 Hybrid RRF。无来源时不调用 LLM。Sparse 召回可能改变
 no-answer 行为，需要继续用真实资料验收。回答提供 `[Sx]` 与原始 Chunk 定位，但当前
-不实现对话历史、Agent、Tools 或 Reranker。
+不实现对话历史、Agent 或 Tools。

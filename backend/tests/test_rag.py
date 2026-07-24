@@ -1,11 +1,17 @@
 from collections.abc import AsyncGenerator
+from dataclasses import replace
 from unittest.mock import AsyncMock
 from uuid import uuid4
+
+import pytest
 
 from app.core.config import Settings
 from app.llm import LLMMessage, LLMProviderError, LLMStreamDelta
 from app.rag import StreamingCitationGuard, build_rag_context, build_rag_messages
+from app.reranker import RerankerUnavailableError
 from app.services.document_indexing import DocumentIndexingService, SemanticSearchResult
+from app.services.document_reranking import DocumentRerankingService
+from app.services.exceptions import HybridSearchUnavailableError
 from app.services.rag import NO_ANSWER_MESSAGE, RagService
 
 
@@ -106,7 +112,12 @@ async def test_rag_service_uses_hybrid_search_and_streams_grounded_answer() -> N
     provider = FakeProvider(
         [LLMStreamDelta("answer [S"), LLMStreamDelta("1]", finish_reason="stop")]
     )
-    settings = Settings(rag_retrieval_limit=4, rag_max_context_chars=2_000)
+    settings = Settings(
+        _env_file=None,
+        rag_retrieval_limit=4,
+        rag_rerank_candidate_limit=10,
+        rag_max_context_chars=2_000,
+    )
     service = RagService(indexing, provider, settings)
     knowledge_base_id, document_id = uuid4(), uuid4()
 
@@ -121,7 +132,7 @@ async def test_rag_service_uses_hybrid_search_and_streams_grounded_answer() -> N
     indexing.hybrid_search.assert_awaited_once_with(
         knowledge_base_id,
         query="question",
-        limit=4,
+        limit=10,
         language="java",
         document_id=document_id,
     )
@@ -129,6 +140,8 @@ async def test_rag_service_uses_hybrid_search_and_streams_grounded_answer() -> N
     assert [item[0] for item in events] == ["retrieval", "token", "token", "done"]
     assert events[-1][1]["grounded"] is True
     assert events[-1][1]["valid_citation_count"] == 1
+    assert events[-1][1]["retrieval_mode"] == "hybrid"
+    assert events[-1][1]["reranker_fallback"] is False
 
 
 async def test_rag_service_short_circuits_no_answer_without_llm() -> None:
@@ -163,3 +176,94 @@ async def test_rag_service_emits_safe_error_and_marks_uncited_answer_ungrounded(
     assert events[-1][0] == "error"
     assert events[-1][1]["message"] == "回答生成服务暂时不可用，请稍后重试。"
     assert "private" not in str(events[-1][1])
+
+
+async def test_rag_reranks_hybrid_candidates_and_preserves_final_source_order() -> None:
+    first = replace(
+        result("first"),
+        retrieval_score=0.8,
+        retrieval_rank=1,
+        ranking_mode="hybrid",
+    )
+    second = replace(
+        result("second"),
+        retrieval_score=0.7,
+        retrieval_rank=2,
+        ranking_mode="hybrid",
+    )
+    reranked_second = replace(
+        second,
+        score=4.2,
+        rerank_score=4.2,
+        ranking_mode="reranker",
+    )
+    reranked_first = replace(
+        first,
+        score=-1.0,
+        rerank_score=-1.0,
+        ranking_mode="reranker",
+    )
+    indexing = AsyncMock(spec=DocumentIndexingService)
+    indexing.hybrid_search.return_value = [first, second]
+    reranking = AsyncMock(spec=DocumentRerankingService)
+    reranking.rerank.return_value = [reranked_second, reranked_first]
+    llm = FakeProvider([LLMStreamDelta("answer [S1]")])
+    settings = Settings(_env_file=None, reranker_enabled=True)
+    service = RagService(indexing, llm, settings, reranking)
+
+    prepared = await service.prepare(uuid4(), query="question", language=None, document_id=None)
+    events = await collect(service, prepared)
+
+    indexing.hybrid_search.assert_awaited_once()
+    assert indexing.hybrid_search.await_args.kwargs["limit"] == 10
+    reranking.rerank.assert_awaited_once_with("question", [first, second], limit=2)
+    assert [source.content for source in prepared.context.sources] == ["second", "first"]
+    assert prepared.context.sources[0].retrieval_score == 0.7
+    assert prepared.context.sources[0].rerank_score == 4.2
+    assert prepared.retrieval_mode == "hybrid_reranker"
+    assert prepared.reranker_fallback is False
+    assert events[-1][1]["retrieval_mode"] == "hybrid_reranker"
+
+
+async def test_rag_reranker_failure_falls_back_and_still_calls_llm() -> None:
+    first = replace(result("first"), retrieval_score=0.8, retrieval_rank=1)
+    second = replace(result("second"), retrieval_score=0.7, retrieval_rank=2)
+    indexing = AsyncMock(spec=DocumentIndexingService)
+    indexing.hybrid_search.return_value = [first, second]
+    reranking = AsyncMock(spec=DocumentRerankingService)
+    reranking.rerank.side_effect = RerankerUnavailableError(reason="timeout")
+    llm = FakeProvider([LLMStreamDelta("fallback [S1]")])
+    service = RagService(
+        indexing,
+        llm,
+        Settings(_env_file=None, reranker_enabled=True),
+        reranking,
+    )
+
+    prepared = await service.prepare(uuid4(), query="question", language=None, document_id=None)
+    events = await collect(service, prepared)
+
+    assert [source.content for source in prepared.context.sources] == ["first", "second"]
+    assert prepared.retrieval_mode == "hybrid_fallback"
+    assert prepared.reranker_fallback is True
+    assert events[0][0] == "retrieval"
+    assert events[-1][0] == "done"
+    assert llm.calls == 1
+
+
+async def test_hybrid_failure_is_not_misclassified_as_reranker_fallback() -> None:
+    indexing = AsyncMock(spec=DocumentIndexingService)
+    indexing.hybrid_search.side_effect = HybridSearchUnavailableError(
+        "Hybrid search is unavailable"
+    )
+    reranking = AsyncMock(spec=DocumentRerankingService)
+    service = RagService(
+        indexing,
+        FakeProvider([]),
+        Settings(_env_file=None, reranker_enabled=True),
+        reranking,
+    )
+
+    with pytest.raises(HybridSearchUnavailableError):
+        await service.prepare(uuid4(), query="question", language=None, document_id=None)
+    reranking.rerank.assert_not_called()

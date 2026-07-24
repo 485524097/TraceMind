@@ -1,14 +1,15 @@
 # Citation-grounded Streaming RAG
 
-TraceMind 当前提供单轮、无状态的引用约束 RAG。它默认使用 Dense + BM25 RRF Hybrid
-Search 召回当前版本的 active generation，不包含对话历史、Agent、Tools 或 Reranker。
+TraceMind 当前提供单轮、无状态的引用约束 RAG。它默认使用 Dense + BM25 RRF
+召回当前版本 active generation 的前 10 个候选，再由独立本地 Cross-Encoder 重排到
+前 5 个，不包含对话历史、Agent 或 Tools。
 
 ## 请求链路
 
 `POST /api/v1/knowledge-bases/{knowledge_base_id}/rag/stream` 接收问题、可选语言和
-Document ID。服务复用 `DocumentIndexingService.hybrid_search()`。Dense Prefetch 使用
-现有阈值，BM25 Prefetch 和最终 RRF 不使用固定阈值；没有来源时返回 `no_answer`，
-不会调用 LLM。RRF score 只表示融合排名，不表示回答置信度。
+Document ID。Reranker 成功时 Source 的 score 是原始 Logit，同时保留 RRF score 和
+rank；该分数不是概率或置信度，不设置阈值。连接失败、超时、503、OOM 或响应无效时
+RAG 静默回退 Hybrid Top 5。没有来源时返回 `no_answer`，不会调用 LLM。
 
 Context Builder 保持检索顺序并按 Chunk ID 去重，只加入完整 Chunk。后续 Chunk超过
 `RAG_MAX_CONTEXT_CHARS` 时跳过，不从正文中间截断。Prompt 使用
@@ -68,5 +69,6 @@ uv run --no-sync pytest -m "not integration"
 OpenAI-compatible 服务后，可以在文档页面输入问题，确认答案逐步出现、引用按钮定位
 到原始 Chunk、停止按钮终止生成，并检查日志不包含问题、来源、答案或密钥。
 
-当前不保存页面刷新前后的问答历史。Dense Search API 仍保留用于检索调试对比；当前
-没有 Reranker、Weighted RRF 或检索评测集自动调参。
+当前不保存页面刷新前后的问答历史。Dense、Hybrid 与 Reranked API 均保留用于检索
+调试对比；当前没有 Reranker threshold、Weighted RRF 或检索评测集自动调参。后续需
+通过真实数据评估 MRR、Recall@K 与 nDCG。

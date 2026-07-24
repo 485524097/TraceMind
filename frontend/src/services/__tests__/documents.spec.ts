@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { apiRequest } from '@/services/api'
-import { hybridSearch, semanticSearch } from '@/services/documents'
+import { hybridSearch, rerankedSearch, semanticSearch } from '@/services/documents'
 
 vi.mock('@/services/api', () => ({
   apiRequest: vi.fn(),
@@ -37,6 +37,20 @@ describe('document search services', () => {
       {
         method: 'POST',
         body: JSON.stringify({ query: '配置中心', language: null, limit: 5 }),
+      },
+    )
+  })
+
+  it('posts reranked search to the dedicated endpoint', async () => {
+    mockedApiRequest.mockResolvedValue({ items: [] })
+
+    await rerankedSearch('kb-id', 'DiscoveryClient', 'java', 5)
+
+    expect(mockedApiRequest).toHaveBeenCalledWith(
+      '/api/v1/knowledge-bases/kb-id/search/reranked',
+      {
+        method: 'POST',
+        body: JSON.stringify({ query: 'DiscoveryClient', language: 'java', limit: 5 }),
       },
     )
   })
