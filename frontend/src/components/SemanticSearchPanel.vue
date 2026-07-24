@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ElButton, ElEmpty, ElMessage } from 'element-plus'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 
-import { semanticSearch } from '@/services/documents'
+import { hybridSearch, semanticSearch } from '@/services/documents'
 import type { SemanticSearchResult } from '@/types/document'
 
 const props = defineProps<{ knowledgeBaseId: string }>()
@@ -11,6 +11,12 @@ const language = ref('')
 const loading = ref(false)
 const searched = ref(false)
 const results = ref<SemanticSearchResult[]>([])
+const mode = ref<'hybrid' | 'dense'>('hybrid')
+
+watch(mode, () => {
+  results.value = []
+  searched.value = false
+})
 
 function reference(result: SemanticSearchResult): string {
   if (result.page_number) return `第 ${result.page_number} 页`
@@ -22,7 +28,8 @@ async function search(): Promise<void> {
   if (!query.value.trim() || loading.value) return
   loading.value = true
   try {
-    const response = await semanticSearch(
+    const searchFunction = mode.value === 'hybrid' ? hybridSearch : semanticSearch
+    const response = await searchFunction(
       props.knowledgeBaseId,
       query.value.trim(),
       language.value.trim() || null,
@@ -31,7 +38,7 @@ async function search(): Promise<void> {
     results.value = response.items
     searched.value = true
   } catch {
-    ElMessage.error('语义检索暂时不可用，请稍后重试')
+    ElMessage.error('检索暂时不可用，请稍后重试')
   } finally {
     loading.value = false
   }
@@ -43,11 +50,18 @@ async function search(): Promise<void> {
     <div class="semantic-search-content">
       <header class="semantic-search-heading">
         <div>
-          <p class="eyebrow">SEMANTIC SEARCH</p>
-          <h2>语义检索</h2>
-          <p>使用 Dense Embedding 查询当前版本已激活的索引。</p>
+          <p class="eyebrow">RETRIEVAL DEBUG</p>
+          <h2>检索调试</h2>
+          <p>对比 Dense 语义检索与 Dense + BM25 RRF 混合检索。</p>
         </div>
       </header>
+      <label class="retrieval-mode-control">
+        <span>检索模式</span>
+        <select v-model="mode" aria-label="检索模式">
+          <option value="hybrid">混合检索</option>
+          <option value="dense">Dense 检索</option>
+        </select>
+      </label>
       <form class="semantic-search-form" @submit.prevent="search">
         <label>
           <span class="sr-only">语义查询</span>
@@ -67,7 +81,9 @@ async function search(): Promise<void> {
         <article v-for="result in results" :key="result.chunk_id" class="search-result-card">
           <header class="search-result-header">
             <strong>{{ result.document_name }} · V{{ result.version_number }}</strong>
-            <span class="search-result-score">{{ result.score.toFixed(4) }}</span>
+            <span class="search-result-score">
+              {{ mode === 'hybrid' ? 'RRF 分数' : '余弦分数' }} {{ result.score.toFixed(4) }}
+            </span>
           </header>
           <p class="search-result-reference">
             {{ result.section_title || '未命名章节' }} · {{ reference(result) }}

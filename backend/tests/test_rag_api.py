@@ -31,7 +31,15 @@ class FakeRagService:
 
 
 async def test_rag_api_returns_503_when_llm_is_disabled() -> None:
-    app = create_app(Settings(app_env="test"))
+    app = create_app(
+        Settings(
+            _env_file=None,
+            app_env="test",
+            llm_base_url=None,
+            llm_model=None,
+            llm_api_key=None,
+        )
+    )
     async for client in client_for(app):
         response = await client.post(
             f"/api/v1/knowledge-bases/{uuid4()}/rag/stream",

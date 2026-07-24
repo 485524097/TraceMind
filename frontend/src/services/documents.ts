@@ -85,6 +85,18 @@ export function semanticSearch(
   })
 }
 
+export function hybridSearch(
+  knowledgeBaseId: string,
+  query: string,
+  language: string | null,
+  limit = 5,
+): Promise<SemanticSearchResponse> {
+  return apiRequest(`/api/v1/knowledge-bases/${knowledgeBaseId}/search/hybrid`, {
+    method: 'POST',
+    body: JSON.stringify({ query, language: language || null, limit }),
+  })
+}
+
 export function listDocumentChunks(
   knowledgeBaseId: string,
   documentId: string,

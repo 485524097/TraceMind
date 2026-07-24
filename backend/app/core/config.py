@@ -33,8 +33,14 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://127.0.0.1:6333"
     qdrant_collection_name: str = "tracemind_chunks"
     qdrant_dense_vector_name: str = "dense_v1"
+    qdrant_sparse_vector_name: str = "bm25_v1"
+    qdrant_bm25_model: str = "qdrant/bm25"
+    qdrant_bm25_tokenizer: str = "multilingual"
+    qdrant_bm25_language: str = "none"
     qdrant_operation_timeout_seconds: int = 60
     qdrant_upsert_batch_size: int = 64
+    hybrid_dense_prefetch_limit: int = 20
+    hybrid_sparse_prefetch_limit: int = 20
     semantic_search_score_threshold: float = 0.50
     llm_base_url: str | None = None
     llm_api_key: SecretStr | None = None
@@ -140,11 +146,23 @@ class Settings(BaseSettings):
             "QDRANT_URL": self.qdrant_url,
             "QDRANT_COLLECTION_NAME": self.qdrant_collection_name,
             "QDRANT_DENSE_VECTOR_NAME": self.qdrant_dense_vector_name,
+            "QDRANT_SPARSE_VECTOR_NAME": self.qdrant_sparse_vector_name,
+            "QDRANT_BM25_MODEL": self.qdrant_bm25_model,
+            "QDRANT_BM25_TOKENIZER": self.qdrant_bm25_tokenizer,
+            "QDRANT_BM25_LANGUAGE": self.qdrant_bm25_language,
             "EMBEDDING_MODEL_NAME": self.embedding_model_name,
         }
         missing = [name for name, value in required.items() if not str(value).strip()]
         if missing:
             raise ValueError(f"Required settings are empty: {', '.join(missing)}")
+        if self.qdrant_sparse_vector_name == self.qdrant_dense_vector_name:
+            raise ValueError("Dense and sparse vector names must be different")
+        for name, value in {
+            "HYBRID_DENSE_PREFETCH_LIMIT": self.hybrid_dense_prefetch_limit,
+            "HYBRID_SPARSE_PREFETCH_LIMIT": self.hybrid_sparse_prefetch_limit,
+        }.items():
+            if not 1 <= value <= 100:
+                raise ValueError(f"{name} must be between 1 and 100")
         index_values = {
             "EMBEDDING_DIMENSION": self.embedding_dimension,
             "EMBEDDING_BATCH_SIZE": self.embedding_batch_size,

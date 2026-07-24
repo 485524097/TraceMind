@@ -13,7 +13,7 @@ from app.api.routes.indexing import (
 )
 from app.llm import LLMProvider
 from app.schemas.rag import RagStreamRequest
-from app.services.exceptions import SemanticSearchUnavailableError
+from app.services.exceptions import HybridSearchUnavailableError
 from app.services.rag import PreparedRag, RagService
 
 router = APIRouter(prefix="/knowledge-bases/{knowledge_base_id}/rag", tags=["rag"])
@@ -49,8 +49,8 @@ async def prepare_rag_stream(
             language=body.language,
             document_id=body.document_id,
         )
-    except SemanticSearchUnavailableError as exc:
-        raise HTTPException(status_code=503, detail="Semantic search is unavailable") from exc
+    except HybridSearchUnavailableError as exc:
+        raise HTTPException(status_code=503, detail="Hybrid search is unavailable") from exc
     return service, prepared
 
 

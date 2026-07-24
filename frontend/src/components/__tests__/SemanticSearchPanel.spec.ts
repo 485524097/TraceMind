@@ -3,11 +3,12 @@ import { ElMessage } from 'element-plus'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import SemanticSearchPanel from '@/components/SemanticSearchPanel.vue'
-import { semanticSearch } from '@/services/documents'
+import { hybridSearch, semanticSearch } from '@/services/documents'
 import type { SemanticSearchResult } from '@/types/document'
 
-vi.mock('@/services/documents', () => ({ semanticSearch: vi.fn() }))
+vi.mock('@/services/documents', () => ({ hybridSearch: vi.fn(), semanticSearch: vi.fn() }))
 const mockedSearch = vi.mocked(semanticSearch)
+const mockedHybridSearch = vi.mocked(hybridSearch)
 
 function result(content = 'class DocumentService'): SemanticSearchResult {
   return {
@@ -40,11 +41,12 @@ async function submit(wrapper: ReturnType<typeof mount>, query = 'service layer'
 describe('SemanticSearchPanel', () => {
   beforeEach(() => {
     mockedSearch.mockReset()
+    mockedHybridSearch.mockReset()
     vi.spyOn(ElMessage, 'error').mockImplementation(() => ({ close: vi.fn() }))
   })
 
   it('uses the dedicated layout, limit five, language filter, and traceable result cards', async () => {
-    mockedSearch.mockResolvedValue({ items: [result()] })
+    mockedHybridSearch.mockResolvedValue({ items: [result()] })
     const wrapper = mount(SemanticSearchPanel, { props: { knowledgeBaseId: 'kb-id' } })
 
     expect(wrapper.find('.semantic-search-content').exists()).toBe(true)
@@ -53,17 +55,17 @@ describe('SemanticSearchPanel', () => {
     await wrapper.get('input[aria-label="语言过滤"]').setValue('python')
     await submit(wrapper)
 
-    expect(mockedSearch).toHaveBeenCalledWith('kb-id', 'service layer', 'python', 5)
+    expect(mockedHybridSearch).toHaveBeenCalledWith('kb-id', 'service layer', 'python', 5)
     expect(wrapper.findAll('.search-result-card')).toHaveLength(1)
     expect(wrapper.text()).toContain('service.py · V2')
-    expect(wrapper.text()).toContain('0.9123')
+    expect(wrapper.text()).toContain('RRF 分数 0.9123')
     expect(wrapper.text()).toContain('Document service')
     expect(wrapper.text()).toContain('第 10-14 行')
     expect(wrapper.text()).toContain('class DocumentService')
   })
 
   it('shows a neutral empty state when no result clears the threshold', async () => {
-    mockedSearch.mockResolvedValue({ items: [] })
+    mockedHybridSearch.mockResolvedValue({ items: [] })
     const wrapper = mount(SemanticSearchPanel, { props: { knowledgeBaseId: 'kb-id' } })
 
     await submit(wrapper, 'unanswered question')
@@ -74,18 +76,18 @@ describe('SemanticSearchPanel', () => {
   })
 
   it('keeps API failures separate from an empty result', async () => {
-    mockedSearch.mockRejectedValue(new Error('unavailable'))
+    mockedHybridSearch.mockRejectedValue(new Error('unavailable'))
     const wrapper = mount(SemanticSearchPanel, { props: { knowledgeBaseId: 'kb-id' } })
 
     await submit(wrapper)
 
-    expect(ElMessage.error).toHaveBeenCalledWith('语义检索暂时不可用，请稍后重试')
+    expect(ElMessage.error).toHaveBeenCalledWith('检索暂时不可用，请稍后重试')
     expect(wrapper.text()).not.toContain('未找到足够相关的内容')
   })
 
   it('keeps long original content once in the DOM without rendering HTML', async () => {
     const longContent = `<strong>unsafe</strong>\n${'完整正文 '.repeat(400)}`
-    mockedSearch.mockResolvedValue({ items: [result(longContent)] })
+    mockedHybridSearch.mockResolvedValue({ items: [result(longContent)] })
     const wrapper = mount(SemanticSearchPanel, { props: { knowledgeBaseId: 'kb-id' } })
 
     await submit(wrapper)
@@ -94,5 +96,24 @@ describe('SemanticSearchPanel', () => {
     expect(content.element.textContent).toBe(longContent)
     expect(content.find('strong').exists()).toBe(false)
     expect(wrapper.findAll('.search-result-card')).toHaveLength(1)
+  })
+
+  it('defaults to hybrid and switches to dense while clearing old results', async () => {
+    mockedHybridSearch.mockResolvedValue({ items: [result()] })
+    mockedSearch.mockResolvedValue({ items: [result('dense result')] })
+    const wrapper = mount(SemanticSearchPanel, { props: { knowledgeBaseId: 'kb-id' } })
+
+    const modeSelect = wrapper.get('select[aria-label="检索模式"]')
+    expect((modeSelect.element as HTMLSelectElement).value).toBe('hybrid')
+    await submit(wrapper)
+    expect(wrapper.text()).toContain('RRF 分数')
+
+    await modeSelect.setValue('dense')
+    await flushPromises()
+    expect(wrapper.findAll('.search-result-card')).toHaveLength(0)
+    await submit(wrapper)
+
+    expect(mockedSearch).toHaveBeenCalledWith('kb-id', 'service layer', null, 5)
+    expect(wrapper.text()).toContain('余弦分数 0.9123')
   })
 })

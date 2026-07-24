@@ -39,6 +39,22 @@
   margin: 24px 0;
 }
 
+.retrieval-mode-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  color: #68748a;
+}
+
+.retrieval-mode-control select {
+  padding: 8px 30px 8px 10px;
+  border: 1px solid #cfd7e3;
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+}
+
 .semantic-search-form label,
 .semantic-search-form input {
   width: 100%;

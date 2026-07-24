@@ -92,6 +92,10 @@ class SemanticSearchUnavailableError(DocumentError):
     pass
 
 
+class HybridSearchUnavailableError(DocumentError):
+    pass
+
+
 __all__ = [
     "DocumentAlreadyParsedError",
     "DocumentAlreadyProcessingError",

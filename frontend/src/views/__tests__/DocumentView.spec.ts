@@ -27,6 +27,7 @@ vi.mock('@/services/documents', () => ({
   requestDocumentParse: vi.fn(),
   requestDocumentIndex: vi.fn(),
   semanticSearch: vi.fn(),
+  hybridSearch: vi.fn(),
   listDocumentChunks: vi.fn(),
   uploadDocument: vi.fn(),
 }))

@@ -100,9 +100,9 @@ async def collect(service: RagService, prepared: object) -> list[tuple[str, dict
     return [event async for event in service.stream_answer(prepared)]  # type: ignore[arg-type]
 
 
-async def test_rag_service_uses_dense_search_and_streams_grounded_answer() -> None:
+async def test_rag_service_uses_hybrid_search_and_streams_grounded_answer() -> None:
     indexing = AsyncMock(spec=DocumentIndexingService)
-    indexing.search.return_value = [result("source")]
+    indexing.hybrid_search.return_value = [result("source")]
     provider = FakeProvider(
         [LLMStreamDelta("answer [S"), LLMStreamDelta("1]", finish_reason="stop")]
     )
@@ -118,13 +118,14 @@ async def test_rag_service_uses_dense_search_and_streams_grounded_answer() -> No
     )
     events = await collect(service, prepared)
 
-    indexing.search.assert_awaited_once_with(
+    indexing.hybrid_search.assert_awaited_once_with(
         knowledge_base_id,
         query="question",
         limit=4,
         language="java",
         document_id=document_id,
     )
+    indexing.search.assert_not_awaited()
     assert [item[0] for item in events] == ["retrieval", "token", "token", "done"]
     assert events[-1][1]["grounded"] is True
     assert events[-1][1]["valid_citation_count"] == 1
@@ -132,7 +133,7 @@ async def test_rag_service_uses_dense_search_and_streams_grounded_answer() -> No
 
 async def test_rag_service_short_circuits_no_answer_without_llm() -> None:
     indexing = AsyncMock(spec=DocumentIndexingService)
-    indexing.search.return_value = []
+    indexing.hybrid_search.return_value = []
     provider = FakeProvider([])
     service = RagService(indexing, provider, Settings())
     prepared = await service.prepare(uuid4(), query="unknown", language=None, document_id=None)
@@ -144,7 +145,7 @@ async def test_rag_service_short_circuits_no_answer_without_llm() -> None:
 
 async def test_rag_service_emits_safe_error_and_marks_uncited_answer_ungrounded() -> None:
     indexing = AsyncMock(spec=DocumentIndexingService)
-    indexing.search.return_value = [result("source")]
+    indexing.hybrid_search.return_value = [result("source")]
     provider = FakeProvider([LLMStreamDelta("answer without citation")])
     service = RagService(indexing, provider, Settings())
     prepared = await service.prepare(uuid4(), query="q", language=None, document_id=None)

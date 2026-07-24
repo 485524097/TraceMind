@@ -23,7 +23,7 @@
 
 > 导入一个包含 Java、JSP、JavaScript、SQL、Markdown 和 PDF 的项目资料库，用户可以通过关键词或自然语言查询代码、业务逻辑和历史问题，并获得带文件路径、页码或代码行号的回答。
 
-当前交付已覆盖知识库管理、原始文件本地持久化、增量版本管理，以及 Markdown、UTF-8 文本、代码、PDF 文本层和 DOCX 的异步解析与可追溯 Chunk。检索索引与问答仍属于后续交付。
+当前交付已覆盖知识库管理、原始文件本地持久化、增量版本管理，Markdown、UTF-8 文本、代码、PDF 文本层和 DOCX 的异步解析与可追溯 Chunk，以及 Dense + BM25 RRF 混合检索和单轮引用约束流式问答。
 
 ## MVP 功能范围
 
@@ -40,7 +40,7 @@
 
 ## 暂不实现的功能
 
-当前 Dense 语义检索阶段明确暂不实现 BM25、Sparse Vector、Hybrid Search、Reranker、RAG 和 LLM Answer。
+当前阶段明确暂不实现 Reranker、Weighted RRF、检索评测集自动调参、Query Rewrite、Multi-query、HyDE、GraphRAG 和多轮对话历史。
 
 - 完整知识图谱
 - 多用户权限系统
@@ -74,6 +74,7 @@
 
 ## 第一阶段 RAG 边界
 
-第一条问答链路为单轮、无状态的 Citation-grounded Streaming RAG。Dense Retrieval 是
-唯一召回方式；无足够相关来源时不调用 LLM。回答提供 `[Sx]` 与原始 Chunk 定位，但
-当前不实现对话历史、Agent、Tools、Hybrid Search 或 Reranker。
+第一条问答链路为单轮、无状态的 Citation-grounded Streaming RAG。默认召回方式为
+Dense + BM25 RRF Hybrid Retrieval；无来源时不调用 LLM。Sparse 召回可能改变
+no-answer 行为，需要继续用真实资料验收。回答提供 `[Sx]` 与原始 Chunk 定位，但当前
+不实现对话历史、Agent、Tools 或 Reranker。
