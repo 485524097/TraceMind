@@ -273,3 +273,5 @@ logs/
 dist/
 build/
 coverage/
+backend/evals/retrieval/reports/*
+!backend/evals/retrieval/reports/.gitkeep

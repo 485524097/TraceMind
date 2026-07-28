@@ -1,0 +1,25 @@
+{
+  "dataset_version": "synthetic-retrieval-v1",
+  "corpus_filename": "synthetic_retrieval_corpus_v1.md",
+  "sha256": "85e0e31aa41a6e0920d92ccb527a84196a99fb7e2f180bf6facda37e342997b4",
+  "created_at": "2026-07-27T00:00:00+08:00",
+  "document_description": "完全虚构的星澜浮岛能源编排系统技术手册，仅用于固定中文检索评测。",
+  "expected_section_count": 20,
+  "expected_question_count": 24,
+  "chunking_snapshot": {
+    "implementation": "DeterministicChunker",
+    "max_chars": 1800,
+    "overlap_chars": 200,
+    "line_metadata": "ParsedBlock line range propagated to ChunkDraft"
+  },
+  "embedding_snapshot": {
+    "model": "Qwen/Qwen3-Embedding-0.6B",
+    "dimension": 1024,
+    "dense_vector": "dense_v1",
+    "sparse_vector": "bm25_v1",
+    "sparse_model": "qdrant/bm25",
+    "sparse_tokenizer": "multilingual",
+    "fusion": "Qdrant RRF"
+  },
+  "notes": "只有语料 Markdown 应上传到 TraceMind；本 Manifest、JSONL、清单和报告不得上传。"
+}
