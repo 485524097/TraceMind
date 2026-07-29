@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.conversation import Conversation
+from app.models.conversation import Conversation, ConversationMessage
 from app.models.knowledge_base import KnowledgeBase
 from app.repositories.conversation import ConversationRepository
 from app.repositories.knowledge_base import KnowledgeBaseRepository
@@ -38,6 +38,7 @@ def make_service() -> tuple[ConversationService, AsyncMock, AsyncMock, AsyncMock
     session = AsyncMock(spec=AsyncSession)
     repository = AsyncMock(spec=ConversationRepository)
     knowledge_bases = AsyncMock(spec=KnowledgeBaseRepository)
+    repository.list_messages.return_value = []
     service = ConversationService(
         cast(AsyncSession, session),
         cast(ConversationRepository, repository),
@@ -104,6 +105,7 @@ async def test_first_question_creates_local_title_and_completed_user_message() -
     )
     assert exchange.conversation_id == conversation.id
     assert exchange.assistant_message_id is not None
+    assert exchange.history == ()
     session.commit.assert_awaited_once()
 
 
@@ -165,3 +167,86 @@ async def test_finish_exchange_rejects_non_terminal_status() -> None:
             sources=None,
             generation_metadata=None,
         )
+
+
+def historical_message(
+    role: str,
+    status: str,
+    content: str,
+    conversation_id: object,
+) -> ConversationMessage:
+    return ConversationMessage(
+        id=uuid4(),
+        conversation_id=conversation_id,  # type: ignore[arg-type]
+        role=role,
+        status=status,
+        content=content,
+        created_at=datetime.now(UTC),
+    )
+
+
+async def test_history_snapshot_precedes_current_message_and_excludes_incomplete_turns() -> None:
+    service, _, repository, _ = make_service()
+    conversation = make_conversation()
+    repository.get_scoped.return_value = conversation
+    repository.list_messages.return_value = [
+        historical_message("user", "completed", "完整问题", conversation.id),
+        historical_message("assistant", "completed", "完整回答", conversation.id),
+        historical_message("user", "completed", "失败问题", conversation.id),
+        historical_message("assistant", "failed", "失败回答", conversation.id),
+        historical_message("user", "completed", "取消问题", conversation.id),
+        historical_message("assistant", "cancelled", "取消回答", conversation.id),
+        historical_message("user", "completed", "无答案问题", conversation.id),
+        historical_message("assistant", "no_answer", "无答案", conversation.id),
+        historical_message("user", "completed", "残缺问题", conversation.id),
+    ]
+
+    exchange = await service.begin_exchange(
+        conversation.knowledge_base_id,
+        conversation.id,
+        query="当前问题",
+        trace_id=uuid4(),
+    )
+
+    assert [(turn.user, turn.assistant) for turn in exchange.history] == [("完整问题", "完整回答")]
+    assert all(turn.user != "当前问题" for turn in exchange.history)
+    repository.list_messages.assert_awaited_once_with(conversation.id)
+
+
+async def test_history_limits_keep_latest_complete_turns_in_old_to_new_order() -> None:
+    service, _, repository, _ = make_service()
+    conversation = make_conversation()
+    repository.get_scoped.return_value = conversation
+    repository.list_messages.return_value = [
+        item
+        for index in range(6)
+        for item in (
+            historical_message("user", "completed", f"Q{index}", conversation.id),
+            historical_message("assistant", "completed", f"A{index}", conversation.id),
+        )
+    ]
+    exchange = await service.begin_exchange(
+        conversation.knowledge_base_id,
+        conversation.id,
+        query="当前",
+        trace_id=uuid4(),
+        history_max_turns=4,
+        history_max_chars=8,
+    )
+    assert [(turn.user, turn.assistant) for turn in exchange.history] == [
+        ("Q4", "A4"),
+        ("Q5", "A5"),
+    ]
+
+
+async def test_cross_scope_failure_does_not_read_history() -> None:
+    service, _, repository, _ = make_service()
+    repository.get_scoped.return_value = None
+    with pytest.raises(ConversationNotFoundError):
+        await service.begin_exchange(
+            uuid4(),
+            uuid4(),
+            query="当前",
+            trace_id=uuid4(),
+        )
+    repository.list_messages.assert_not_awaited()

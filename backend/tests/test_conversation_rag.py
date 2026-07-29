@@ -7,13 +7,21 @@ from uuid import UUID, uuid4
 import pytest
 
 from app.api.routes.rag import PreparedRagStream, stream_rag_answer
-from app.services.conversation import ConversationExchange, ConversationService
+from app.services.conversation import (
+    ConversationExchange,
+    ConversationService,
+    ConversationTurn,
+)
 
 
 @dataclass
 class FakePrepared:
     trace_id: UUID
     knowledge_base_id: UUID
+    query_rewrite_mode: str = "rewritten"
+    query_rewrite_latency_ms: int = 7
+    conversation_history: tuple[ConversationTurn, ...] = (ConversationTurn("历史问题", "历史回答"),)
+    retrieval_query: str = "独立检索问题"
 
 
 @dataclass
@@ -88,6 +96,10 @@ async def test_completed_answer_persists_guarded_content_sources_and_metadata(
         "retrieval_mode": retrieval_mode,
         "reranker_fallback": fallback,
         "grounded": True,
+        "query_rewrite_mode": "rewritten",
+        "query_rewrite_latency_ms": 7,
+        "history_turn_count": 1,
+        "retrieval_query": "独立检索问题",
     }
     stream, persistence, exchange = prepared_stream(
         [
@@ -148,7 +160,14 @@ async def test_llm_error_persists_only_safe_public_error() -> None:
         "status": "failed",
         "content": "回答生成服务暂时不可用，请稍后重试。",
         "sources": [],
-        "generation_metadata": {"error_code": "llm_unavailable"},
+        "generation_metadata": {
+            "error_code": "llm_unavailable",
+            "llm_first_token_latency_ms": 0,
+            "query_rewrite_mode": "rewritten",
+            "query_rewrite_latency_ms": 7,
+            "history_turn_count": 1,
+            "retrieval_query": "独立检索问题",
+        },
     }
     assert "upstream" not in str(kwargs).lower()
     assert persistence.finish_exchange.await_args.args == (exchange,)
@@ -168,7 +187,14 @@ async def test_disconnect_persists_cancelled_without_pending_message() -> None:
         status="cancelled",
         content="部分回答",
         sources=[],
-        generation_metadata={"cancelled": True},
+        generation_metadata={
+            "cancelled": True,
+            "query_rewrite_mode": "rewritten",
+            "query_rewrite_latency_ms": 7,
+            "history_turn_count": 1,
+            "retrieval_query": "独立检索问题",
+            "llm_first_token_latency_ms": 0,
+        },
     )
 
 
@@ -201,5 +227,12 @@ async def test_task_cancellation_persists_cancelled_status() -> None:
         status="cancelled",
         content="",
         sources=[],
-        generation_metadata={"cancelled": True},
+        generation_metadata={
+            "cancelled": True,
+            "query_rewrite_mode": "rewritten",
+            "query_rewrite_latency_ms": 7,
+            "history_turn_count": 1,
+            "retrieval_query": "独立检索问题",
+            "llm_first_token_latency_ms": 0,
+        },
     )
