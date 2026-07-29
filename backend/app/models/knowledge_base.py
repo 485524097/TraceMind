@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base
 
 if TYPE_CHECKING:
+    from app.models.conversation import Conversation
     from app.models.document import Document
 
 
@@ -31,6 +32,12 @@ class KnowledgeBase(Base):
     )
     documents: Mapped[list["Document"]] = relationship(
         back_populates="knowledge_base",
+        passive_deletes=True,
+        lazy="raise",
+    )
+    conversations: Mapped[list["Conversation"]] = relationship(
+        back_populates="knowledge_base",
+        cascade="all, delete-orphan",
         passive_deletes=True,
         lazy="raise",
     )

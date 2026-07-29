@@ -7,6 +7,7 @@ class RagStreamRequest(BaseModel):
     query: str = Field(min_length=1, max_length=2_000)
     language: str | None = Field(default=None, max_length=32)
     document_id: UUID | None = None
+    conversation_id: UUID | None = None
 
     @field_validator("query")
     @classmethod

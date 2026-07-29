@@ -96,6 +96,16 @@ class HybridSearchUnavailableError(DocumentError):
     pass
 
 
+class ConversationError(Exception):
+    """Base exception for conversation business rules."""
+
+
+class ConversationNotFoundError(ConversationError):
+    def __init__(self, conversation_id: UUID) -> None:
+        super().__init__(f"Conversation {conversation_id} was not found")
+        self.conversation_id = conversation_id
+
+
 __all__ = [
     "DocumentAlreadyParsedError",
     "DocumentAlreadyProcessingError",

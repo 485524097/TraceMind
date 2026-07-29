@@ -132,8 +132,9 @@ describe('DocumentView', () => {
     expect(wrapper.text()).toContain('2.0 KB')
     expect(wrapper.text()).toContain('解析完成')
     expect(wrapper.text()).toContain('2')
-    const html = wrapper.html()
-    expect(html.indexOf('rag-answer-panel')).toBeLessThan(html.indexOf('semantic-search-panel'))
+    expect(wrapper.text()).toContain('进入知识库问答')
+    expect(wrapper.find('.rag-answer-panel').exists()).toBe(false)
+    expect(wrapper.find('.semantic-search-panel').exists()).toBe(true)
   })
 
   it('shows an empty state', async () => {
