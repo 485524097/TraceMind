@@ -23,6 +23,10 @@ export interface RagSource {
   page_number: number | null
   start_line: number | null
   end_line: number | null
+  ranking_mode?: string | null
+  retrieval_score?: number | null
+  rerank_score?: number | null
+  retrieval_rank?: number | null
 }
 
 export interface RagRetrievalEvent {
@@ -50,6 +54,9 @@ export interface RagDoneEvent {
   retrieval_latency_ms: number
   llm_latency_ms: number
   total_latency_ms: number
+  retrieval_mode?: string
+  rerank_latency_ms?: number
+  reranker_fallback?: boolean
 }
 
 export interface RagErrorEvent {

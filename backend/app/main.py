@@ -12,6 +12,7 @@ from app.db.session import Database
 from app.integrations.qdrant import QdrantClient
 from app.integrations.redis import RedisClient
 from app.llm import OpenAICompatibleLLMProvider
+from app.reranker import HttpRerankerProvider
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.database = Database(app_settings)
         app.state.redis_client = RedisClient(app_settings)
         app.state.qdrant_client = QdrantClient(app_settings)
+        app.state.reranker_provider = (
+            HttpRerankerProvider(
+                app_settings.reranker_base_url,
+                read_timeout_seconds=app_settings.reranker_timeout_seconds,
+                max_candidates=app_settings.reranker_max_candidates,
+            )
+            if app_settings.reranker_enabled
+            else None
+        )
         app.state.llm_provider = (
             OpenAICompatibleLLMProvider(
                 base_url=app_settings.llm_base_url or "",
@@ -45,6 +55,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
+            if app.state.reranker_provider is not None:
+                try:
+                    await app.state.reranker_provider.close()
+                except Exception:
+                    logger.warning("Reranker provider did not close cleanly")
             if app.state.llm_provider is not None:
                 try:
                     await app.state.llm_provider.close()

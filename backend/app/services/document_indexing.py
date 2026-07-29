@@ -61,6 +61,10 @@ class SemanticSearchResult:
     page_number: int | None
     start_line: int | None
     end_line: int | None
+    ranking_mode: str | None = None
+    retrieval_score: float | None = None
+    rerank_score: float | None = None
+    retrieval_rank: int | None = None
 
 
 def deterministic_point_id(version_id: UUID, generation: UUID, chunk_index: int) -> UUID:
@@ -281,7 +285,9 @@ class DocumentIndexingService:
                 score_threshold=self.settings.semantic_search_score_threshold,
                 excluded_chunk_types=("heading",),
             )
-            return [self._search_result(hit.score, hit.payload) for hit in hits]
+            return [
+                self._search_result(hit.score, hit.payload, ranking_mode="dense") for hit in hits
+            ]
         except (EmbeddingError, VectorIndexError) as exc:
             raise SemanticSearchUnavailableError("Semantic search is unavailable") from exc
 
@@ -314,7 +320,16 @@ class DocumentIndexingService:
                 dense_score_threshold=self.settings.semantic_search_score_threshold,
                 excluded_chunk_types=("heading",),
             )
-            return [self._search_result(hit.score, hit.payload) for hit in hits]
+            return [
+                self._search_result(
+                    hit.score,
+                    hit.payload,
+                    ranking_mode="hybrid",
+                    retrieval_score=hit.score,
+                    retrieval_rank=rank,
+                )
+                for rank, hit in enumerate(hits, start=1)
+            ]
         except (EmbeddingError, VectorIndexError) as exc:
             raise HybridSearchUnavailableError("Hybrid search is unavailable") from exc
 
@@ -452,7 +467,14 @@ class DocumentIndexingService:
         )
 
     @staticmethod
-    def _search_result(score: float, payload: dict[str, Any]) -> SemanticSearchResult:
+    def _search_result(
+        score: float,
+        payload: dict[str, Any],
+        *,
+        ranking_mode: str,
+        retrieval_score: float | None = None,
+        retrieval_rank: int | None = None,
+    ) -> SemanticSearchResult:
         try:
             return SemanticSearchResult(
                 score=score,
@@ -474,6 +496,9 @@ class DocumentIndexingService:
                 page_number=int(payload["page_number"]) if payload.get("page_number") else None,
                 start_line=int(payload["start_line"]) if payload.get("start_line") else None,
                 end_line=int(payload["end_line"]) if payload.get("end_line") else None,
+                ranking_mode=ranking_mode,
+                retrieval_score=retrieval_score,
+                retrieval_rank=retrieval_rank,
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise SemanticSearchUnavailableError("Semantic search payload is invalid") from exc
