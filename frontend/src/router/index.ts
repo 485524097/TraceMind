@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import HomeView from '@/views/HomeView.vue'
+import ConversationView from '@/views/ConversationView.vue'
 import DocumentView from '@/views/DocumentView.vue'
 import KnowledgeBaseView from '@/views/KnowledgeBaseView.vue'
 
@@ -13,6 +14,11 @@ export default createRouter({
       path: '/knowledge-bases/:knowledgeBaseId/documents',
       name: 'documents',
       component: DocumentView,
+    },
+    {
+      path: '/knowledge-bases/:knowledgeBaseId/chat',
+      name: 'conversation',
+      component: ConversationView,
     },
   ],
 })

@@ -2,6 +2,12 @@ export interface RagStreamRequest {
   query: string
   language?: string | null
   document_id?: string | null
+  conversation_id?: string | null
+}
+
+export interface ConversationEventFields {
+  conversation_id?: string
+  message_id?: string
 }
 
 export interface RagSource {
@@ -29,23 +35,23 @@ export interface RagSource {
   retrieval_rank?: number | null
 }
 
-export interface RagRetrievalEvent {
+export interface RagRetrievalEvent extends ConversationEventFields {
   trace_id: string
   source_count: number
   sources: RagSource[]
 }
 
-export interface RagTokenEvent {
+export interface RagTokenEvent extends ConversationEventFields {
   trace_id: string
   text: string
 }
 
-export interface RagNoAnswerEvent {
+export interface RagNoAnswerEvent extends ConversationEventFields {
   trace_id: string
   message: string
 }
 
-export interface RagDoneEvent {
+export interface RagDoneEvent extends ConversationEventFields {
   trace_id: string
   finish_reason: string
   grounded: boolean
@@ -59,7 +65,7 @@ export interface RagDoneEvent {
   reranker_fallback?: boolean
 }
 
-export interface RagErrorEvent {
+export interface RagErrorEvent extends ConversationEventFields {
   trace_id: string
   code: string
   message: string

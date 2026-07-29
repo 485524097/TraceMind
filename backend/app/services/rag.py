@@ -51,9 +51,10 @@ class RagService:
         query: str,
         language: str | None,
         document_id: UUID | None,
+        trace_id: UUID | None = None,
     ) -> PreparedRag:
         started_at = perf_counter()
-        trace_id = uuid4()
+        trace_id = trace_id or uuid4()
         candidates = await self.indexing_service.hybrid_search(
             knowledge_base_id,
             query=query,

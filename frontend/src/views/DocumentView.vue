@@ -6,7 +6,6 @@ import { RouterLink, useRoute } from 'vue-router'
 import DocumentUploadPanel from '@/components/DocumentUploadPanel.vue'
 import DocumentChunkDialog from '@/components/DocumentChunkDialog.vue'
 import DocumentVersionDialog from '@/components/DocumentVersionDialog.vue'
-import RagAnswerPanel from '@/components/RagAnswerPanel.vue'
 import SemanticSearchPanel from '@/components/SemanticSearchPanel.vue'
 import { ApiError } from '@/services/api'
 import {
@@ -202,11 +201,15 @@ onBeforeUnmount(() => {
         <h1>{{ knowledgeBaseName || '文档管理' }}</h1>
         <p>管理原始文件、解析状态与历史版本；解析完成仍不代表已建立检索索引。</p>
       </div>
-      <ElButton :loading="loading" @click="loadDocuments">刷新</ElButton>
+      <div class="header-actions">
+        <RouterLink :to="`/knowledge-bases/${knowledgeBaseId}/chat`">
+          <ElButton type="primary">进入知识库问答</ElButton>
+        </RouterLink>
+        <ElButton :loading="loading" @click="loadDocuments">刷新</ElButton>
+      </div>
     </header>
 
     <DocumentUploadPanel :knowledge-base-id="knowledgeBaseId" @completed="loadDocuments" />
-    <RagAnswerPanel :knowledge-base-id="knowledgeBaseId" />
     <p class="panel-section-label">Dense 检索调试</p>
     <SemanticSearchPanel :knowledge-base-id="knowledgeBaseId" />
 
