@@ -15,7 +15,13 @@ from app.indexing import (
 )
 
 
-def gateway(client: AsyncMock, *, batch_size: int = 64) -> QdrantGateway:
+def gateway(
+    client: AsyncMock,
+    *,
+    batch_size: int = 64,
+    dense_prefetch_limit: int = 20,
+    sparse_prefetch_limit: int = 20,
+) -> QdrantGateway:
     return QdrantGateway(
         client,
         collection_name="tracemind_chunks",
@@ -26,8 +32,8 @@ def gateway(client: AsyncMock, *, batch_size: int = 64) -> QdrantGateway:
         bm25_language="none",
         dimension=3,
         upsert_batch_size=batch_size,
-        dense_prefetch_limit=20,
-        sparse_prefetch_limit=20,
+        dense_prefetch_limit=dense_prefetch_limit,
+        sparse_prefetch_limit=sparse_prefetch_limit,
     )
 
 
@@ -226,7 +232,7 @@ async def test_incompatible_sparse_vector_is_rejected_without_rebuild() -> None:
 async def test_hybrid_search_uses_shared_filters_and_rrf() -> None:
     client = AsyncMock(spec=AsyncQdrantClient)
     client.query_points.return_value = SimpleNamespace(
-        points=[SimpleNamespace(score=0.7, payload={"content": "result"})]
+        points=[SimpleNamespace(id="point-a", score=0.7, payload={"content": "result"})]
     )
     knowledge_base_id, document_id, generation = uuid4(), uuid4(), uuid4()
 
@@ -256,6 +262,76 @@ async def test_hybrid_search_uses_shared_filters_and_rrf() -> None:
     assert sparse.query.text == "DiscoveryClient"
     assert sparse.query.options == {"language": "none", "tokenizer": "multilingual"}
     assert dense.filter == sparse.filter
+    assert call["limit"] == 20
+
+
+async def test_hybrid_search_sorts_scores_and_equal_scores_by_point_id() -> None:
+    client = AsyncMock(spec=AsyncQdrantClient)
+    payload_a = {"content": "same-score-a", "marker": ["unchanged"]}
+    payload_b = {"content": "same-score-b"}
+    payload_high = {"content": "higher-score"}
+    client.query_points.return_value = SimpleNamespace(
+        points=[
+            SimpleNamespace(id="point-b", score=0.75, payload=payload_b),
+            SimpleNamespace(id="point-low", score=0.25, payload={"content": "low"}),
+            SimpleNamespace(id="point-high", score=0.833333, payload=payload_high),
+            SimpleNamespace(id="point-a", score=0.75, payload=payload_a),
+        ]
+    )
+
+    hits = await gateway(
+        client,
+        dense_prefetch_limit=8,
+        sparse_prefetch_limit=12,
+    ).hybrid_search(
+        [1.0, 0.0, 0.0],
+        "query",
+        knowledge_base_id=uuid4(),
+        generations=[uuid4()],
+        limit=3,
+        language=None,
+        document_id=None,
+        dense_score_threshold=0.5,
+        excluded_chunk_types=("heading",),
+    )
+
+    assert [hit.score for hit in hits] == [0.833333, 0.75, 0.75]
+    assert [hit.payload["content"] for hit in hits] == [
+        "higher-score",
+        "same-score-a",
+        "same-score-b",
+    ]
+    assert hits[1].payload == payload_a
+    assert payload_a == {"content": "same-score-a", "marker": ["unchanged"]}
+    assert client.query_points.await_args.kwargs["limit"] == 12
+
+
+async def test_hybrid_search_order_is_stable_for_permuted_equal_score_candidates() -> None:
+    candidates = [
+        SimpleNamespace(id="point-c", score=0.583333, payload={"content": "c"}),
+        SimpleNamespace(id="point-a", score=0.583333, payload={"content": "a"}),
+        SimpleNamespace(id="point-b", score=0.583333, payload={"content": "b"}),
+    ]
+    orders: list[list[str]] = []
+    for points in (candidates, list(reversed(candidates))):
+        client = AsyncMock(spec=AsyncQdrantClient)
+        client.query_points.return_value = SimpleNamespace(points=points)
+        hits = await gateway(client).hybrid_search(
+            [1.0, 0.0, 0.0],
+            "query",
+            knowledge_base_id=uuid4(),
+            generations=[uuid4()],
+            limit=2,
+            language=None,
+            document_id=None,
+            dense_score_threshold=0.5,
+            excluded_chunk_types=("heading",),
+        )
+        orders.append([str(hit.payload["content"]) for hit in hits])
+        assert len(hits) == 2
+        assert client.query_points.await_args.kwargs["limit"] == 20
+
+    assert orders == [["a", "b"], ["a", "b"]]
 
 
 async def test_search_passes_threshold_and_heading_exclusion_with_existing_filters() -> None:

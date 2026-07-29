@@ -1,0 +1,1776 @@
+{
+  "strategy": "hybrid",
+  "generated_at": "2026-07-29T01:46:20.471847Z",
+  "case_count": 24,
+  "answerable_count": 22,
+  "passed_count": 18,
+  "failed_count": 4,
+  "hit_at_1": 0.5909090909090909,
+  "hit_at_5": 1.0,
+  "precision_at_5": 0.22727272727272727,
+  "recall_at_5": 0.8409090909090909,
+  "mrr_at_5": 0.7363636363636363,
+  "ndcg_at_5": 0.6571736692194441,
+  "all_required_at_5": 0.8181818181818182,
+  "p50_latency_ms": 235.26640003547072,
+  "p95_latency_ms": 375.3906700061634,
+  "cases": [
+    {
+      "case_id": "ret-001",
+      "query": "这个系统的实时输送周期和责任汇总周期有什么区别？",
+      "strategy": "hybrid",
+      "latency_ms": 1490.2340001426637,
+      "hits": [
+        {
+          "rank": 1,
+          "score": 1.0,
+          "chunk_id": "a8db20ac-3567-4751-86db-f500f60a47fb",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "1. 系统边界与运行周期",
+          "start_line": 11,
+          "end_line": 11,
+          "content": "调度窗并不等于结算窗。调度窗用于实时输送，默认一分钟；结算窗用于汇总责任与损耗，默认三十分钟。把二者混用会让短时削峰被误认为长期欠供，但不会改变现场控制器已经执行的路径。"
+        },
+        {
+          "rank": 2,
+          "score": 0.5833334,
+          "chunk_id": "57b94ccf-d228-4043-b9e8-2eddd97e68cb",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "20. 术语与责任边界",
+          "start_line": 185,
+          "end_line": 185,
+          "content": "潮拍是观测封存节奏，调度窗是实时输送周期，结算窗是责任汇总周期。快照属于采集事实，预测属于未来估计，配额属于分配上限，路径属于物理输送方案，储能计划属于电芯动作，审计记录属于决策追踪。"
+        },
+        {
+          "rank": 3,
+          "score": 0.5833334,
+          "chunk_id": "2854e35e-2cb3-46b2-8f34-388f0108fbe2",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "1. 系统边界与运行周期",
+          "start_line": 9,
+          "end_line": 9,
+          "content": "系统以十五秒为一个“潮拍”，每四个潮拍形成一分钟调度窗。晨潮采集器在潮拍末尾封存观测值，霁光预测器在下一潮拍开始时计算未来十二个调度窗的需求，脉轮协调器随后生成配额草案。雾桥路由器只负责把已批准配额转换为输送路径，不参与需求预测。余辉储能器根据路径余量决定充放电动作，银弦审计器最后记录每次决策的来源。"
+        },
+        {
+          "rank": 4,
+          "score": 0.2,
+          "chunk_id": "3a945a47-3ba5-47ed-9366-9dd16a4a1b93",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "星澜浮岛能源编排系统技术手册",
+          "start_line": 5,
+          "end_line": 5,
+          "content": "星澜浮岛能源编排系统服务于虚构的“澄空群岛”，负责在漂浮居住舱、藻光农圃和气象桅杆之间编排能源。手册中的组织、模块、协议、配置、错误码与运行数据均为虚构内容，只用于验证中文技术资料的检索稳定性。系统把能量采集、需求预测、配额计算、输送调度、储能调节和审计追踪拆成相近但互不替代的职责，运维人员必须依据章节中的边界处理事件。"
+        },
+        {
+          "rank": 5,
+          "score": 0.16666667,
+          "chunk_id": "aa060b32-9bb9-409b-aeb6-deecb584dca6",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "5. 雾桥路由器",
+          "start_line": 37,
+          "end_line": 37,
+          "content": "雾桥路由器接收已批准配额、桥段容量和禁行清单，计算从能量源到目标舱的有向路径。它优先选择跳数少且热损耗低的桥段；当主路径的剩余容量低于配额时，可拆分到两条互不共享脆弱节点的路径。配置项 `mist.route.max-hops` 默认 7，限制单条路径的最大桥段数。"
+        }
+      ],
+      "matched_evidence": [
+        0
+      ],
+      "missing_required_evidence": [],
+      "hit_at_1": 1.0,
+      "hit_at_5": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "mrr_at_5": 1.0,
+      "ndcg_at_5": 1.0,
+      "all_required_at_5": 1.0,
+      "passed": true,
+      "observational": false,
+      "error": null
+    },
+    {
+      "case_id": "ret-002",
+      "query": "哪个组件负责整理设备观测，它会不会直接预测用量？",
+      "strategy": "hybrid",
+      "latency_ms": 368.00230015069246,
+      "hits": [
+        {
+          "rank": 1,
+          "score": 0.7,
+          "chunk_id": "bc31e893-2ef7-4348-b588-deaa7c9c8641",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "16. 预测退化与恢复",
+          "start_line": 163,
+          "end_line": 163,
+          "content": "单位不兼容的 `SLR-FOR-207` 不会因等待而恢复。运维人员必须修正观测单位映射，再重放受影响的采集快照。重放只生成新的预测版本，不会直接覆盖已经批准的历史配额。"
+        },
+        {
+          "rank": 2,
+          "score": 0.5,
+          "chunk_id": "4405fec8-28f8-4488-943c-67b3b3649ec7",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "3. 霁光预测器",
+          "start_line": 23,
+          "end_line": 23,
+          "content": "霁光预测器读取最近二十四个调度窗的快照，并结合虚构节律表推算未来十二个窗口。配置项 `dawn.forecast.horizon-windows` 决定预测跨度，默认 12；`dawn.forecast.min-samples` 指定最少历史窗口数，默认 8。历史不足时，预测器返回保守曲线并标记低可信来源。"
+        },
+        {
+          "rank": 3,
+          "score": 0.4166667,
+          "chunk_id": "d435854e-8c6c-48e5-88a5-32795e6d0861",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "3. 霁光预测器",
+          "start_line": 25,
+          "end_line": 25,
+          "content": "预测器输出的是需求区间和峰值时刻，不产生岛屿配额。若输入快照的单位无法统一，它拒绝该序列并返回 `SLR-FOR-207`，表示“预测输入单位不兼容”。相似的 `SLR-FOR-208` 表示历史样本不足，两者都来自预测阶段，但前者需要修正单位，后者通常等待更多快照即可恢复。"
+        },
+        {
+          "rank": 4,
+          "score": 0.33333334,
+          "chunk_id": "aa3ae83a-5528-4d3f-acea-8fcfc0cf1ebc",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "2. 晨潮采集器",
+          "start_line": 15,
+          "end_line": 15,
+          "content": "晨潮采集器接收浮岛边缘的风帆阵列、热翼板和重力摆的观测包。它校验观测时间、设备序列和单位，将同一潮拍的重复包合并为一个不可变快照。配置项 `tide.collect.window-seconds` 控制潮拍长度，默认值为 15；`tide.collect.late-grace-seconds` 控制迟到包宽限，默认值为 6。"
+        },
+        {
+          "rank": 5,
+          "score": 0.3026316,
+          "chunk_id": "0ee1a62f-29dd-4ba6-9560-c3dd241b689d",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "15. 观测包迟到处理",
+          "start_line": 157,
+          "end_line": 157,
+          "content": "若迟到包同时缺少单位，采集器先按迟到规则决定是否进入快照；只有进入快照的包才继续单位校验。旁路记录保留原始单位声明，供后续人工分析，但不能参与自动预测。"
+        }
+      ],
+      "matched_evidence": [
+        0
+      ],
+      "missing_required_evidence": [],
+      "hit_at_1": 0.0,
+      "hit_at_5": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_5": 0.5,
+      "mrr_at_5": 0.25,
+      "ndcg_at_5": 0.35583989829307827,
+      "all_required_at_5": 1.0,
+      "passed": true,
+      "observational": false,
+      "error": null
+    },
+    {
+      "case_id": "ret-003",
+      "query": "需求估算模块产出什么，历史数据不够时怎么处理？",
+      "strategy": "hybrid",
+      "latency_ms": 244.03319996781647,
+      "hits": [
+        {
+          "rank": 1,
+          "score": 1.0,
+          "chunk_id": "54295bfe-2202-42b2-be2a-ac382c24cb43",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "16. 预测退化与恢复",
+          "start_line": 161,
+          "end_line": 161,
+          "content": "当历史窗口少于 `dawn.forecast.min-samples` 时，霁光预测器使用最近可用中位需求生成保守曲线，并附带 `SLR-FOR-208`。历史数量恢复后，下一次潮拍会自动回到常规预测，不需要重启模块。"
+        },
+        {
+          "rank": 2,
+          "score": 0.33333334,
+          "chunk_id": "3a945a47-3ba5-47ed-9366-9dd16a4a1b93",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "星澜浮岛能源编排系统技术手册",
+          "start_line": 5,
+          "end_line": 5,
+          "content": "星澜浮岛能源编排系统服务于虚构的“澄空群岛”，负责在漂浮居住舱、藻光农圃和气象桅杆之间编排能源。手册中的组织、模块、协议、配置、错误码与运行数据均为虚构内容，只用于验证中文技术资料的检索稳定性。系统把能量采集、需求预测、配额计算、输送调度、储能调节和审计追踪拆成相近但互不替代的职责，运维人员必须依据章节中的边界处理事件。"
+        },
+        {
+          "rank": 3,
+          "score": 0.25,
+          "chunk_id": "d435854e-8c6c-48e5-88a5-32795e6d0861",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "3. 霁光预测器",
+          "start_line": 25,
+          "end_line": 25,
+          "content": "预测器输出的是需求区间和峰值时刻，不产生岛屿配额。若输入快照的单位无法统一，它拒绝该序列并返回 `SLR-FOR-207`，表示“预测输入单位不兼容”。相似的 `SLR-FOR-208` 表示历史样本不足，两者都来自预测阶段，但前者需要修正单位，后者通常等待更多快照即可恢复。"
+        },
+        {
+          "rank": 4,
+          "score": 0.2,
+          "chunk_id": "4405fec8-28f8-4488-943c-67b3b3649ec7",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "3. 霁光预测器",
+          "start_line": 23,
+          "end_line": 23,
+          "content": "霁光预测器读取最近二十四个调度窗的快照，并结合虚构节律表推算未来十二个窗口。配置项 `dawn.forecast.horizon-windows` 决定预测跨度，默认 12；`dawn.forecast.min-samples` 指定最少历史窗口数，默认 8。历史不足时，预测器返回保守曲线并标记低可信来源。"
+        },
+        {
+          "rank": 5,
+          "score": 0.16666667,
+          "chunk_id": "3af6ab98-ee6d-40f1-a5af-f6ed3528b2f5",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "20. 术语与责任边界",
+          "start_line": 187,
+          "end_line": 187,
+          "content": "任何模块都不得越权修改上游事实：路由器不能提高配额，储能器不能改写预测，审计器不能替现场控制器执行回滚。跨模块故障处理应保留各自版本，通过关联标识串联，而不是把多个阶段压缩成一条不可追踪记录。"
+        }
+      ],
+      "matched_evidence": [
+        0,
+        1
+      ],
+      "missing_required_evidence": [],
+      "hit_at_1": 0.0,
+      "hit_at_5": 1.0,
+      "precision_at_5": 0.4,
+      "recall_at_5": 1.0,
+      "mrr_at_5": 0.3333333333333333,
+      "ndcg_at_5": 0.4935456744811716,
+      "all_required_at_5": 1.0,
+      "passed": true,
+      "observational": false,
+      "error": null
+    },
+    {
+      "case_id": "ret-004",
+      "query": "同等级对象如何避免一直由同一个对象优先拿到能量？",
+      "strategy": "hybrid",
+      "latency_ms": 212.47619995847344,
+      "hits": [
+        {
+          "rank": 1,
+          "score": 0.5,
+          "chunk_id": "e6a53b0f-e438-41ff-9924-308d62552202",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "4. 脉轮协调器",
+          "start_line": 29,
+          "end_line": 29,
+          "content": "脉轮协调器把需求区间、岛屿优先级和维护约束组合成配额草案。它先保障生命维持舱，再处理农圃与工坊；同级对象按照上个结算窗的欠供比例轮转。配置项 `pulse.quota.reserve-percent` 表示预留比例，默认 9，合法范围为 0 到 30。"
+        },
+        {
+          "rank": 2,
+          "score": 0.33333334,
+          "chunk_id": "d35537af-6100-4ffc-a320-f52e4eb2625d",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "19. 最小巡检清单",
+          "start_line": 181,
+          "end_line": 181,
+          "content": "发现异常时应记录模块、错误码、影响对象和首次出现的潮拍编号。错误码相同但对象不同的事件必须分别保留，避免局部恢复误关闭其他浮岛的事件。"
+        },
+        {
+          "rank": 3,
+          "score": 0.25,
+          "chunk_id": "bc6eba73-73cd-489e-9a3d-a500b64bf9a2",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "8. 模块相似概念辨析",
+          "start_line": 61,
+          "end_line": 61,
+          "content": "“迟到宽限”与“预测跨度”都使用时间窗口表达。迟到宽限只决定观测包能否进入当前快照；预测跨度决定输出覆盖多少个未来调度窗。二者不能通过同一个配置项调整。"
+        },
+        {
+          "rank": 4,
+          "score": 0.2,
+          "chunk_id": "ac10ae7b-bbc6-422b-9037-d1b227ef1fb6",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "8. 模块相似概念辨析",
+          "start_line": 59,
+          "end_line": 59,
+          "content": "“采集快照”与“审计快照”都包含时间和摘要，但采集快照保存设备观测，审计快照保存决策来源。“配额草案”与“储能计划”都带有能量数值，但配额草案约束目标对象，储能计划约束电芯动作。“路由冻结”与“维护冻结”都会阻止执行，前者针对桥段，后者针对候选对象。"
+        },
+        {
+          "rank": 5,
+          "score": 0.16666667,
+          "chunk_id": "aa060b32-9bb9-409b-aeb6-deecb584dca6",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "5. 雾桥路由器",
+          "start_line": 37,
+          "end_line": 37,
+          "content": "雾桥路由器接收已批准配额、桥段容量和禁行清单，计算从能量源到目标舱的有向路径。它优先选择跳数少且热损耗低的桥段；当主路径的剩余容量低于配额时，可拆分到两条互不共享脆弱节点的路径。配置项 `mist.route.max-hops` 默认 7，限制单条路径的最大桥段数。"
+        }
+      ],
+      "matched_evidence": [
+        0
+      ],
+      "missing_required_evidence": [],
+      "hit_at_1": 1.0,
+      "hit_at_5": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "mrr_at_5": 1.0,
+      "ndcg_at_5": 1.0,
+      "all_required_at_5": 1.0,
+      "passed": true,
+      "observational": false,
+      "error": null
+    },
+    {
+      "case_id": "ret-005",
+      "query": "主输送线路装不下全部配额时，系统能否拆成多条线路？",
+      "strategy": "hybrid",
+      "latency_ms": 376.6944999806583,
+      "hits": [
+        {
+          "rank": 1,
+          "score": 0.6,
+          "chunk_id": "626fd7ed-1abf-4e76-aa7f-2e7c50fe37a8",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "4. 脉轮协调器",
+          "start_line": 31,
+          "end_line": 31,
+          "content": "配额草案必须经过规则校验才会成为已批准配额。若预留比例超出范围，协调器返回 `SLR-QUO-311`；若所有候选对象都处于维护冻结，则返回 `SLR-QUO-318`。协调器不计算物理输送路线，因此“获得配额”不代表某条雾桥必然可用。"
+        },
+        {
+          "rank": 2,
+          "score": 0.53333336,
+          "chunk_id": "e8ee4da6-87be-46c0-9a0a-a188d6c6e415",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "5. 雾桥路由器",
+          "start_line": 39,
+          "end_line": 39,
+          "content": "路由器不修改配额数值，也不决定储能池是否放电。找不到满足最大跳数的路径时返回 `SLR-RTE-423`，含义是“输送路径不可达”；存在路径但总容量不足时返回 `SLR-RTE-429`，含义是“桥段容量不足”。前者应检查拓扑与禁行清单，后者应调整配额或请求储能支援。"
+        },
+        {
+          "rank": 3,
+          "score": 0.5,
+          "chunk_id": "3a945a47-3ba5-47ed-9366-9dd16a4a1b93",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "星澜浮岛能源编排系统技术手册",
+          "start_line": 5,
+          "end_line": 5,
+          "content": "星澜浮岛能源编排系统服务于虚构的“澄空群岛”，负责在漂浮居住舱、藻光农圃和气象桅杆之间编排能源。手册中的组织、模块、协议、配置、错误码与运行数据均为虚构内容，只用于验证中文技术资料的检索稳定性。系统把能量采集、需求预测、配额计算、输送调度、储能调节和审计追踪拆成相近但互不替代的职责，运维人员必须依据章节中的边界处理事件。"
+        },
+        {
+          "rank": 4,
+          "score": 0.45,
+          "chunk_id": "aa060b32-9bb9-409b-aeb6-deecb584dca6",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "5. 雾桥路由器",
+          "start_line": 37,
+          "end_line": 37,
+          "content": "雾桥路由器接收已批准配额、桥段容量和禁行清单，计算从能量源到目标舱的有向路径。它优先选择跳数少且热损耗低的桥段；当主路径的剩余容量低于配额时，可拆分到两条互不共享脆弱节点的路径。配置项 `mist.route.max-hops` 默认 7，限制单条路径的最大桥段数。"
+        },
+        {
+          "rank": 5,
+          "score": 0.33333334,
+          "chunk_id": "2854e35e-2cb3-46b2-8f34-388f0108fbe2",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "1. 系统边界与运行周期",
+          "start_line": 9,
+          "end_line": 9,
+          "content": "系统以十五秒为一个“潮拍”，每四个潮拍形成一分钟调度窗。晨潮采集器在潮拍末尾封存观测值，霁光预测器在下一潮拍开始时计算未来十二个调度窗的需求，脉轮协调器随后生成配额草案。雾桥路由器只负责把已批准配额转换为输送路径，不参与需求预测。余辉储能器根据路径余量决定充放电动作，银弦审计器最后记录每次决策的来源。"
+        }
+      ],
+      "matched_evidence": [
+        0
+      ],
+      "missing_required_evidence": [],
+      "hit_at_1": 0.0,
+      "hit_at_5": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "mrr_at_5": 0.25,
+      "ndcg_at_5": 0.4306765580733931,
+      "all_required_at_5": 1.0,
+      "passed": true,
+      "observational": false,
+      "error": null
+    },
+    {
+      "case_id": "ret-006",
+      "query": "追踪模块能证明什么，又不能替代什么？",
+      "strategy": "hybrid",
+      "latency_ms": 284.4827000517398,
+      "hits": [
+        {
+          "rank": 1,
+          "score": 1.0,
+          "chunk_id": "3af6ab98-ee6d-40f1-a5af-f6ed3528b2f5",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "20. 术语与责任边界",
+          "start_line": 187,
+          "end_line": 187,
+          "content": "任何模块都不得越权修改上游事实：路由器不能提高配额，储能器不能改写预测，审计器不能替现场控制器执行回滚。跨模块故障处理应保留各自版本，通过关联标识串联，而不是把多个阶段压缩成一条不可追踪记录。"
+        },
+        {
+          "rank": 2,
+          "score": 0.33333334,
+          "chunk_id": "3a945a47-3ba5-47ed-9366-9dd16a4a1b93",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "星澜浮岛能源编排系统技术手册",
+          "start_line": 5,
+          "end_line": 5,
+          "content": "星澜浮岛能源编排系统服务于虚构的“澄空群岛”，负责在漂浮居住舱、藻光农圃和气象桅杆之间编排能源。手册中的组织、模块、协议、配置、错误码与运行数据均为虚构内容，只用于验证中文技术资料的检索稳定性。系统把能量采集、需求预测、配额计算、输送调度、储能调节和审计追踪拆成相近但互不替代的职责，运维人员必须依据章节中的边界处理事件。"
+        },
+        {
+          "rank": 3,
+          "score": 0.25,
+          "chunk_id": "246dcbf3-7504-4550-a91b-2eba821446b6",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "7. 银弦审计器",
+          "start_line": 55,
+          "end_line": 55,
+          "content": "审计器只证明系统当时使用了哪些输入与规则，不替代监控告警，也不会回滚现场动作。摘要链断裂时产生 `SLR-AUD-604`，该错误要求暂停归档导出并重建受影响区段；单条记录字段缺失则产生 `SLR-AUD-607`，可从对应决策对象补录。"
+        },
+        {
+          "rank": 4,
+          "score": 0.2,
+          "chunk_id": "bc6eba73-73cd-489e-9a3d-a500b64bf9a2",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "8. 模块相似概念辨析",
+          "start_line": 61,
+          "end_line": 61,
+          "content": "“迟到宽限”与“预测跨度”都使用时间窗口表达。迟到宽限只决定观测包能否进入当前快照；预测跨度决定输出覆盖多少个未来调度窗。二者不能通过同一个配置项调整。"
+        },
+        {
+          "rank": 5,
+          "score": 0.16666667,
+          "chunk_id": "d2aae17f-a301-4962-bb25-046e8eb4c106",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "11. 路径计算与容量处理",
+          "start_line": 118,
+          "end_line": 118,
+          "content": "处理 `SLR-RTE-423` 时先核对桥段是否被拓扑筛选移除，再检查 `mist.route.max-hops`。处理 `SLR-RTE-429` 时应查看剩余容量和批准配额，增加最大跳数不一定能解决容量不足。"
+        }
+      ],
+      "matched_evidence": [
+        1
+      ],
+      "missing_required_evidence": [],
+      "hit_at_1": 0.0,
+      "hit_at_5": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_5": 0.5,
+      "mrr_at_5": 0.3333333333333333,
+      "ndcg_at_5": 0.41311732856427996,
+      "all_required_at_5": 1.0,
+      "passed": true,
+      "observational": false,
+      "error": null
+    },
+    {
+      "case_id": "ret-007",
+      "query": "tide.collect.late-grace-seconds 的默认值是多少？",
+      "strategy": "hybrid",
+      "latency_ms": 211.5392000414431,
+      "hits": [
+        {
+          "rank": 1,
+          "score": 0.8333334,
+          "chunk_id": "7d9af240-2ace-49f5-9b79-b7d3a51dae6c",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "9. 基础配置示例",
+          "start_line": 67,
+          "end_line": 88,
+          "content": "```yaml\ntide:\n  collect:\n    window-seconds: 15\n    late-grace-seconds: 6\ndawn:\n  forecast:\n    horizon-windows: 12\n    min-samples: 8\npulse:\n  quota:\n    reserve-percent: 9\nmist:\n  route:\n    max-hops: 7\nafterglow:\n  storage:\n    floor-percent: 22\nsilver:\n  audit:\n    retention-days: 45\n```"
+        },
+        {
+          "rank": 2,
+          "score": 0.75,
+          "chunk_id": "aa3ae83a-5528-4d3f-acea-8fcfc0cf1ebc",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "2. 晨潮采集器",
+          "start_line": 15,
+          "end_line": 15,
+          "content": "晨潮采集器接收浮岛边缘的风帆阵列、热翼板和重力摆的观测包。它校验观测时间、设备序列和单位，将同一潮拍的重复包合并为一个不可变快照。配置项 `tide.collect.window-seconds` 控制潮拍长度，默认值为 15；`tide.collect.late-grace-seconds` 控制迟到包宽限，默认值为 6。"
+        },
+        {
+          "rank": 3,
+          "score": 0.5833334,
+          "chunk_id": "e5281758-e6ce-4c18-bb68-16bd898f43d1",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "15. 观测包迟到处理",
+          "start_line": 155,
+          "end_line": 155,
+          "content": "迟到不超过 `tide.collect.late-grace-seconds` 的观测包可以重开当前潮拍快照，快照版本号递增，预测器下次读取最新版本。超过宽限的包只进入旁路记录并产生 `SLR-COL-104`，不会回写已经完成的预测和配额。"
+        },
+        {
+          "rank": 4,
+          "score": 0.30952382,
+          "chunk_id": "2854e35e-2cb3-46b2-8f34-388f0108fbe2",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "1. 系统边界与运行周期",
+          "start_line": 9,
+          "end_line": 9,
+          "content": "系统以十五秒为一个“潮拍”，每四个潮拍形成一分钟调度窗。晨潮采集器在潮拍末尾封存观测值，霁光预测器在下一潮拍开始时计算未来十二个调度窗的需求，脉轮协调器随后生成配额草案。雾桥路由器只负责把已批准配额转换为输送路径，不参与需求预测。余辉储能器根据路径余量决定充放电动作，银弦审计器最后记录每次决策的来源。"
+        },
+        {
+          "rank": 5,
+          "score": 0.25263157,
+          "chunk_id": "054a8a43-4d49-4d82-a96c-ab9582c5a556",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "2. 晨潮采集器",
+          "start_line": 17,
+          "end_line": 17,
+          "content": "采集器只保证输入快照完整，不判断未来需求，也不向输送节点下达动作。迟到包在宽限期内会重开当前快照，超过宽限期则写入旁路记录，并产生错误码 `SLR-COL-104`，含义是“观测包超过潮拍宽限”。该错误不会触发全岛停供。"
+        }
+      ],
+      "matched_evidence": [
+        0
+      ],
+      "missing_required_evidence": [],
+      "hit_at_1": 0.0,
+      "hit_at_5": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "mrr_at_5": 0.5,
+      "ndcg_at_5": 0.6309297535714574,
+      "all_required_at_5": 1.0,
+      "passed": true,
+      "observational": false,
+      "error": null
+    },
+    {
+      "case_id": "ret-008",
+      "query": "dawn.forecast.horizon-windows 默认配置",
+      "strategy": "hybrid",
+      "latency_ms": 188.0216000135988,
+      "hits": [
+        {
+          "rank": 1,
+          "score": 1.0,
+          "chunk_id": "4405fec8-28f8-4488-943c-67b3b3649ec7",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "3. 霁光预测器",
+          "start_line": 23,
+          "end_line": 23,
+          "content": "霁光预测器读取最近二十四个调度窗的快照，并结合虚构节律表推算未来十二个窗口。配置项 `dawn.forecast.horizon-windows` 决定预测跨度，默认 12；`dawn.forecast.min-samples` 指定最少历史窗口数，默认 8。历史不足时，预测器返回保守曲线并标记低可信来源。"
+        },
+        {
+          "rank": 2,
+          "score": 0.6666667,
+          "chunk_id": "7d9af240-2ace-49f5-9b79-b7d3a51dae6c",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "9. 基础配置示例",
+          "start_line": 67,
+          "end_line": 88,
+          "content": "```yaml\ntide:\n  collect:\n    window-seconds: 15\n    late-grace-seconds: 6\ndawn:\n  forecast:\n    horizon-windows: 12\n    min-samples: 8\npulse:\n  quota:\n    reserve-percent: 9\nmist:\n  route:\n    max-hops: 7\nafterglow:\n  storage:\n    floor-percent: 22\nsilver:\n  audit:\n    retention-days: 45\n```"
+        },
+        {
+          "rank": 3,
+          "score": 0.5,
+          "chunk_id": "54295bfe-2202-42b2-be2a-ac382c24cb43",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "16. 预测退化与恢复",
+          "start_line": 161,
+          "end_line": 161,
+          "content": "当历史窗口少于 `dawn.forecast.min-samples` 时，霁光预测器使用最近可用中位需求生成保守曲线，并附带 `SLR-FOR-208`。历史数量恢复后，下一次潮拍会自动回到常规预测，不需要重启模块。"
+        },
+        {
+          "rank": 4,
+          "score": 0.2,
+          "chunk_id": "0b1a8cd2-ebde-40d4-b5ea-8567e17e1238",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "9. 基础配置示例",
+          "start_line": 90,
+          "end_line": 90,
+          "content": "启动时配置加载器先读取内置默认值，再读取本地配置文件。未知键会被拒绝而不是静默忽略，数值越界则在任何模块启动前统一报告。"
+        },
+        {
+          "rank": 5,
+          "score": 0.16666667,
+          "chunk_id": "aa3ae83a-5528-4d3f-acea-8fcfc0cf1ebc",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "2. 晨潮采集器",
+          "start_line": 15,
+          "end_line": 15,
+          "content": "晨潮采集器接收浮岛边缘的风帆阵列、热翼板和重力摆的观测包。它校验观测时间、设备序列和单位，将同一潮拍的重复包合并为一个不可变快照。配置项 `tide.collect.window-seconds` 控制潮拍长度，默认值为 15；`tide.collect.late-grace-seconds` 控制迟到包宽限，默认值为 6。"
+        }
+      ],
+      "matched_evidence": [
+        0
+      ],
+      "missing_required_evidence": [],
+      "hit_at_1": 1.0,
+      "hit_at_5": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "mrr_at_5": 1.0,
+      "ndcg_at_5": 1.0,
+      "all_required_at_5": 1.0,
+      "passed": true,
+      "observational": false,
+      "error": null
+    },
+    {
+      "case_id": "ret-009",
+      "query": "mist.route.max-hops 最大跳数默认多少？",
+      "strategy": "hybrid",
+      "latency_ms": 307.41899996064603,
+      "hits": [
+        {
+          "rank": 1,
+          "score": 1.0,
+          "chunk_id": "aa060b32-9bb9-409b-aeb6-deecb584dca6",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "5. 雾桥路由器",
+          "start_line": 37,
+          "end_line": 37,
+          "content": "雾桥路由器接收已批准配额、桥段容量和禁行清单，计算从能量源到目标舱的有向路径。它优先选择跳数少且热损耗低的桥段；当主路径的剩余容量低于配额时，可拆分到两条互不共享脆弱节点的路径。配置项 `mist.route.max-hops` 默认 7，限制单条路径的最大桥段数。"
+        },
+        {
+          "rank": 2,
+          "score": 0.6666667,
+          "chunk_id": "d2aae17f-a301-4962-bb25-046e8eb4c106",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "11. 路径计算与容量处理",
+          "start_line": 118,
+          "end_line": 118,
+          "content": "处理 `SLR-RTE-423` 时先核对桥段是否被拓扑筛选移除，再检查 `mist.route.max-hops`。处理 `SLR-RTE-429` 时应查看剩余容量和批准配额，增加最大跳数不一定能解决容量不足。"
+        },
+        {
+          "rank": 3,
+          "score": 0.45,
+          "chunk_id": "2b006960-f578-44f6-abe7-645e405caf8e",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "11. 路径计算与容量处理",
+          "start_line": 113,
+          "end_line": 116,
+          "content": "```text\nstarlane route plan --quota quota-approved-17 --max-hops 7\nstarlane route inspect --plan route-plan-42 --show-capacity\n```"
+        },
+        {
+          "rank": 4,
+          "score": 0.34285715,
+          "chunk_id": "e8ee4da6-87be-46c0-9a0a-a188d6c6e415",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "5. 雾桥路由器",
+          "start_line": 39,
+          "end_line": 39,
+          "content": "路由器不修改配额数值，也不决定储能池是否放电。找不到满足最大跳数的路径时返回 `SLR-RTE-423`，含义是“输送路径不可达”；存在路径但总容量不足时返回 `SLR-RTE-429`，含义是“桥段容量不足”。前者应检查拓扑与禁行清单，后者应调整配额或请求储能支援。"
+        },
+        {
+          "rank": 5,
+          "score": 0.25,
+          "chunk_id": "7d9af240-2ace-49f5-9b79-b7d3a51dae6c",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "9. 基础配置示例",
+          "start_line": 67,
+          "end_line": 88,
+          "content": "```yaml\ntide:\n  collect:\n    window-seconds: 15\n    late-grace-seconds: 6\ndawn:\n  forecast:\n    horizon-windows: 12\n    min-samples: 8\npulse:\n  quota:\n    reserve-percent: 9\nmist:\n  route:\n    max-hops: 7\nafterglow:\n  storage:\n    floor-percent: 22\nsilver:\n  audit:\n    retention-days: 45\n```"
+        }
+      ],
+      "matched_evidence": [
+        0
+      ],
+      "missing_required_evidence": [],
+      "hit_at_1": 1.0,
+      "hit_at_5": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "mrr_at_5": 1.0,
+      "ndcg_at_5": 1.0,
+      "all_required_at_5": 1.0,
+      "passed": true,
+      "observational": false,
+      "error": null
+    },
+    {
+      "case_id": "ret-010",
+      "query": "silver.audit.retention-days 会不会改变原始观测的保留时间？",
+      "strategy": "hybrid",
+      "latency_ms": 305.533500155434,
+      "hits": [
+        {
+          "rank": 1,
+          "score": 0.8333334,
+          "chunk_id": "fa9b1de0-88af-485f-b8f1-11272670ea5b",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "7. 银弦审计器",
+          "start_line": 53,
+          "end_line": 53,
+          "content": "银弦审计器为快照、预测、配额、路径和储能动作生成关联记录。每条记录保存决策类型、来源版本、输入摘要、执行时间和前一条记录的摘要链。配置项 `silver.audit.retention-days` 默认 45，只影响本地审计记录保留期，不影响原始观测快照的保留策略。"
+        },
+        {
+          "rank": 2,
+          "score": 0.8333334,
+          "chunk_id": "c1b18fc8-3091-4e87-862e-c01cc111de90",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "14. 审计留存与导出",
+          "start_line": 149,
+          "end_line": 149,
+          "content": "审计记录按照 `silver.audit.retention-days` 保留，过期后先生成封存清单，再删除本地明细。导出包包含摘要链起点、终点、记录数量和规则版本，不包含设备原始观测全文。采集快照由独立策略保留，因此延长审计天数不会自动延长观测数据寿命。"
+        },
+        {
+          "rank": 3,
+          "score": 0.39285713,
+          "chunk_id": "7d9af240-2ace-49f5-9b79-b7d3a51dae6c",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "9. 基础配置示例",
+          "start_line": 67,
+          "end_line": 88,
+          "content": "```yaml\ntide:\n  collect:\n    window-seconds: 15\n    late-grace-seconds: 6\ndawn:\n  forecast:\n    horizon-windows: 12\n    min-samples: 8\npulse:\n  quota:\n    reserve-percent: 9\nmist:\n  route:\n    max-hops: 7\nafterglow:\n  storage:\n    floor-percent: 22\nsilver:\n  audit:\n    retention-days: 45\n```"
+        },
+        {
+          "rank": 4,
+          "score": 0.30555555,
+          "chunk_id": "1783772b-852b-4256-8123-8e4e45bf1b56",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "18. 安全变更窗口",
+          "start_line": 175,
+          "end_line": 175,
+          "content": "同时修改预测跨度与预留比例时，应先保留旧预测版本完成当前配额批准，再让新跨度生成下一版本需求，最后应用新的预留比例。这样审计器能明确区分变化来自需求范围还是分配规则。"
+        },
+        {
+          "rank": 5,
+          "score": 0.27142859,
+          "chunk_id": "cc73eea3-95ed-455b-9d22-570ed02e83df",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "14. 审计留存与导出",
+          "start_line": 151,
+          "end_line": 151,
+          "content": "发生 `SLR-AUD-604` 时，导出任务必须停止在断裂点之前。运维人员从最近一次可信封存清单恢复链起点，再按决策时间重放摘要；恢复期间现场调度继续运行，但新的导出包标记为暂缓。"
+        }
+      ],
+      "matched_evidence": [
+        0
+      ],
+      "missing_required_evidence": [],
+      "hit_at_1": 1.0,
+      "hit_at_5": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "mrr_at_5": 1.0,
+      "ndcg_at_5": 1.0,
+      "all_required_at_5": 1.0,
+      "passed": true,
+      "observational": false,
+      "error": null
+    },
+    {
+      "case_id": "ret-011",
+      "query": "SLR-RTE-423 表示什么，应该先查哪里？",
+      "strategy": "hybrid",
+      "latency_ms": 224.14690000005066,
+      "hits": [
+        {
+          "rank": 1,
+          "score": 1.0,
+          "chunk_id": "d2aae17f-a301-4962-bb25-046e8eb4c106",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "11. 路径计算与容量处理",
+          "start_line": 118,
+          "end_line": 118,
+          "content": "处理 `SLR-RTE-423` 时先核对桥段是否被拓扑筛选移除，再检查 `mist.route.max-hops`。处理 `SLR-RTE-429` 时应查看剩余容量和批准配额，增加最大跳数不一定能解决容量不足。"
+        },
+        {
+          "rank": 2,
+          "score": 0.6666667,
+          "chunk_id": "e8ee4da6-87be-46c0-9a0a-a188d6c6e415",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "5. 雾桥路由器",
+          "start_line": 39,
+          "end_line": 39,
+          "content": "路由器不修改配额数值，也不决定储能池是否放电。找不到满足最大跳数的路径时返回 `SLR-RTE-423`，含义是“输送路径不可达”；存在路径但总容量不足时返回 `SLR-RTE-429`，含义是“桥段容量不足”。前者应检查拓扑与禁行清单，后者应调整配额或请求储能支援。"
+        },
+        {
+          "rank": 3,
+          "score": 0.25,
+          "chunk_id": "d435854e-8c6c-48e5-88a5-32795e6d0861",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "3. 霁光预测器",
+          "start_line": 25,
+          "end_line": 25,
+          "content": "预测器输出的是需求区间和峰值时刻，不产生岛屿配额。若输入快照的单位无法统一，它拒绝该序列并返回 `SLR-FOR-207`，表示“预测输入单位不兼容”。相似的 `SLR-FOR-208` 表示历史样本不足，两者都来自预测阶段，但前者需要修正单位，后者通常等待更多快照即可恢复。"
+        },
+        {
+          "rank": 4,
+          "score": 0.2,
+          "chunk_id": "bd6ab66b-e2d2-4192-bb90-e5040dd19ebc",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "13. 事件恢复顺序",
+          "start_line": 136,
+          "end_line": 143,
+          "content": "```json\n{\n  \"event\": \"SLR-RTE-423\",\n  \"scope\": \"虚构浮岛丁\",\n  \"action\": \"freeze-route-only\",\n  \"preserve\": [\"approved-quota\", \"forecast-revision\"]\n}\n```"
+        },
+        {
+          "rank": 5,
+          "score": 0.16666667,
+          "chunk_id": "e6a53b0f-e438-41ff-9924-308d62552202",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "4. 脉轮协调器",
+          "start_line": 29,
+          "end_line": 29,
+          "content": "脉轮协调器把需求区间、岛屿优先级和维护约束组合成配额草案。它先保障生命维持舱，再处理农圃与工坊；同级对象按照上个结算窗的欠供比例轮转。配置项 `pulse.quota.reserve-percent` 表示预留比例，默认 9，合法范围为 0 到 30。"
+        }
+      ],
+      "matched_evidence": [
+        0,
+        1
+      ],
+      "missing_required_evidence": [],
+      "hit_at_1": 1.0,
+      "hit_at_5": 1.0,
+      "precision_at_5": 0.4,
+      "recall_at_5": 1.0,
+      "mrr_at_5": 1.0,
+      "ndcg_at_5": 1.0,
+      "all_required_at_5": 1.0,
+      "passed": true,
+      "observational": false,
+      "error": null
+    },
+    {
+      "case_id": "ret-012",
+      "query": "SLR-FOR-207 能靠等待更多历史数据自动恢复吗？",
+      "strategy": "hybrid",
+      "latency_ms": 226.99539992026985,
+      "hits": [
+        {
+          "rank": 1,
+          "score": 0.75,
+          "chunk_id": "bc31e893-2ef7-4348-b588-deaa7c9c8641",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "16. 预测退化与恢复",
+          "start_line": 163,
+          "end_line": 163,
+          "content": "单位不兼容的 `SLR-FOR-207` 不会因等待而恢复。运维人员必须修正观测单位映射，再重放受影响的采集快照。重放只生成新的预测版本，不会直接覆盖已经批准的历史配额。"
+        },
+        {
+          "rank": 2,
+          "score": 0.6666667,
+          "chunk_id": "d435854e-8c6c-48e5-88a5-32795e6d0861",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "3. 霁光预测器",
+          "start_line": 25,
+          "end_line": 25,
+          "content": "预测器输出的是需求区间和峰值时刻，不产生岛屿配额。若输入快照的单位无法统一，它拒绝该序列并返回 `SLR-FOR-207`，表示“预测输入单位不兼容”。相似的 `SLR-FOR-208` 表示历史样本不足，两者都来自预测阶段，但前者需要修正单位，后者通常等待更多快照即可恢复。"
+        },
+        {
+          "rank": 3,
+          "score": 0.5833334,
+          "chunk_id": "54295bfe-2202-42b2-be2a-ac382c24cb43",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "16. 预测退化与恢复",
+          "start_line": 161,
+          "end_line": 161,
+          "content": "当历史窗口少于 `dawn.forecast.min-samples` 时，霁光预测器使用最近可用中位需求生成保守曲线，并附带 `SLR-FOR-208`。历史数量恢复后，下一次潮拍会自动回到常规预测，不需要重启模块。"
+        },
+        {
+          "rank": 4,
+          "score": 0.53333336,
+          "chunk_id": "07d4f3d4-42bb-4c83-8a4f-73d1b2f3ff2c",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "17. 运维检查顺序",
+          "start_line": 169,
+          "end_line": 169,
+          "content": "当用户报告“预测突然降低”时，先检查晨潮快照是否完整，再辨别 `SLR-FOR-207` 与 `SLR-FOR-208`。前者修正单位映射，后者补足历史样本；不要因为两者都以 `SLR-FOR` 开头而采用同一恢复操作。"
+        },
+        {
+          "rank": 5,
+          "score": 0.31111112,
+          "chunk_id": "cc73eea3-95ed-455b-9d22-570ed02e83df",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "14. 审计留存与导出",
+          "start_line": 151,
+          "end_line": 151,
+          "content": "发生 `SLR-AUD-604` 时，导出任务必须停止在断裂点之前。运维人员从最近一次可信封存清单恢复链起点，再按决策时间重放摘要；恢复期间现场调度继续运行，但新的导出包标记为暂缓。"
+        }
+      ],
+      "matched_evidence": [
+        0
+      ],
+      "missing_required_evidence": [],
+      "hit_at_1": 1.0,
+      "hit_at_5": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "mrr_at_5": 1.0,
+      "ndcg_at_5": 1.0,
+      "all_required_at_5": 1.0,
+      "passed": true,
+      "observational": false,
+      "error": null
+    },
+    {
+      "case_id": "ret-013",
+      "query": "SLR-STO-519 出现后最高优先级目标还能强制放电吗？",
+      "strategy": "hybrid",
+      "latency_ms": 339.39530001953244,
+      "hits": [
+        {
+          "rank": 1,
+          "score": 1.0,
+          "chunk_id": "1f2cc8ea-4ace-4eb7-9979-f810b148c0c6",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "12. 储能支援与下限保护",
+          "start_line": 130,
+          "end_line": 130,
+          "content": "紧急授权只绕过荷电下限，不绕过温差冻结。出现 `SLR-STO-519` 时，即使生命维持舱具有最高优先级，也必须等待电芯温差恢复到虚构安全区间。"
+        },
+        {
+          "rank": 2,
+          "score": 0.6666667,
+          "chunk_id": "64fb5d49-aaa7-477c-8c5b-10ccbf5deba5",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "6. 余辉储能器",
+          "start_line": 47,
+          "end_line": 47,
+          "content": "当荷电比例低于下限且没有紧急授权时，储能器拒绝放电并返回 `SLR-STO-512`。当电芯温差超过虚构安全阈值时返回 `SLR-STO-519`，同时冻结充放电，但不会撤销脉轮协调器已经批准的配额。储能计划和配额计划名称相近，前者描述电芯动作，后者描述对象可获得的上限。"
+        },
+        {
+          "rank": 3,
+          "score": 0.34285715,
+          "chunk_id": "9aa5ce61-20a9-4343-bee9-c43158f8fec0",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "12. 储能支援与下限保护",
+          "start_line": 122,
+          "end_line": 122,
+          "content": "当路径容量不足但存在可用电芯池时，余辉储能器可以在目标附近提供支援。它先读取霁光预测器的未来峰值，再确保放电后荷电比例不低于 `afterglow.storage.floor-percent`。因此一次支援是否允许，需要联合未来需求和储能下限两处信息判断。"
+        },
+        {
+          "rank": 4,
+          "score": 0.25,
+          "chunk_id": "670485a5-155d-4a2b-a967-9d5c6b62718e",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "10. 配额生成与批准流程",
+          "start_line": 94,
+          "end_line": 94,
+          "content": "协调器收到预测结果后创建 `draft_revision`，按照优先级和欠供轮转规则分配可用总量，再扣除预留比例。规则校验确认数值非负、总和不超过输入能力且维护对象未获配额。批准动作生成新的 `approved_revision`，并把草案摘要交给银弦审计器。"
+        },
+        {
+          "rank": 5,
+          "score": 0.25,
+          "chunk_id": "c36626b2-17b9-4097-a58a-9cb2f83efe2f",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "6. 余辉储能器",
+          "start_line": 45,
+          "end_line": 45,
+          "content": "余辉储能器管理虚构的星砂电芯池。它根据已批准路径的缺口、当前荷电比例和未来预测峰值生成充放电计划。配置项 `afterglow.storage.floor-percent` 默认 22，表示常规调度不得突破的最低荷电比例；紧急生命维持事件可由双人授权临时越过该下限。"
+        }
+      ],
+      "matched_evidence": [
+        0
+      ],
+      "missing_required_evidence": [],
+      "hit_at_1": 1.0,
+      "hit_at_5": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "mrr_at_5": 1.0,
+      "ndcg_at_5": 1.0,
+      "all_required_at_5": 1.0,
+      "passed": true,
+      "observational": false,
+      "error": null
+    },
+    {
+      "case_id": "ret-014",
+      "query": "配额咋轮？",
+      "strategy": "hybrid",
+      "latency_ms": 236.44760018214583,
+      "hits": [
+        {
+          "rank": 1,
+          "score": 0.8333334,
+          "chunk_id": "626fd7ed-1abf-4e76-aa7f-2e7c50fe37a8",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "4. 脉轮协调器",
+          "start_line": 31,
+          "end_line": 31,
+          "content": "配额草案必须经过规则校验才会成为已批准配额。若预留比例超出范围，协调器返回 `SLR-QUO-311`；若所有候选对象都处于维护冻结，则返回 `SLR-QUO-318`。协调器不计算物理输送路线，因此“获得配额”不代表某条雾桥必然可用。"
+        },
+        {
+          "rank": 2,
+          "score": 0.7,
+          "chunk_id": "e6a53b0f-e438-41ff-9924-308d62552202",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "4. 脉轮协调器",
+          "start_line": 29,
+          "end_line": 29,
+          "content": "脉轮协调器把需求区间、岛屿优先级和维护约束组合成配额草案。它先保障生命维持舱，再处理农圃与工坊；同级对象按照上个结算窗的欠供比例轮转。配置项 `pulse.quota.reserve-percent` 表示预留比例，默认 9，合法范围为 0 到 30。"
+        },
+        {
+          "rank": 3,
+          "score": 0.45833334,
+          "chunk_id": "09c6b760-cf08-432b-affa-7944fc7bec77",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "10. 配额生成与批准流程",
+          "start_line": 107,
+          "end_line": 107,
+          "content": "若要完整解释某个目标最终为何获得特定配额，必须同时查看霁光预测器给出的需求区间和本节的优先级、欠供轮转及预留规则；只看任一章节都无法还原完整原因。"
+        },
+        {
+          "rank": 4,
+          "score": 0.3611111,
+          "chunk_id": "670485a5-155d-4a2b-a967-9d5c6b62718e",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "10. 配额生成与批准流程",
+          "start_line": 94,
+          "end_line": 94,
+          "content": "协调器收到预测结果后创建 `draft_revision`，按照优先级和欠供轮转规则分配可用总量，再扣除预留比例。规则校验确认数值非负、总和不超过输入能力且维护对象未获配额。批准动作生成新的 `approved_revision`，并把草案摘要交给银弦审计器。"
+        },
+        {
+          "rank": 5,
+          "score": 0.2916667,
+          "chunk_id": "2854e35e-2cb3-46b2-8f34-388f0108fbe2",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "1. 系统边界与运行周期",
+          "start_line": 9,
+          "end_line": 9,
+          "content": "系统以十五秒为一个“潮拍”，每四个潮拍形成一分钟调度窗。晨潮采集器在潮拍末尾封存观测值，霁光预测器在下一潮拍开始时计算未来十二个调度窗的需求，脉轮协调器随后生成配额草案。雾桥路由器只负责把已批准配额转换为输送路径，不参与需求预测。余辉储能器根据路径余量决定充放电动作，银弦审计器最后记录每次决策的来源。"
+        }
+      ],
+      "matched_evidence": [
+        0
+      ],
+      "missing_required_evidence": [],
+      "hit_at_1": 0.0,
+      "hit_at_5": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "mrr_at_5": 0.5,
+      "ndcg_at_5": 0.6309297535714574,
+      "all_required_at_5": 1.0,
+      "passed": true,
+      "observational": false,
+      "error": null
+    },
+    {
+      "case_id": "ret-015",
+      "query": "路不通先看啥",
+      "strategy": "hybrid",
+      "latency_ms": 174.61890005506575,
+      "hits": [
+        {
+          "rank": 1,
+          "score": 0.5,
+          "chunk_id": "09c6b760-cf08-432b-affa-7944fc7bec77",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "10. 配额生成与批准流程",
+          "start_line": 107,
+          "end_line": 107,
+          "content": "若要完整解释某个目标最终为何获得特定配额，必须同时查看霁光预测器给出的需求区间和本节的优先级、欠供轮转及预留规则；只看任一章节都无法还原完整原因。"
+        },
+        {
+          "rank": 2,
+          "score": 0.33333334,
+          "chunk_id": "0b1a8cd2-ebde-40d4-b5ea-8567e17e1238",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "9. 基础配置示例",
+          "start_line": 90,
+          "end_line": 90,
+          "content": "启动时配置加载器先读取内置默认值，再读取本地配置文件。未知键会被拒绝而不是静默忽略，数值越界则在任何模块启动前统一报告。"
+        },
+        {
+          "rank": 3,
+          "score": 0.25,
+          "chunk_id": "0ee1a62f-29dd-4ba6-9560-c3dd241b689d",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "15. 观测包迟到处理",
+          "start_line": 157,
+          "end_line": 157,
+          "content": "若迟到包同时缺少单位，采集器先按迟到规则决定是否进入快照；只有进入快照的包才继续单位校验。旁路记录保留原始单位声明，供后续人工分析，但不能参与自动预测。"
+        },
+        {
+          "rank": 4,
+          "score": 0.2,
+          "chunk_id": "0e31b923-7e91-4b7c-a564-ccdc8a1abb92",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "13. 事件恢复顺序",
+          "start_line": 145,
+          "end_line": 145,
+          "content": "如果路径不可达且目标附近储能也低于下限，应保留已批准配额作为审计事实，先修复拓扑或解除禁行；储能器在没有紧急授权时不能用低于下限的电量掩盖路由故障。"
+        },
+        {
+          "rank": 5,
+          "score": 0.16666667,
+          "chunk_id": "d2aae17f-a301-4962-bb25-046e8eb4c106",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "11. 路径计算与容量处理",
+          "start_line": 118,
+          "end_line": 118,
+          "content": "处理 `SLR-RTE-423` 时先核对桥段是否被拓扑筛选移除，再检查 `mist.route.max-hops`。处理 `SLR-RTE-429` 时应查看剩余容量和批准配额，增加最大跳数不一定能解决容量不足。"
+        }
+      ],
+      "matched_evidence": [
+        0
+      ],
+      "missing_required_evidence": [],
+      "hit_at_1": 0.0,
+      "hit_at_5": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "mrr_at_5": 0.2,
+      "ndcg_at_5": 0.38685280723454163,
+      "all_required_at_5": 1.0,
+      "passed": true,
+      "observational": false,
+      "error": null
+    },
+    {
+      "case_id": "ret-016",
+      "query": "迟到包咋办",
+      "strategy": "hybrid",
+      "latency_ms": 219.48690013960004,
+      "hits": [
+        {
+          "rank": 1,
+          "score": 0.8333334,
+          "chunk_id": "e5281758-e6ce-4c18-bb68-16bd898f43d1",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "15. 观测包迟到处理",
+          "start_line": 155,
+          "end_line": 155,
+          "content": "迟到不超过 `tide.collect.late-grace-seconds` 的观测包可以重开当前潮拍快照，快照版本号递增，预测器下次读取最新版本。超过宽限的包只进入旁路记录并产生 `SLR-COL-104`，不会回写已经完成的预测和配额。"
+        },
+        {
+          "rank": 2,
+          "score": 0.8333334,
+          "chunk_id": "0ee1a62f-29dd-4ba6-9560-c3dd241b689d",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "15. 观测包迟到处理",
+          "start_line": 157,
+          "end_line": 157,
+          "content": "若迟到包同时缺少单位，采集器先按迟到规则决定是否进入快照；只有进入快照的包才继续单位校验。旁路记录保留原始单位声明，供后续人工分析，但不能参与自动预测。"
+        },
+        {
+          "rank": 3,
+          "score": 0.25,
+          "chunk_id": "bc6eba73-73cd-489e-9a3d-a500b64bf9a2",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "8. 模块相似概念辨析",
+          "start_line": 61,
+          "end_line": 61,
+          "content": "“迟到宽限”与“预测跨度”都使用时间窗口表达。迟到宽限只决定观测包能否进入当前快照；预测跨度决定输出覆盖多少个未来调度窗。二者不能通过同一个配置项调整。"
+        },
+        {
+          "rank": 4,
+          "score": 0.2,
+          "chunk_id": "aa3ae83a-5528-4d3f-acea-8fcfc0cf1ebc",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "2. 晨潮采集器",
+          "start_line": 15,
+          "end_line": 15,
+          "content": "晨潮采集器接收浮岛边缘的风帆阵列、热翼板和重力摆的观测包。它校验观测时间、设备序列和单位，将同一潮拍的重复包合并为一个不可变快照。配置项 `tide.collect.window-seconds` 控制潮拍长度，默认值为 15；`tide.collect.late-grace-seconds` 控制迟到包宽限，默认值为 6。"
+        },
+        {
+          "rank": 5,
+          "score": 0.16666667,
+          "chunk_id": "054a8a43-4d49-4d82-a96c-ab9582c5a556",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "2. 晨潮采集器",
+          "start_line": 17,
+          "end_line": 17,
+          "content": "采集器只保证输入快照完整，不判断未来需求，也不向输送节点下达动作。迟到包在宽限期内会重开当前快照，超过宽限期则写入旁路记录，并产生错误码 `SLR-COL-104`，含义是“观测包超过潮拍宽限”。该错误不会触发全岛停供。"
+        }
+      ],
+      "matched_evidence": [
+        0,
+        1
+      ],
+      "missing_required_evidence": [],
+      "hit_at_1": 1.0,
+      "hit_at_5": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "mrr_at_5": 1.0,
+      "ndcg_at_5": 0.6131471927654584,
+      "all_required_at_5": 1.0,
+      "passed": true,
+      "observational": false,
+      "error": null
+    },
+    {
+      "case_id": "ret-017",
+      "query": "要解释一个目标最终获配额度的原因，需要结合哪些信息？",
+      "strategy": "hybrid",
+      "latency_ms": 223.9699000492692,
+      "hits": [
+        {
+          "rank": 1,
+          "score": 1.0,
+          "chunk_id": "09c6b760-cf08-432b-affa-7944fc7bec77",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "10. 配额生成与批准流程",
+          "start_line": 107,
+          "end_line": 107,
+          "content": "若要完整解释某个目标最终为何获得特定配额，必须同时查看霁光预测器给出的需求区间和本节的优先级、欠供轮转及预留规则；只看任一章节都无法还原完整原因。"
+        },
+        {
+          "rank": 2,
+          "score": 0.4166667,
+          "chunk_id": "07eb4d07-719d-4fa8-9a1d-de33d22f5bc0",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "17. 运维检查顺序",
+          "start_line": 167,
+          "end_line": 167,
+          "content": "当用户报告“目标未收到足够能量”时，先在脉轮协调器确认是否获得已批准配额，再到雾桥路由器确认是否存在可行路径，最后查看余辉储能器是否因下限或温差冻结拒绝支援。跳过配额检查直接调整路由，可能为一个本就未获配额的目标制造无效路径。"
+        },
+        {
+          "rank": 3,
+          "score": 0.38333336,
+          "chunk_id": "670485a5-155d-4a2b-a967-9d5c6b62718e",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "10. 配额生成与批准流程",
+          "start_line": 94,
+          "end_line": 94,
+          "content": "协调器收到预测结果后创建 `draft_revision`，按照优先级和欠供轮转规则分配可用总量，再扣除预留比例。规则校验确认数值非负、总和不超过输入能力且维护对象未获配额。批准动作生成新的 `approved_revision`，并把草案摘要交给银弦审计器。"
+        },
+        {
+          "rank": 4,
+          "score": 0.33333334,
+          "chunk_id": "9aa5ce61-20a9-4343-bee9-c43158f8fec0",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "12. 储能支援与下限保护",
+          "start_line": 122,
+          "end_line": 122,
+          "content": "当路径容量不足但存在可用电芯池时，余辉储能器可以在目标附近提供支援。它先读取霁光预测器的未来峰值，再确保放电后荷电比例不低于 `afterglow.storage.floor-percent`。因此一次支援是否允许，需要联合未来需求和储能下限两处信息判断。"
+        },
+        {
+          "rank": 5,
+          "score": 0.25,
+          "chunk_id": "626fd7ed-1abf-4e76-aa7f-2e7c50fe37a8",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "4. 脉轮协调器",
+          "start_line": 31,
+          "end_line": 31,
+          "content": "配额草案必须经过规则校验才会成为已批准配额。若预留比例超出范围，协调器返回 `SLR-QUO-311`；若所有候选对象都处于维护冻结，则返回 `SLR-QUO-318`。协调器不计算物理输送路线，因此“获得配额”不代表某条雾桥必然可用。"
+        }
+      ],
+      "matched_evidence": [
+        2
+      ],
+      "missing_required_evidence": [
+        0,
+        1
+      ],
+      "hit_at_1": 1.0,
+      "hit_at_5": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_5": 0.3333333333333333,
+      "mrr_at_5": 1.0,
+      "ndcg_at_5": 0.18543279769614657,
+      "all_required_at_5": 0.0,
+      "passed": false,
+      "observational": false,
+      "error": null
+    },
+    {
+      "case_id": "ret-018",
+      "query": "路径容量不够时，附近储能是否允许支援要同时判断什么？",
+      "strategy": "hybrid",
+      "latency_ms": 202.13729981333017,
+      "hits": [
+        {
+          "rank": 1,
+          "score": 1.0,
+          "chunk_id": "9aa5ce61-20a9-4343-bee9-c43158f8fec0",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "12. 储能支援与下限保护",
+          "start_line": 122,
+          "end_line": 122,
+          "content": "当路径容量不足但存在可用电芯池时，余辉储能器可以在目标附近提供支援。它先读取霁光预测器的未来峰值，再确保放电后荷电比例不低于 `afterglow.storage.floor-percent`。因此一次支援是否允许，需要联合未来需求和储能下限两处信息判断。"
+        },
+        {
+          "rank": 2,
+          "score": 0.6666667,
+          "chunk_id": "e8ee4da6-87be-46c0-9a0a-a188d6c6e415",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "5. 雾桥路由器",
+          "start_line": 39,
+          "end_line": 39,
+          "content": "路由器不修改配额数值，也不决定储能池是否放电。找不到满足最大跳数的路径时返回 `SLR-RTE-423`，含义是“输送路径不可达”；存在路径但总容量不足时返回 `SLR-RTE-429`，含义是“桥段容量不足”。前者应检查拓扑与禁行清单，后者应调整配额或请求储能支援。"
+        },
+        {
+          "rank": 3,
+          "score": 0.45,
+          "chunk_id": "07eb4d07-719d-4fa8-9a1d-de33d22f5bc0",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "17. 运维检查顺序",
+          "start_line": 167,
+          "end_line": 167,
+          "content": "当用户报告“目标未收到足够能量”时，先在脉轮协调器确认是否获得已批准配额，再到雾桥路由器确认是否存在可行路径，最后查看余辉储能器是否因下限或温差冻结拒绝支援。跳过配额检查直接调整路由，可能为一个本就未获配额的目标制造无效路径。"
+        },
+        {
+          "rank": 4,
+          "score": 0.4166667,
+          "chunk_id": "0e31b923-7e91-4b7c-a564-ccdc8a1abb92",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "13. 事件恢复顺序",
+          "start_line": 145,
+          "end_line": 145,
+          "content": "如果路径不可达且目标附近储能也低于下限，应保留已批准配额作为审计事实，先修复拓扑或解除禁行；储能器在没有紧急授权时不能用低于下限的电量掩盖路由故障。"
+        },
+        {
+          "rank": 5,
+          "score": 0.34285715,
+          "chunk_id": "d2aae17f-a301-4962-bb25-046e8eb4c106",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "11. 路径计算与容量处理",
+          "start_line": 118,
+          "end_line": 118,
+          "content": "处理 `SLR-RTE-423` 时先核对桥段是否被拓扑筛选移除，再检查 `mist.route.max-hops`。处理 `SLR-RTE-429` 时应查看剩余容量和批准配额，增加最大跳数不一定能解决容量不足。"
+        }
+      ],
+      "matched_evidence": [
+        2
+      ],
+      "missing_required_evidence": [
+        0,
+        1
+      ],
+      "hit_at_1": 1.0,
+      "hit_at_5": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_5": 0.3333333333333333,
+      "mrr_at_5": 1.0,
+      "ndcg_at_5": 0.18543279769614657,
+      "all_required_at_5": 0.0,
+      "passed": false,
+      "observational": false,
+      "error": null
+    },
+    {
+      "case_id": "ret-019",
+      "query": "某目标能量不足时，应该按什么跨模块顺序定位？",
+      "strategy": "hybrid",
+      "latency_ms": 207.3838000651449,
+      "hits": [
+        {
+          "rank": 1,
+          "score": 0.8333334,
+          "chunk_id": "c0773d94-e79e-439d-b574-550012ce8777",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "13. 事件恢复顺序",
+          "start_line": 134,
+          "end_line": 134,
+          "content": "单模块错误按“冻结受影响动作、保留已批准对象、记录审计、尝试局部恢复”的顺序处理。采集迟到不会停止旧快照供预测使用；预测样本不足会生成保守曲线；路径不可达只冻结对应目标的输送计划；储能温差异常只冻结电芯动作。"
+        },
+        {
+          "rank": 2,
+          "score": 0.8333334,
+          "chunk_id": "07eb4d07-719d-4fa8-9a1d-de33d22f5bc0",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "17. 运维检查顺序",
+          "start_line": 167,
+          "end_line": 167,
+          "content": "当用户报告“目标未收到足够能量”时，先在脉轮协调器确认是否获得已批准配额，再到雾桥路由器确认是否存在可行路径，最后查看余辉储能器是否因下限或温差冻结拒绝支援。跳过配额检查直接调整路由，可能为一个本就未获配额的目标制造无效路径。"
+        },
+        {
+          "rank": 3,
+          "score": 0.25,
+          "chunk_id": "ac10ae7b-bbc6-422b-9037-d1b227ef1fb6",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "8. 模块相似概念辨析",
+          "start_line": 59,
+          "end_line": 59,
+          "content": "“采集快照”与“审计快照”都包含时间和摘要，但采集快照保存设备观测，审计快照保存决策来源。“配额草案”与“储能计划”都带有能量数值，但配额草案约束目标对象，储能计划约束电芯动作。“路由冻结”与“维护冻结”都会阻止执行，前者针对桥段，后者针对候选对象。"
+        },
+        {
+          "rank": 4,
+          "score": 0.2,
+          "chunk_id": "aa060b32-9bb9-409b-aeb6-deecb584dca6",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "5. 雾桥路由器",
+          "start_line": 37,
+          "end_line": 37,
+          "content": "雾桥路由器接收已批准配额、桥段容量和禁行清单，计算从能量源到目标舱的有向路径。它优先选择跳数少且热损耗低的桥段；当主路径的剩余容量低于配额时，可拆分到两条互不共享脆弱节点的路径。配置项 `mist.route.max-hops` 默认 7，限制单条路径的最大桥段数。"
+        },
+        {
+          "rank": 5,
+          "score": 0.16666667,
+          "chunk_id": "3af6ab98-ee6d-40f1-a5af-f6ed3528b2f5",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "20. 术语与责任边界",
+          "start_line": 187,
+          "end_line": 187,
+          "content": "任何模块都不得越权修改上游事实：路由器不能提高配额，储能器不能改写预测，审计器不能替现场控制器执行回滚。跨模块故障处理应保留各自版本，通过关联标识串联，而不是把多个阶段压缩成一条不可追踪记录。"
+        }
+      ],
+      "matched_evidence": [
+        2
+      ],
+      "missing_required_evidence": [
+        0,
+        1
+      ],
+      "hit_at_1": 0.0,
+      "hit_at_5": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_5": 0.3333333333333333,
+      "mrr_at_5": 0.5,
+      "ndcg_at_5": 0.11699506935449569,
+      "all_required_at_5": 0.0,
+      "passed": false,
+      "observational": false,
+      "error": null
+    },
+    {
+      "case_id": "ret-020",
+      "query": "预测范围和配额预留同时调整时，怎样避免审计上分不清变化来源？",
+      "strategy": "hybrid",
+      "latency_ms": 215.8482000231743,
+      "hits": [
+        {
+          "rank": 1,
+          "score": 1.0,
+          "chunk_id": "1783772b-852b-4256-8123-8e4e45bf1b56",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "18. 安全变更窗口",
+          "start_line": 175,
+          "end_line": 175,
+          "content": "同时修改预测跨度与预留比例时，应先保留旧预测版本完成当前配额批准，再让新跨度生成下一版本需求，最后应用新的预留比例。这样审计器能明确区分变化来自需求范围还是分配规则。"
+        },
+        {
+          "rank": 2,
+          "score": 0.45833334,
+          "chunk_id": "670485a5-155d-4a2b-a967-9d5c6b62718e",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "10. 配额生成与批准流程",
+          "start_line": 94,
+          "end_line": 94,
+          "content": "协调器收到预测结果后创建 `draft_revision`，按照优先级和欠供轮转规则分配可用总量，再扣除预留比例。规则校验确认数值非负、总和不超过输入能力且维护对象未获配额。批准动作生成新的 `approved_revision`，并把草案摘要交给银弦审计器。"
+        },
+        {
+          "rank": 3,
+          "score": 0.45,
+          "chunk_id": "fa9b1de0-88af-485f-b8f1-11272670ea5b",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "7. 银弦审计器",
+          "start_line": 53,
+          "end_line": 53,
+          "content": "银弦审计器为快照、预测、配额、路径和储能动作生成关联记录。每条记录保存决策类型、来源版本、输入摘要、执行时间和前一条记录的摘要链。配置项 `silver.audit.retention-days` 默认 45，只影响本地审计记录保留期，不影响原始观测快照的保留策略。"
+        },
+        {
+          "rank": 4,
+          "score": 0.4166667,
+          "chunk_id": "09c6b760-cf08-432b-affa-7944fc7bec77",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "10. 配额生成与批准流程",
+          "start_line": 107,
+          "end_line": 107,
+          "content": "若要完整解释某个目标最终为何获得特定配额，必须同时查看霁光预测器给出的需求区间和本节的优先级、欠供轮转及预留规则；只看任一章节都无法还原完整原因。"
+        },
+        {
+          "rank": 5,
+          "score": 0.33333334,
+          "chunk_id": "e6a53b0f-e438-41ff-9924-308d62552202",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "4. 脉轮协调器",
+          "start_line": 29,
+          "end_line": 29,
+          "content": "脉轮协调器把需求区间、岛屿优先级和维护约束组合成配额草案。它先保障生命维持舱，再处理农圃与工坊；同级对象按照上个结算窗的欠供比例轮转。配置项 `pulse.quota.reserve-percent` 表示预留比例，默认 9，合法范围为 0 到 30。"
+        }
+      ],
+      "matched_evidence": [
+        0,
+        1
+      ],
+      "missing_required_evidence": [],
+      "hit_at_1": 1.0,
+      "hit_at_5": 1.0,
+      "precision_at_5": 0.4,
+      "recall_at_5": 1.0,
+      "mrr_at_5": 1.0,
+      "ndcg_at_5": 0.8772153153380493,
+      "all_required_at_5": 1.0,
+      "passed": true,
+      "observational": false,
+      "error": null
+    },
+    {
+      "case_id": "ret-021",
+      "query": "设备观测快照和决策追踪快照有什么本质差别？",
+      "strategy": "hybrid",
+      "latency_ms": 358.95069991238415,
+      "hits": [
+        {
+          "rank": 1,
+          "score": 1.0,
+          "chunk_id": "ac10ae7b-bbc6-422b-9037-d1b227ef1fb6",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "8. 模块相似概念辨析",
+          "start_line": 59,
+          "end_line": 59,
+          "content": "“采集快照”与“审计快照”都包含时间和摘要，但采集快照保存设备观测，审计快照保存决策来源。“配额草案”与“储能计划”都带有能量数值，但配额草案约束目标对象，储能计划约束电芯动作。“路由冻结”与“维护冻结”都会阻止执行，前者针对桥段，后者针对候选对象。"
+        },
+        {
+          "rank": 2,
+          "score": 0.6666667,
+          "chunk_id": "57b94ccf-d228-4043-b9e8-2eddd97e68cb",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "20. 术语与责任边界",
+          "start_line": 185,
+          "end_line": 185,
+          "content": "潮拍是观测封存节奏，调度窗是实时输送周期，结算窗是责任汇总周期。快照属于采集事实，预测属于未来估计，配额属于分配上限，路径属于物理输送方案，储能计划属于电芯动作，审计记录属于决策追踪。"
+        },
+        {
+          "rank": 3,
+          "score": 0.34285715,
+          "chunk_id": "e5281758-e6ce-4c18-bb68-16bd898f43d1",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "15. 观测包迟到处理",
+          "start_line": 155,
+          "end_line": 155,
+          "content": "迟到不超过 `tide.collect.late-grace-seconds` 的观测包可以重开当前潮拍快照，快照版本号递增，预测器下次读取最新版本。超过宽限的包只进入旁路记录并产生 `SLR-COL-104`，不会回写已经完成的预测和配额。"
+        },
+        {
+          "rank": 4,
+          "score": 0.33333334,
+          "chunk_id": "fa9b1de0-88af-485f-b8f1-11272670ea5b",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "7. 银弦审计器",
+          "start_line": 53,
+          "end_line": 53,
+          "content": "银弦审计器为快照、预测、配额、路径和储能动作生成关联记录。每条记录保存决策类型、来源版本、输入摘要、执行时间和前一条记录的摘要链。配置项 `silver.audit.retention-days` 默认 45，只影响本地审计记录保留期，不影响原始观测快照的保留策略。"
+        },
+        {
+          "rank": 5,
+          "score": 0.33333334,
+          "chunk_id": "0ee1a62f-29dd-4ba6-9560-c3dd241b689d",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "15. 观测包迟到处理",
+          "start_line": 157,
+          "end_line": 157,
+          "content": "若迟到包同时缺少单位，采集器先按迟到规则决定是否进入快照；只有进入快照的包才继续单位校验。旁路记录保留原始单位声明，供后续人工分析，但不能参与自动预测。"
+        }
+      ],
+      "matched_evidence": [
+        0
+      ],
+      "missing_required_evidence": [],
+      "hit_at_1": 1.0,
+      "hit_at_5": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "mrr_at_5": 1.0,
+      "ndcg_at_5": 1.0,
+      "all_required_at_5": 1.0,
+      "passed": true,
+      "observational": false,
+      "error": null
+    },
+    {
+      "case_id": "ret-022",
+      "query": "储能动作方案和目标分配上限是同一回事吗？",
+      "strategy": "hybrid",
+      "latency_ms": 243.74029994942248,
+      "hits": [
+        {
+          "rank": 1,
+          "score": 0.64285713,
+          "chunk_id": "57b94ccf-d228-4043-b9e8-2eddd97e68cb",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "20. 术语与责任边界",
+          "start_line": 185,
+          "end_line": 185,
+          "content": "潮拍是观测封存节奏，调度窗是实时输送周期，结算窗是责任汇总周期。快照属于采集事实，预测属于未来估计，配额属于分配上限，路径属于物理输送方案，储能计划属于电芯动作，审计记录属于决策追踪。"
+        },
+        {
+          "rank": 2,
+          "score": 0.5769231,
+          "chunk_id": "07eb4d07-719d-4fa8-9a1d-de33d22f5bc0",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "17. 运维检查顺序",
+          "start_line": 167,
+          "end_line": 167,
+          "content": "当用户报告“目标未收到足够能量”时，先在脉轮协调器确认是否获得已批准配额，再到雾桥路由器确认是否存在可行路径，最后查看余辉储能器是否因下限或温差冻结拒绝支援。跳过配额检查直接调整路由，可能为一个本就未获配额的目标制造无效路径。"
+        },
+        {
+          "rank": 3,
+          "score": 0.53333336,
+          "chunk_id": "64fb5d49-aaa7-477c-8c5b-10ccbf5deba5",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "6. 余辉储能器",
+          "start_line": 47,
+          "end_line": 47,
+          "content": "当荷电比例低于下限且没有紧急授权时，储能器拒绝放电并返回 `SLR-STO-512`。当电芯温差超过虚构安全阈值时返回 `SLR-STO-519`，同时冻结充放电，但不会撤销脉轮协调器已经批准的配额。储能计划和配额计划名称相近，前者描述电芯动作，后者描述对象可获得的上限。"
+        },
+        {
+          "rank": 4,
+          "score": 0.39285713,
+          "chunk_id": "9aa5ce61-20a9-4343-bee9-c43158f8fec0",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "12. 储能支援与下限保护",
+          "start_line": 122,
+          "end_line": 122,
+          "content": "当路径容量不足但存在可用电芯池时，余辉储能器可以在目标附近提供支援。它先读取霁光预测器的未来峰值，再确保放电后荷电比例不低于 `afterglow.storage.floor-percent`。因此一次支援是否允许，需要联合未来需求和储能下限两处信息判断。"
+        },
+        {
+          "rank": 5,
+          "score": 0.33333334,
+          "chunk_id": "c36626b2-17b9-4097-a58a-9cb2f83efe2f",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "6. 余辉储能器",
+          "start_line": 45,
+          "end_line": 45,
+          "content": "余辉储能器管理虚构的星砂电芯池。它根据已批准路径的缺口、当前荷电比例和未来预测峰值生成充放电计划。配置项 `afterglow.storage.floor-percent` 默认 22，表示常规调度不得突破的最低荷电比例；紧急生命维持事件可由双人授权临时越过该下限。"
+        }
+      ],
+      "matched_evidence": [
+        1
+      ],
+      "missing_required_evidence": [
+        0
+      ],
+      "hit_at_1": 0.0,
+      "hit_at_5": 1.0,
+      "precision_at_5": 0.2,
+      "recall_at_5": 0.5,
+      "mrr_at_5": 0.3333333333333333,
+      "ndcg_at_5": 0.13770577618809332,
+      "all_required_at_5": 0.0,
+      "passed": false,
+      "observational": false,
+      "error": null
+    },
+    {
+      "case_id": "ret-023",
+      "query": "星门身份令牌的有效期和自动续签窗口是多少？",
+      "strategy": "hybrid",
+      "latency_ms": 234.08519988879561,
+      "hits": [
+        {
+          "rank": 1,
+          "score": 0.5,
+          "chunk_id": "60bd730f-e144-458c-88f2-16721eab398b",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "星澜浮岛能源编排系统技术手册",
+          "start_line": 3,
+          "end_line": 3,
+          "content": "本文件是完全虚构的检索评测语料，不描述任何真实系统。"
+        },
+        {
+          "rank": 2,
+          "score": 0.33333334,
+          "chunk_id": "bc6eba73-73cd-489e-9a3d-a500b64bf9a2",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "8. 模块相似概念辨析",
+          "start_line": 61,
+          "end_line": 61,
+          "content": "“迟到宽限”与“预测跨度”都使用时间窗口表达。迟到宽限只决定观测包能否进入当前快照；预测跨度决定输出覆盖多少个未来调度窗。二者不能通过同一个配置项调整。"
+        },
+        {
+          "rank": 3,
+          "score": 0.25,
+          "chunk_id": "054a8a43-4d49-4d82-a96c-ab9582c5a556",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "2. 晨潮采集器",
+          "start_line": 17,
+          "end_line": 17,
+          "content": "采集器只保证输入快照完整，不判断未来需求，也不向输送节点下达动作。迟到包在宽限期内会重开当前快照，超过宽限期则写入旁路记录，并产生错误码 `SLR-COL-104`，含义是“观测包超过潮拍宽限”。该错误不会触发全岛停供。"
+        },
+        {
+          "rank": 4,
+          "score": 0.2,
+          "chunk_id": "fa9b1de0-88af-485f-b8f1-11272670ea5b",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "7. 银弦审计器",
+          "start_line": 53,
+          "end_line": 53,
+          "content": "银弦审计器为快照、预测、配额、路径和储能动作生成关联记录。每条记录保存决策类型、来源版本、输入摘要、执行时间和前一条记录的摘要链。配置项 `silver.audit.retention-days` 默认 45，只影响本地审计记录保留期，不影响原始观测快照的保留策略。"
+        },
+        {
+          "rank": 5,
+          "score": 0.16666667,
+          "chunk_id": "3a945a47-3ba5-47ed-9366-9dd16a4a1b93",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "星澜浮岛能源编排系统技术手册",
+          "start_line": 5,
+          "end_line": 5,
+          "content": "星澜浮岛能源编排系统服务于虚构的“澄空群岛”，负责在漂浮居住舱、藻光农圃和气象桅杆之间编排能源。手册中的组织、模块、协议、配置、错误码与运行数据均为虚构内容，只用于验证中文技术资料的检索稳定性。系统把能量采集、需求预测、配额计算、输送调度、储能调节和审计追踪拆成相近但互不替代的职责，运维人员必须依据章节中的边界处理事件。"
+        }
+      ],
+      "matched_evidence": [],
+      "missing_required_evidence": [],
+      "hit_at_1": 0.0,
+      "hit_at_5": 0.0,
+      "precision_at_5": 0.0,
+      "recall_at_5": null,
+      "mrr_at_5": null,
+      "ndcg_at_5": null,
+      "all_required_at_5": null,
+      "passed": null,
+      "observational": true,
+      "error": null
+    },
+    {
+      "case_id": "ret-024",
+      "query": "天穹外部气象接口失败后采用几秒的指数退避？",
+      "strategy": "hybrid",
+      "latency_ms": 247.95920005999506,
+      "hits": [
+        {
+          "rank": 1,
+          "score": 0.5909091,
+          "chunk_id": "e5281758-e6ce-4c18-bb68-16bd898f43d1",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "15. 观测包迟到处理",
+          "start_line": 155,
+          "end_line": 155,
+          "content": "迟到不超过 `tide.collect.late-grace-seconds` 的观测包可以重开当前潮拍快照，快照版本号递增，预测器下次读取最新版本。超过宽限的包只进入旁路记录并产生 `SLR-COL-104`，不会回写已经完成的预测和配额。"
+        },
+        {
+          "rank": 2,
+          "score": 0.5,
+          "chunk_id": "3a945a47-3ba5-47ed-9366-9dd16a4a1b93",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "星澜浮岛能源编排系统技术手册",
+          "start_line": 5,
+          "end_line": 5,
+          "content": "星澜浮岛能源编排系统服务于虚构的“澄空群岛”，负责在漂浮居住舱、藻光农圃和气象桅杆之间编排能源。手册中的组织、模块、协议、配置、错误码与运行数据均为虚构内容，只用于验证中文技术资料的检索稳定性。系统把能量采集、需求预测、配额计算、输送调度、储能调节和审计追踪拆成相近但互不替代的职责，运维人员必须依据章节中的边界处理事件。"
+        },
+        {
+          "rank": 3,
+          "score": 0.33333334,
+          "chunk_id": "07d4f3d4-42bb-4c83-8a4f-73d1b2f3ff2c",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "17. 运维检查顺序",
+          "start_line": 169,
+          "end_line": 169,
+          "content": "当用户报告“预测突然降低”时，先检查晨潮快照是否完整，再辨别 `SLR-FOR-207` 与 `SLR-FOR-208`。前者修正单位映射，后者补足历史样本；不要因为两者都以 `SLR-FOR` 开头而采用同一恢复操作。"
+        },
+        {
+          "rank": 4,
+          "score": 0.25,
+          "chunk_id": "670485a5-155d-4a2b-a967-9d5c6b62718e",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "10. 配额生成与批准流程",
+          "start_line": 94,
+          "end_line": 94,
+          "content": "协调器收到预测结果后创建 `draft_revision`，按照优先级和欠供轮转规则分配可用总量，再扣除预留比例。规则校验确认数值非负、总和不超过输入能力且维护对象未获配额。批准动作生成新的 `approved_revision`，并把草案摘要交给银弦审计器。"
+        },
+        {
+          "rank": 5,
+          "score": 0.2,
+          "chunk_id": "9aa5ce61-20a9-4343-bee9-c43158f8fec0",
+          "document_name": "synthetic_retrieval_corpus_v1.md",
+          "section_title": "12. 储能支援与下限保护",
+          "start_line": 122,
+          "end_line": 122,
+          "content": "当路径容量不足但存在可用电芯池时，余辉储能器可以在目标附近提供支援。它先读取霁光预测器的未来峰值，再确保放电后荷电比例不低于 `afterglow.storage.floor-percent`。因此一次支援是否允许，需要联合未来需求和储能下限两处信息判断。"
+        }
+      ],
+      "matched_evidence": [],
+      "missing_required_evidence": [],
+      "hit_at_1": 0.0,
+      "hit_at_5": 0.0,
+      "precision_at_5": 0.0,
+      "recall_at_5": null,
+      "mrr_at_5": null,
+      "ndcg_at_5": null,
+      "all_required_at_5": null,
+      "passed": null,
+      "observational": true,
+      "error": null
+    }
+  ],
+  "unanswerable_observations": [
+    {
+      "case_id": "ret-023",
+      "returned_count": 5,
+      "top1_score": 0.5,
+      "top1_document": "synthetic_retrieval_corpus_v1.md",
+      "top1_section": "星澜浮岛能源编排系统技术手册",
+      "top1_content_preview": "本文件是完全虚构的检索评测语料，不描述任何真实系统。"
+    },
+    {
+      "case_id": "ret-024",
+      "returned_count": 5,
+      "top1_score": 0.5909091,
+      "top1_document": "synthetic_retrieval_corpus_v1.md",
+      "top1_section": "15. 观测包迟到处理",
+      "top1_content_preview": "迟到不超过 `tide.collect.late-grace-seconds` 的观测包可以重开当前潮拍快照，快照版本号递增，预测器下次读取最新版本。超过宽限的包只进入旁路记录并产生 `SLR-COL-104`，不会回写已经完成的预测和配额。"
+    }
+  ]
+}
