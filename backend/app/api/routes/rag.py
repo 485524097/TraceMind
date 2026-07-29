@@ -70,6 +70,8 @@ async def prepare_rag_stream(
                 body.conversation_id,
                 query=body.query,
                 trace_id=trace_id,
+                history_max_turns=service.settings.query_rewrite_history_max_turns,
+                history_max_chars=service.settings.query_rewrite_history_max_chars,
             )
         except ConversationNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Conversation not found") from exc
@@ -79,13 +81,23 @@ async def prepare_rag_stream(
                 status_code=500, detail="The conversation operation could not be completed"
             ) from exc
     try:
-        prepared = await service.prepare(
-            knowledge_base_id,
-            query=body.query,
-            language=body.language,
-            document_id=body.document_id,
-            **({"trace_id": trace_id} if trace_id is not None else {}),
-        )
+        if exchange is not None and trace_id is not None:
+            prepared = await service.prepare(
+                knowledge_base_id,
+                query=body.query,
+                language=body.language,
+                document_id=body.document_id,
+                trace_id=trace_id,
+                conversation_id=exchange.conversation_id,
+                conversation_history=exchange.history,
+            )
+        else:
+            prepared = await service.prepare(
+                knowledge_base_id,
+                query=body.query,
+                language=body.language,
+                document_id=body.document_id,
+            )
     except HybridSearchUnavailableError as exc:
         if exchange is not None:
             await conversation_service.finish_exchange(
@@ -120,7 +132,17 @@ async def stream_rag_answer(
     answer_parts: list[str] = []
     sources: list[dict[str, Any]] | None = None
     no_answer_content: str | None = None
+    llm_first_token_latency_ms = 0
     terminal_saved = exchange is None
+
+    def rewrite_metadata() -> dict[str, object]:
+        return {
+            "query_rewrite_mode": prepared.query_rewrite_mode,
+            "query_rewrite_latency_ms": prepared.query_rewrite_latency_ms,
+            "history_turn_count": len(prepared.conversation_history),
+            "retrieval_query": prepared.retrieval_query,
+            "llm_first_token_latency_ms": llm_first_token_latency_ms,
+        }
 
     async def finish(
         status: str,
@@ -150,15 +172,24 @@ async def stream_rag_answer(
                     text = data.get("text")
                     if isinstance(text, str):
                         answer_parts.append(text)
+                    raw_first_token_latency = data.get("llm_first_token_latency_ms")
+                    if isinstance(raw_first_token_latency, int):
+                        llm_first_token_latency_ms = raw_first_token_latency
                 elif event == "no_answer":
                     message = data.get("message")
                     if isinstance(message, str):
                         no_answer_content = message
                 elif event == "error":
+                    raw_first_token_latency = data.get("llm_first_token_latency_ms")
+                    if isinstance(raw_first_token_latency, int):
+                        llm_first_token_latency_ms = raw_first_token_latency
                     await finish(
                         "failed",
                         str(data.get("message") or "回答生成服务暂时不可用，请稍后重试。"),
-                        {"error_code": str(data.get("code") or "generation_failed")},
+                        {
+                            "error_code": str(data.get("code") or "generation_failed"),
+                            **rewrite_metadata(),
+                        },
                     )
                 elif event == "done":
                     status = (
@@ -170,7 +201,7 @@ async def stream_rag_answer(
                     await finish(
                         "no_answer" if no_answer_content is not None else "cancelled",
                         no_answer_content or "".join(answer_parts),
-                        {"cancelled": no_answer_content is None},
+                        {"cancelled": no_answer_content is None, **rewrite_metadata()},
                     )
                     logger.info(
                         "RAG disconnected trace_id=%s knowledge_base_id=%s disconnected=true",
@@ -190,7 +221,7 @@ async def stream_rag_answer(
             await finish(
                 "no_answer" if no_answer_content is not None else "cancelled",
                 no_answer_content or "".join(answer_parts),
-                {"cancelled": no_answer_content is None},
+                {"cancelled": no_answer_content is None, **rewrite_metadata()},
             )
         except SQLAlchemyError:
             logger.exception("Cancelled conversation response could not be persisted")
@@ -200,7 +231,7 @@ async def stream_rag_answer(
             await finish(
                 "failed",
                 "回答生成服务暂时不可用，请稍后重试。",
-                {"error_code": "generation_failed"},
+                {"error_code": "generation_failed", **rewrite_metadata()},
             )
         except SQLAlchemyError:
             logger.exception("Failed conversation response could not be persisted")
@@ -211,7 +242,7 @@ async def stream_rag_answer(
                 await finish(
                     "no_answer" if no_answer_content is not None else "cancelled",
                     no_answer_content or "".join(answer_parts),
-                    {"cancelled": no_answer_content is None},
+                    {"cancelled": no_answer_content is None, **rewrite_metadata()},
                 )
             except SQLAlchemyError:
                 logger.exception("Conversation response finalization failed")

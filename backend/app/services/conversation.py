@@ -26,6 +26,13 @@ class ConversationExchange:
     user_message_id: UUID
     assistant_message_id: UUID
     trace_id: UUID
+    history: tuple["ConversationTurn", ...] = ()
+
+
+@dataclass(frozen=True)
+class ConversationTurn:
+    user: str
+    assistant: str
 
 
 class ConversationService:
@@ -107,8 +114,16 @@ class ConversationService:
         *,
         query: str,
         trace_id: UUID,
+        history_max_turns: int = 4,
+        history_max_chars: int = 6_000,
     ) -> ConversationExchange:
         conversation = await self.get(knowledge_base_id, conversation_id)
+        messages = await self.repository.list_messages(conversation.id)
+        history = self._select_history(
+            messages,
+            max_turns=history_max_turns,
+            max_chars=history_max_chars,
+        )
         user_message = ConversationMessage(
             id=uuid4(),
             conversation_id=conversation.id,
@@ -134,7 +149,39 @@ class ConversationService:
             user_message.id,
             uuid4(),
             trace_id,
+            history,
         )
+
+    @staticmethod
+    def _select_history(
+        messages: builtins.list[ConversationMessage],
+        *,
+        max_turns: int,
+        max_chars: int,
+    ) -> tuple[ConversationTurn, ...]:
+        completed: builtins.list[ConversationTurn] = []
+        pending_user: str | None = None
+        for message in messages:
+            if message.role == "user":
+                pending_user = message.content if message.status == "completed" else None
+                continue
+            if message.role != "assistant":
+                pending_user = None
+                continue
+            if pending_user is not None and message.status == "completed":
+                completed.append(ConversationTurn(pending_user, message.content))
+            pending_user = None
+
+        selected: builtins.list[ConversationTurn] = []
+        total_chars = 0
+        for turn in reversed(completed[-max_turns:]):
+            turn_chars = len(turn.user) + len(turn.assistant)
+            if total_chars + turn_chars > max_chars:
+                break
+            selected.append(turn)
+            total_chars += turn_chars
+        selected.reverse()
+        return tuple(selected)
 
     async def finish_exchange(
         self,

@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     rag_retrieval_limit: int = 5
     rag_rerank_candidate_limit: int = 10
     rag_max_context_chars: int = 12_000
+    query_rewrite_timeout_seconds: float = 15
+    query_rewrite_history_max_turns: int = 4
+    query_rewrite_history_max_chars: int = 6_000
+    query_rewrite_max_query_chars: int = 2_000
     reranker_enabled: bool = False
     reranker_base_url: str = "http://127.0.0.1:8011"
     reranker_timeout_seconds: float = 12
@@ -251,6 +255,14 @@ class Settings(BaseSettings):
             raise ValueError("RERANKER_DTYPE must be float16, float32, or bfloat16")
         if self.rag_max_context_chars < 1_000:
             raise ValueError("RAG_MAX_CONTEXT_CHARS must be at least 1000")
+        if self.query_rewrite_timeout_seconds <= 0:
+            raise ValueError("QUERY_REWRITE_TIMEOUT_SECONDS must be greater than zero")
+        if not 1 <= self.query_rewrite_history_max_turns <= 20:
+            raise ValueError("QUERY_REWRITE_HISTORY_MAX_TURNS must be between 1 and 20")
+        if self.query_rewrite_history_max_chars < 100:
+            raise ValueError("QUERY_REWRITE_HISTORY_MAX_CHARS must be at least 100")
+        if not 1 <= self.query_rewrite_max_query_chars <= 10_000:
+            raise ValueError("QUERY_REWRITE_MAX_QUERY_CHARS must be between 1 and 10000")
         if self.document_max_file_size_bytes <= 0:
             raise ValueError("DOCUMENT_MAX_FILE_SIZE_BYTES must be greater than zero")
         if self.document_upload_chunk_size_bytes <= 0:

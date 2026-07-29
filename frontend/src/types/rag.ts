@@ -58,11 +58,17 @@ export interface RagDoneEvent extends ConversationEventFields {
   valid_citation_count: number
   invalid_citation_count: number
   retrieval_latency_ms: number
+  llm_first_token_latency_ms?: number
   llm_latency_ms: number
   total_latency_ms: number
+  source_count?: number
   retrieval_mode?: string
   rerank_latency_ms?: number
   reranker_fallback?: boolean
+  query_rewrite_mode?: 'not_applicable' | 'skipped' | 'rewritten' | 'fallback'
+  query_rewrite_latency_ms?: number
+  history_turn_count?: number
+  retrieval_query?: string
 }
 
 export interface RagErrorEvent extends ConversationEventFields {

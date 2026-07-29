@@ -194,15 +194,83 @@
   display: grid;
   grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
   gap: 1rem;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.management-page.conversation-page {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.75rem;
+  height: 100dvh;
+  min-height: 100dvh;
+  padding: clamp(10px, 1.5vw, 20px);
+  overflow: hidden;
+}
+
+.conversation-page .management-header {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-width: none;
+  max-height: 140px;
+  margin: 0;
+  overflow: hidden;
+}
+
+.conversation-page .management-header h1 {
+  margin: 2px 0 0;
+  font-size: clamp(28px, 3.5vw, 44px);
+  line-height: 1.05;
+}
+
+.conversation-page .management-header .back-link {
+  margin: 0 0 4px;
+}
+
+.conversation-page .management-header .eyebrow {
+  margin: 0 0 4px;
+}
+
+.conversation-page .conversation-description {
+  margin: 4px 0 0;
+  color: #68748a;
+}
+
+.conversation-page .conversation-layout > .knowledge-panel {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-width: none;
+  margin: 0;
 }
 
 .conversation-sidebar {
-  align-self: start;
+  display: flex;
+  align-self: stretch;
+  flex-direction: column;
+  padding: 1rem;
+  overflow: hidden;
 }
 
 .conversation-sidebar-actions {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  flex: 0 0 auto;
   flex-wrap: wrap;
   margin-bottom: 1rem;
+  background: #fff;
+}
+
+.conversation-list-scroll {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
 }
 
 .conversation-list-item {
@@ -232,16 +300,28 @@
 }
 
 .conversation-main {
-  min-height: 65vh;
   display: flex;
   flex-direction: column;
+  padding: 1rem;
+  overflow: hidden;
 }
 
 .conversation-thread {
   display: grid;
   gap: 1rem;
   flex: 1;
-  overflow: auto;
+  min-width: 0;
+  min-height: 0;
+  align-content: start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.conversation-empty-state {
+  display: grid;
+  flex: 1;
+  place-content: center;
+  justify-items: center;
 }
 
 .conversation-message {
@@ -271,14 +351,66 @@
   margin-top: 0.85rem;
 }
 
-.conversation-sources summary {
+.conversation-sources summary,
+.conversation-execution-details summary {
   cursor: pointer;
   font-weight: 600;
 }
 
+.conversation-sources summary {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.conversation-execution-details {
+  margin-top: 0.85rem;
+}
+
+.conversation-execution-details dl {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr);
+  gap: 0.4rem 0.85rem;
+  margin: 0.75rem 0 0;
+  color: #536079;
+  font-size: 0.875rem;
+}
+
+.conversation-execution-details dt {
+  font-weight: 650;
+}
+
+.conversation-execution-details dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.conversation-progress {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.45rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: 10px;
+  color: #536079;
+  background: #f3f6fa;
+}
+
+.conversation-progress[data-state='failed'],
+.conversation-progress[data-state='cancelled'] {
+  color: #8d3b3b;
+}
+
 .conversation-composer {
-  margin-top: 1rem;
+  flex: 0 0 auto;
   flex-wrap: wrap;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #edf0f4;
+  background: #fff;
 }
 
 .conversation-composer input:first-child {
@@ -288,6 +420,29 @@
 @media (max-width: 800px) {
   .conversation-layout {
     grid-template-columns: 1fr;
+    grid-template-rows: minmax(120px, 28%) minmax(0, 1fr);
+  }
+
+  .conversation-sidebar,
+  .conversation-main {
+    overflow: hidden;
+  }
+
+  .conversation-sidebar-actions {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+
+}
+
+@media (max-height: 820px) {
+  .conversation-page .management-header .eyebrow,
+  .conversation-page .conversation-description {
+    display: none;
+  }
+
+  .conversation-page .management-header h1 {
+    font-size: clamp(26px, 3vw, 38px);
   }
 }
 
