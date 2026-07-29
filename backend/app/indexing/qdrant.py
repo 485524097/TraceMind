@@ -248,6 +248,11 @@ class QdrantGateway:
             document_id=document_id,
             excluded_chunk_types=excluded_chunk_types,
         )
+        fusion_limit = max(
+            limit,
+            self.dense_prefetch_limit,
+            self.sparse_prefetch_limit,
+        )
         try:
             response = await self.client.query_points(
                 self.collection_name,
@@ -267,13 +272,16 @@ class QdrantGateway:
                     ),
                 ],
                 query=models.FusionQuery(fusion=models.Fusion.RRF),
-                limit=limit,
+                limit=fusion_limit,
                 with_payload=True,
                 with_vectors=False,
             )
             return [
                 VectorSearchHit(float(point.score), dict(point.payload or {}))
-                for point in response.points
+                for point in sorted(
+                    response.points,
+                    key=lambda point: (-float(point.score), str(point.id)),
+                )[:limit]
             ]
         except Exception as exc:
             raise VectorIndexError("Hybrid search is unavailable") from exc
