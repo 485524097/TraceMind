@@ -18,7 +18,7 @@ from app.schemas.indexing import (
     SemanticSearchResultResponse,
 )
 from app.services.document_index_dispatcher import CeleryDocumentIndexingDispatcher
-from app.services.document_indexing import DocumentIndexingService
+from app.services.document_indexing import DocumentIndexingService, SemanticSearchResult
 from app.services.document_reranking import DocumentRerankingService
 from app.services.exceptions import (
     DocumentIndexingQueueError,
@@ -27,6 +27,7 @@ from app.services.exceptions import (
     HybridSearchUnavailableError,
     SemanticSearchUnavailableError,
 )
+from app.services.retrieval_query import PreparedRetrievalQuery
 
 router = APIRouter(prefix="/knowledge-bases/{knowledge_base_id}", tags=["semantic-search"])
 SessionDependency = Annotated[AsyncSession, Depends(get_db_session)]
@@ -118,6 +119,18 @@ def raise_index_http_error(exc: Exception) -> NoReturn:
     raise exc
 
 
+def search_response(
+    results: list[SemanticSearchResult],
+    prepared: PreparedRetrievalQuery,
+) -> SemanticSearchResponse:
+    return SemanticSearchResponse(
+        items=[SemanticSearchResultResponse.model_validate(result.__dict__) for result in results],
+        path_scope_mode=prepared.path_scope_mode,
+        scoped_relative_path=prepared.explicit_relative_path,
+        semantic_query=(prepared.semantic_query if prepared.path_scope_mode == "exact" else None),
+    )
+
+
 @router.post(
     "/documents/{document_id}/versions/{version_id}/index",
     response_model=DocumentIndexRequestResponse,
@@ -162,30 +175,39 @@ async def get_document_index_status(
     return index_status_response(version)
 
 
-@router.post("/search/semantic", response_model=SemanticSearchResponse)
+@router.post(
+    "/search/semantic",
+    response_model=SemanticSearchResponse,
+    response_model_exclude_defaults=True,
+)
 async def semantic_search(
     knowledge_base_id: UUID,
     body: SemanticSearchRequest,
     service: IndexingServiceDependency,
 ) -> SemanticSearchResponse:
     try:
+        prepared = await service.prepare_retrieval_query(
+            knowledge_base_id,
+            body.query,
+            document_id=body.document_id,
+        )
         results = await service.search(
             knowledge_base_id,
             query=body.query,
             limit=body.limit,
             language=body.language,
             document_id=body.document_id,
+            prepared_query=prepared,
         )
     except Exception as exc:
         raise_index_http_error(exc)
-    return SemanticSearchResponse(
-        items=[SemanticSearchResultResponse.model_validate(result.__dict__) for result in results]
-    )
+    return search_response(results, prepared)
 
 
 @router.post(
     "/search/hybrid",
     response_model=SemanticSearchResponse,
+    response_model_exclude_defaults=True,
     summary="Dense + BM25 RRF hybrid search",
     description="Returns Qdrant RRF ranking scores, not cosine similarity.",
 )
@@ -195,23 +217,28 @@ async def hybrid_search(
     service: IndexingServiceDependency,
 ) -> SemanticSearchResponse:
     try:
+        prepared = await service.prepare_retrieval_query(
+            knowledge_base_id,
+            body.query,
+            document_id=body.document_id,
+        )
         results = await service.hybrid_search(
             knowledge_base_id,
             query=body.query,
             limit=body.limit,
             language=body.language,
             document_id=body.document_id,
+            prepared_query=prepared,
         )
     except Exception as exc:
         raise_index_http_error(exc)
-    return SemanticSearchResponse(
-        items=[SemanticSearchResultResponse.model_validate(result.__dict__) for result in results]
-    )
+    return search_response(results, prepared)
 
 
 @router.post(
     "/search/reranked",
     response_model=SemanticSearchResponse,
+    response_model_exclude_defaults=True,
     summary="Hybrid search with local Cross-Encoder reranking",
     description="Returns raw Cross-Encoder logits for ranking; scores are not probabilities.",
 )
@@ -229,20 +256,24 @@ async def reranked_search(
             detail="limit must not exceed the configured rerank candidate limit",
         )
     try:
+        prepared = await indexing_service.prepare_retrieval_query(
+            knowledge_base_id,
+            body.query,
+            document_id=body.document_id,
+        )
         candidates = await indexing_service.hybrid_search(
             knowledge_base_id,
             query=body.query,
             limit=candidate_limit,
             language=body.language,
             document_id=body.document_id,
+            prepared_query=prepared,
         )
         results = await reranking_service.rerank(
-            body.query,
+            prepared.semantic_query,
             candidates,
             limit=min(body.limit, len(candidates)),
         )
     except Exception as exc:
         raise_index_http_error(exc)
-    return SemanticSearchResponse(
-        items=[SemanticSearchResultResponse.model_validate(result.__dict__) for result in results]
-    )
+    return search_response(results, prepared)

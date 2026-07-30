@@ -10,7 +10,7 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 from alembic.config import Config
-from sqlalchemy import event, inspect, select
+from sqlalchemy import event, inspect, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import (
@@ -54,6 +54,56 @@ def migrate(revision: str) -> None:
     get_settings.cache_clear()
 
 
+def downgrade(revision: str) -> None:
+    os.environ["DATABASE_URL"] = require_test_database_url()
+    get_settings.cache_clear()
+    command.downgrade(Config("alembic.ini"), revision)
+    get_settings.cache_clear()
+
+
+async def test_document_path_migration_backfills_and_round_trips() -> None:
+    await asyncio.to_thread(migrate, "head")
+    await asyncio.to_thread(downgrade, "20260729_0005")
+    engine = create_async_engine(require_test_database_url())
+    knowledge_base_id, document_id = uuid4(), uuid4()
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(
+                text("INSERT INTO knowledge_bases (id, name) VALUES (:id, :name)"),
+                {"id": knowledge_base_id, "name": "Migration path test"},
+            )
+            await connection.execute(
+                text(
+                    "INSERT INTO documents "
+                    "(id, knowledge_base_id, name, normalized_name, source_type) "
+                    "VALUES (:id, :knowledge_base_id, :name, :normalized_name, 'upload')"
+                ),
+                {
+                    "id": document_id,
+                    "knowledge_base_id": knowledge_base_id,
+                    "name": "README.md",
+                    "normalized_name": "readme.md",
+                },
+            )
+        await engine.dispose()
+        await asyncio.to_thread(migrate, "head")
+        engine = create_async_engine(require_test_database_url())
+        async with engine.connect() as connection:
+            row = (
+                await connection.execute(
+                    text("SELECT relative_path, normalized_path FROM documents WHERE id = :id"),
+                    {"id": document_id},
+                )
+            ).one()
+            assert row == ("README.md", "readme.md")
+        await engine.dispose()
+        await asyncio.to_thread(downgrade, "-1")
+        await asyncio.to_thread(migrate, "head")
+    finally:
+        await engine.dispose()
+        await asyncio.to_thread(migrate, "head")
+
+
 @pytest_asyncio.fixture
 async def database() -> AsyncIterator[tuple[AsyncSession, AsyncEngine]]:
     await asyncio.to_thread(migrate, "head")
@@ -71,6 +121,8 @@ def make_document(knowledge_base_id: object, name: str) -> Document:
         knowledge_base_id=knowledge_base_id,
         name=name,
         normalized_name=name.casefold(),
+        relative_path=name,
+        normalized_path=name.casefold(),
         source_type="upload",
     )
 
@@ -303,7 +355,7 @@ def test_document_migration_upgrade_downgrade_upgrade() -> None:
         version_column_types,
     ) = asyncio.run(inspect_schema())
     assert {"documents", "document_versions", "document_chunks"}.issubset(tables)
-    assert "uq_documents_knowledge_base_normalized_name" in document_uniques
+    assert "uq_documents_knowledge_base_normalized_path" in document_uniques
     assert "uq_document_versions_document_version" in version_uniques
     assert {
         "ck_document_versions_version_positive",

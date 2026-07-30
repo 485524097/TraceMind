@@ -35,10 +35,13 @@ export function getDocument(
 export function uploadDocument(
   knowledgeBaseId: string,
   file: File,
+  relativePath?: string,
+  signal?: AbortSignal,
 ): Promise<DocumentImportResponse> {
   const body = new FormData()
   body.append('file', file)
-  return apiRequest(basePath(knowledgeBaseId), { method: 'POST', body })
+  if (relativePath) body.append('relative_path', relativePath)
+  return apiRequest(basePath(knowledgeBaseId), { method: 'POST', body, signal })
 }
 
 export function listDocumentVersions(

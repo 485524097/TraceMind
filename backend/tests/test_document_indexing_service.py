@@ -24,6 +24,7 @@ from app.services.document_indexing import (
     deterministic_point_id,
 )
 from app.services.exceptions import DocumentVersionNotFoundError, SemanticSearchUnavailableError
+from app.services.retrieval_query import PreparedRetrievalQuery
 
 
 class FakeProvider:
@@ -39,6 +40,7 @@ class FakeProvider:
         self.error = error
         self.on_embed = on_embed
         self.document_inputs: list[str] = []
+        self.query_inputs: list[str] = []
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         self.document_inputs = texts
@@ -48,7 +50,8 @@ class FakeProvider:
             raise self.error
         return [[1.0, 0.0, 0.0] for _ in texts]
 
-    def embed_query(self, _text: str) -> list[float]:
+    def embed_query(self, text: str) -> list[float]:
+        self.query_inputs.append(text)
         if self.error is not None:
             raise self.error
         return [1.0, 0.0, 0.0]
@@ -102,6 +105,7 @@ class FakeRepository:
         self.record = IndexingVersionRecord(document, version)
         self.chunks = chunks
         self.active: list[ActiveGeneration] = []
+        self.active_calls: list[tuple[UUID, UUID | None]] = []
 
     async def lock_version(self, version_id: UUID) -> IndexingVersionRecord | None:
         return self.record if version_id == self.record.version.id else None
@@ -121,8 +125,9 @@ class FakeRepository:
         return self.chunks
 
     async def list_active_generations(
-        self, _knowledge_base_id: UUID, *, document_id: UUID | None
+        self, knowledge_base_id: UUID, *, document_id: UUID | None
     ) -> list[ActiveGeneration]:
+        self.active_calls.append((knowledge_base_id, document_id))
         if document_id is None:
             return self.active
         return [item for item in self.active if item.document_id == document_id]
@@ -190,6 +195,8 @@ def make_version() -> tuple[Document, DocumentVersion, list[DocumentChunk]]:
         knowledge_base_id=uuid4(),
         name="sample.md",
         normalized_name="sample.md",
+        relative_path="sample.md",
+        normalized_path="sample.md",
         source_type="upload",
     )
     version = DocumentVersion(
@@ -269,6 +276,7 @@ async def test_successful_index_writes_traceable_point_and_activates_generation(
     assert gateway.points[0].payload["section_title"] == "Architecture"
     assert gateway.points[0].payload["content"] == repository.chunks[0].content
     assert gateway.points[0].payload["content_hash"] == repository.chunks[0].content_hash
+    assert gateway.points[0].payload["relative_path"] == "sample.md"
     assert gateway.points[0].dense_vector == [1.0, 0.0, 0.0]
     assert gateway.points[0].sparse_text == "sample.md\nArchitecture\nTraceMind service"
     assert provider.document_inputs == [
@@ -280,6 +288,17 @@ async def test_successful_index_writes_traceable_point_and_activates_generation(
         "TraceMind service"
     ]
     assert session.commit.await_count == 2
+
+
+def test_path_is_added_to_dense_and_sparse_text_only_for_directory_documents() -> None:
+    document, version, chunks = make_version()
+    record = IndexingVersionRecord(document, version)
+    assert "Path:" not in build_document_embedding_text(record, chunks[0])
+    assert "Path:" not in build_sparse_document_text(record, chunks[0])
+
+    document.relative_path = "backend/sample.md"
+    assert "Path: backend/sample.md" in build_document_embedding_text(record, chunks[0])
+    assert "Path: backend/sample.md" in build_sparse_document_text(record, chunks[0])
 
 
 def test_document_embedding_text_omits_missing_optional_context_without_mutation() -> None:
@@ -595,6 +614,7 @@ async def test_search_uses_database_generations_and_filters() -> None:
     )
 
     assert results[0].document_id == document.id
+    assert results[0].relative_path == document.name
     call = gateway.search_calls[0]
     assert call["knowledge_base_id"] == document.knowledge_base_id
     assert call["generations"] == [generation]
@@ -640,6 +660,46 @@ async def test_hybrid_search_uses_active_generations_and_rrf_gateway() -> None:
     assert call["query"] == "DiscoveryClient"
     assert call["generations"] == [generation]
     assert call["dense_score_threshold"] == 0.50
+
+
+async def test_scoped_query_drives_dense_and_hybrid_embedding_and_filter() -> None:
+    provider = FakeProvider()
+    service, _, repository, gateway, document, version = make_service(provider=provider)
+    generation = uuid4()
+    repository.active = [ActiveGeneration(document.id, version.id, generation)]
+    prepared = PreparedRetrievalQuery(
+        original_query="src/main/java/demo/UserService.java 中 source 方法返回什么？",
+        semantic_query="source 方法返回什么？",
+        scoped_document_id=document.id,
+        path_scope_mode="exact",
+        explicit_relative_path="src/main/java/demo/UserService.java",
+    )
+
+    await service.search(
+        document.knowledge_base_id,
+        query=prepared.original_query,
+        limit=5,
+        language="java",
+        document_id=None,
+        prepared_query=prepared,
+    )
+    await service.hybrid_search(
+        document.knowledge_base_id,
+        query=prepared.original_query,
+        limit=5,
+        language="java",
+        document_id=None,
+        prepared_query=prepared,
+    )
+
+    assert provider.query_inputs == [prepared.semantic_query, prepared.semantic_query]
+    assert repository.active_calls == [
+        (document.knowledge_base_id, document.id),
+        (document.knowledge_base_id, document.id),
+    ]
+    assert gateway.search_calls[0]["document_id"] == document.id
+    assert gateway.search_calls[1]["document_id"] == document.id
+    assert gateway.search_calls[1]["query"] == prepared.semantic_query
 
 
 async def test_search_returns_empty_without_database_active_generation() -> None:

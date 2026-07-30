@@ -40,6 +40,8 @@ def make_record() -> DocumentRecord:
         knowledge_base_id=knowledge_base_id,
         name="设计说明.md",
         normalized_name="设计说明.md",
+        relative_path="设计说明.md",
+        normalized_path="设计说明.md",
         source_type="upload",
         created_at=now,
         updated_at=now,
@@ -126,9 +128,32 @@ async def test_upload_actions_and_multipart_field(
     assert response.status_code == expected_status
     assert response.json()["import_action"] == action.value
     assert response.json()["parsing_queued"] is False
+    assert response.json()["document"]["relative_path"] == "设计说明.md"
     assert "storage_path" not in response.text
     uploaded = service.import_document.await_args.args[1]
     assert uploaded.filename == "设计说明.md"
+    assert service.import_document.await_args.kwargs["relative_path"] is None
+
+
+async def test_upload_passes_optional_relative_path_to_existing_service() -> None:
+    service = make_service()
+    record = make_record()
+    record.document.relative_path = "backend/设计说明.md"
+    record.document.normalized_path = "backend/设计说明.md"
+    service.import_document.return_value = DocumentImportResult(
+        DocumentImportAction.created, record
+    )
+
+    response = await request(
+        make_app(service),
+        "POST",
+        f"/api/v1/knowledge-bases/{record.document.knowledge_base_id}/documents",
+        files={"file": ("设计说明.md", b"content", "text/markdown")},
+        data={"relative_path": r"backend\设计说明.md"},
+    )
+
+    assert response.status_code == 201
+    assert service.import_document.await_args.kwargs["relative_path"] == r"backend\设计说明.md"
 
 
 async def test_missing_multipart_file_returns_422() -> None:

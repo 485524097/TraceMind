@@ -2,7 +2,7 @@ from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
@@ -22,6 +22,7 @@ from app.services.document_indexing import (
 )
 from app.services.document_reranking import DocumentRerankingService
 from app.services.exceptions import HybridSearchUnavailableError, SemanticSearchUnavailableError
+from app.services.retrieval_query import PreparedRetrievalQuery
 
 
 async def client_for(app: FastAPI) -> AsyncIterator[AsyncClient]:
@@ -35,6 +36,15 @@ def make_app(
     *,
     reranking_service: AsyncMock | None = None,
 ) -> FastAPI:
+    async def prepare(
+        _knowledge_base_id: UUID,
+        query: str,
+        *,
+        document_id: UUID | None,
+    ) -> PreparedRetrievalQuery:
+        return PreparedRetrievalQuery(query, query, document_id)
+
+    service.prepare_retrieval_query.side_effect = prepare
     app = create_app(
         Settings(
             _env_file=None,
@@ -114,6 +124,7 @@ async def test_semantic_search_validation_and_traceable_response() -> None:
             chunk_id=chunk_id,
             index_generation=generation,
             document_name="sample.md",
+            relative_path="docs/sample.md",
             version_number=2,
             chunk_index=3,
             content_hash="a" * 64,
@@ -139,6 +150,7 @@ async def test_semantic_search_validation_and_traceable_response() -> None:
     assert response.status_code == 200
     assert response.json()["items"][0]["start_line"] == 10
     assert response.json()["items"][0]["document_name"] == "sample.md"
+    assert response.json()["items"][0]["relative_path"] == "docs/sample.md"
     assert blank.status_code == too_many.status_code == 422
     service.search.assert_awaited_once_with(
         knowledge_base_id,
@@ -146,6 +158,7 @@ async def test_semantic_search_validation_and_traceable_response() -> None:
         limit=5,
         language="python",
         document_id=None,
+        prepared_query=PreparedRetrievalQuery("service layer", "service layer", None),
     )
 
 
@@ -201,6 +214,7 @@ async def test_hybrid_search_path_and_safe_error() -> None:
         limit=5,
         language="java",
         document_id=None,
+        prepared_query=PreparedRetrievalQuery("DiscoveryClient", "DiscoveryClient", None),
     )
 
     service.hybrid_search.side_effect = HybridSearchUnavailableError("Hybrid search is unavailable")
@@ -223,6 +237,7 @@ async def test_reranked_search_returns_raw_and_original_rrf_scores() -> None:
         chunk_id=uuid4(),
         index_generation=uuid4(),
         document_name="service.java",
+        relative_path="src/service.java",
         version_number=1,
         chunk_index=1,
         content_hash="a" * 64,
@@ -259,6 +274,7 @@ async def test_reranked_search_returns_raw_and_original_rrf_scores() -> None:
     assert item["score"] == item["rerank_score"] == 6.1
     assert item["retrieval_score"] == 0.7
     assert item["retrieval_rank"] == 1
+    assert item["relative_path"] == "src/service.java"
     assert item["ranking_mode"] == "reranker"
     indexing.hybrid_search.assert_awaited_once_with(
         knowledge_base_id,
@@ -266,7 +282,63 @@ async def test_reranked_search_returns_raw_and_original_rrf_scores() -> None:
         limit=10,
         language=None,
         document_id=None,
+        prepared_query=PreparedRetrievalQuery("DiscoveryClient", "DiscoveryClient", None),
     )
+
+
+async def test_reranked_search_reports_exact_path_scope_and_uses_semantic_query() -> None:
+    indexing = AsyncMock(spec=DocumentIndexingService)
+    reranking = AsyncMock(spec=DocumentRerankingService)
+    knowledge_base_id = uuid4()
+    document_id = uuid4()
+    relative_path = "src/main/java/demo/UserService.java"
+    original_query = f"{relative_path} 中 source 方法返回什么？"
+    semantic_query = "source 方法返回什么？"
+    prepared = PreparedRetrievalQuery(
+        original_query,
+        semantic_query,
+        document_id,
+        "exact",
+        relative_path,
+    )
+    candidate = SemanticSearchResult(
+        score=0.7,
+        content="return source;",
+        knowledge_base_id=knowledge_base_id,
+        document_id=document_id,
+        document_version_id=uuid4(),
+        chunk_id=uuid4(),
+        index_generation=uuid4(),
+        document_name="UserService.java",
+        relative_path=relative_path,
+        version_number=1,
+        chunk_index=1,
+        content_hash="a" * 64,
+        chunk_type="code",
+        language="java",
+        section_title="source",
+        page_number=None,
+        start_line=1,
+        end_line=3,
+    )
+    indexing.hybrid_search.return_value = [candidate]
+    reranking.rerank.return_value = [candidate]
+    app = make_app(indexing, reranking_service=reranking)
+    indexing.prepare_retrieval_query.side_effect = None
+    indexing.prepare_retrieval_query.return_value = prepared
+
+    async for client in client_for(app):
+        response = await client.post(
+            f"/api/v1/knowledge-bases/{knowledge_base_id}/search/reranked",
+            json={"query": original_query, "limit": 1},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["path_scope_mode"] == "exact"
+    assert response.json()["scoped_relative_path"] == relative_path
+    assert response.json()["semantic_query"] == semantic_query
+    reranking.rerank.assert_awaited_once_with(semantic_query, [candidate], limit=1)
+    assert indexing.hybrid_search.await_args.kwargs["prepared_query"] == prepared
 
 
 async def test_reranked_search_disabled_or_unavailable_returns_503() -> None:
@@ -288,6 +360,7 @@ async def test_reranked_search_disabled_or_unavailable_returns_503() -> None:
             chunk_id=uuid4(),
             index_generation=uuid4(),
             document_name="doc.md",
+            relative_path="doc.md",
             version_number=1,
             chunk_index=1,
             content_hash="a" * 64,

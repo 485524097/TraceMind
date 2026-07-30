@@ -20,7 +20,7 @@ from app.services.exceptions import (
     KnowledgeBaseNotFoundError,
 )
 from app.storage.local import LocalFileStorage
-from app.storage.names import normalize_document_name
+from app.storage.names import normalize_document_name, normalize_document_path
 
 logger = logging.getLogger(__name__)
 
@@ -59,15 +59,23 @@ class DocumentService:
         self.index_gateway = index_gateway
 
     async def import_document(
-        self, knowledge_base_id: UUID, upload: UploadFile
+        self,
+        knowledge_base_id: UUID,
+        upload: UploadFile,
+        *,
+        relative_path: str | None = None,
     ) -> DocumentImportResult:
         await self._require_knowledge_base(knowledge_base_id)
-        safe_name = normalize_document_name(upload.filename, self.allowed_extensions)
+        if relative_path is None:
+            safe_name = normalize_document_name(upload.filename, self.allowed_extensions)
+            safe_path = normalize_document_path(safe_name.display_name, self.allowed_extensions)
+        else:
+            safe_path = normalize_document_path(relative_path, self.allowed_extensions)
         temporary = await self.storage.write_upload(upload)
         finalized_path: str | None = None
         try:
-            document = await self.repository.get_document_by_normalized_name(
-                knowledge_base_id, safe_name.normalized_name
+            document = await self.repository.get_document_by_normalized_path(
+                knowledge_base_id, safe_path.normalized_path
             )
             if document is not None:
                 current = await self.repository.get_latest_version(knowledge_base_id, document.id)
@@ -84,8 +92,10 @@ class DocumentService:
                 document = Document(
                     id=uuid4(),
                     knowledge_base_id=knowledge_base_id,
-                    name=safe_name.display_name,
-                    normalized_name=safe_name.normalized_name,
+                    name=safe_path.display_name,
+                    normalized_name=safe_path.normalized_name,
+                    relative_path=safe_path.relative_path,
+                    normalized_path=safe_path.normalized_path,
                     source_type="upload",
                 )
                 await self.repository.create_document(document)
@@ -99,17 +109,20 @@ class DocumentService:
                 content_hash=temporary.content_hash,
                 file_size=temporary.file_size,
                 mime_type=upload.content_type,
-                extension=safe_name.extension,
+                extension=safe_path.extension,
                 storage_path="",
                 parse_status="pending",
                 chunk_count=0,
             )
             version.storage_path = self.storage.final_relative_path(
-                knowledge_base_id, document.id, version.id, safe_name.extension
+                knowledge_base_id, document.id, version.id, safe_path.extension
             )
             await self.repository.create_version(version)
             if action is DocumentImportAction.version_created:
-                document.name = safe_name.display_name
+                document.name = safe_path.display_name
+                document.normalized_name = safe_path.normalized_name
+                document.relative_path = safe_path.relative_path
+                document.normalized_path = safe_path.normalized_path
                 await self.repository.touch_document(document)
             await self.storage.finalize(temporary.path, version.storage_path)
             finalized_path = version.storage_path

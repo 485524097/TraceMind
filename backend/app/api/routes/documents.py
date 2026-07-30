@@ -6,6 +6,7 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
+    Form,
     HTTPException,
     Query,
     Request,
@@ -114,6 +115,7 @@ def document_response(record: DocumentRecord) -> DocumentResponse:
         id=document.id,
         knowledge_base_id=document.knowledge_base_id,
         name=document.name,
+        relative_path=document.relative_path,
         source_type=document.source_type,
         created_at=document.created_at,
         updated_at=document.updated_at,
@@ -182,9 +184,10 @@ async def import_document(
     service: ServiceDependency,
     response: Response,
     file: Annotated[UploadFile, File(description="A supported document file")],
+    relative_path: Annotated[str | None, Form(max_length=1024)] = None,
 ) -> DocumentImportResponse:
     try:
-        result = await service.import_document(knowledge_base_id, file)
+        result = await service.import_document(knowledge_base_id, file, relative_path=relative_path)
     except Exception as exc:
         raise_document_http_error(exc)
     if result.action.value == "unchanged":

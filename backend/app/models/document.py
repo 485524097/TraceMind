@@ -29,8 +29,8 @@ class Document(Base):
     __table_args__ = (
         UniqueConstraint(
             "knowledge_base_id",
-            "normalized_name",
-            name="uq_documents_knowledge_base_normalized_name",
+            "normalized_path",
+            name="uq_documents_knowledge_base_normalized_path",
         ),
         Index("ix_documents_knowledge_base_id", "knowledge_base_id"),
     )
@@ -45,6 +45,8 @@ class Document(Base):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     normalized_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    relative_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    normalized_path: Mapped[str] = mapped_column(String(1024), nullable=False)
     source_type: Mapped[str] = mapped_column(
         String(32), nullable=False, default="upload", server_default="upload"
     )

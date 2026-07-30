@@ -47,6 +47,7 @@ class DocumentResponse(BaseModel):
     id: UUID
     knowledge_base_id: UUID
     name: str
+    relative_path: str
     source_type: str
     created_at: datetime
     updated_at: datetime

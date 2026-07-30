@@ -41,13 +41,13 @@ class DocumentRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_document_by_normalized_name(
-        self, knowledge_base_id: UUID, normalized_name: str
+    async def get_document_by_normalized_path(
+        self, knowledge_base_id: UUID, normalized_path: str
     ) -> Document | None:
         result = await self.session.execute(
             select(Document).where(
                 Document.knowledge_base_id == knowledge_base_id,
-                Document.normalized_name == normalized_name,
+                Document.normalized_path == normalized_path,
             )
         )
         return result.scalar_one_or_none()
@@ -93,7 +93,10 @@ class DocumentRepository:
         statement = self._records_statement().where(Document.knowledge_base_id == knowledge_base_id)
         if query:
             escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            statement = statement.where(Document.name.ilike(f"%{escaped}%", escape="\\"))
+            statement = statement.where(
+                Document.name.ilike(f"%{escaped}%", escape="\\")
+                | Document.relative_path.ilike(f"%{escaped}%", escape="\\")
+            )
         statement = statement.order_by(Document.created_at.desc(), Document.id.desc())
         rows = (await self.session.execute(statement.offset(offset).limit(limit))).all()
         return [self._to_record(row) for row in rows]
@@ -106,7 +109,10 @@ class DocumentRepository:
         )
         if query:
             escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            statement = statement.where(Document.name.ilike(f"%{escaped}%", escape="\\"))
+            statement = statement.where(
+                Document.name.ilike(f"%{escaped}%", escape="\\")
+                | Document.relative_path.ilike(f"%{escaped}%", escape="\\")
+            )
         return int((await self.session.execute(statement)).scalar_one())
 
     async def count_by_knowledge_base(self, knowledge_base_id: UUID) -> int:

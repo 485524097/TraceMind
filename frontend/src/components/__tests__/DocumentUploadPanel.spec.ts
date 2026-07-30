@@ -18,6 +18,7 @@ function response(action: DocumentImportAction): DocumentImportResponse {
       id: 'document-id',
       knowledge_base_id: 'kb-id',
       name: 'sample.md',
+      relative_path: 'sample.md',
       source_type: 'upload',
       created_at: '2026-07-17T00:00:00Z',
       updated_at: '2026-07-17T00:00:00Z',
@@ -64,6 +65,22 @@ async function selectFiles(wrapper: ReturnType<typeof mountPanel>, files: File[]
   await input.trigger('change')
 }
 
+async function selectDirectory(
+  wrapper: ReturnType<typeof mountPanel>,
+  files: File[],
+): Promise<void> {
+  const input = wrapper.get('[data-testid="document-directory"]')
+  Object.defineProperty(input.element, 'files', { configurable: true, value: files })
+  await input.trigger('change')
+}
+
+function directoryFile(path: string): File {
+  const parts = path.split('/')
+  const file = new File(['content'], parts[parts.length - 1] ?? 'file.txt')
+  Object.defineProperty(file, 'webkitRelativePath', { value: path })
+  return file
+}
+
 describe('DocumentUploadPanel', () => {
   beforeEach(() => {
     mockedUpload.mockReset()
@@ -83,6 +100,75 @@ describe('DocumentUploadPanel', () => {
     expect(mockedUpload).toHaveBeenCalledTimes(2)
     expect(mockedUpload.mock.calls[0]?.[1]).toBe(files[0])
     expect(mockedUpload.mock.calls[1]?.[1]).toBe(files[1])
+    expect(wrapper.emitted('completed')).toHaveLength(1)
+  })
+
+  it('shows a directory preview with ready, ignored and unsupported totals', async () => {
+    const wrapper = mountPanel()
+    await selectDirectory(wrapper, [
+      directoryFile('project/src/main.py'),
+      directoryFile('project/node_modules/pkg/index.js'),
+      directoryFile('project/assets/logo.png'),
+    ])
+
+    expect(wrapper.get('[data-testid="document-directory"]').attributes()).toHaveProperty(
+      'webkitdirectory',
+    )
+    expect(wrapper.text()).toContain('src/main.py')
+    expect(wrapper.text()).toContain('准备 1')
+    expect(wrapper.text()).toContain('忽略 1')
+    expect(wrapper.text()).toContain('不支持 1')
+  })
+
+  it('uploads directory files with no more than three concurrent requests', async () => {
+    let active = 0
+    let maximum = 0
+    mockedUpload.mockImplementation(async () => {
+      active += 1
+      maximum = Math.max(maximum, active)
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      active -= 1
+      return response('created')
+    })
+    const wrapper = mountPanel()
+    await selectDirectory(
+      wrapper,
+      Array.from({ length: 7 }, (_, index) => directoryFile(`project/src/file${index}.py`)),
+    )
+
+    await wrapper.get('[data-testid="upload-documents"]').trigger('click')
+    await vi.waitFor(() => expect(mockedUpload).toHaveBeenCalledTimes(7))
+    await flushPromises()
+
+    expect(maximum).toBe(3)
+    expect(mockedUpload.mock.calls[0]?.[2]).toBe('src/file0.py')
+    expect(wrapper.text()).toContain('完成 7')
+    expect(wrapper.text()).toContain('成功 7')
+  })
+
+  it('cancels active and not-yet-started directory uploads', async () => {
+    mockedUpload.mockImplementation(
+      async (_knowledgeBaseId, _file, _relativePath, signal) =>
+        await new Promise((_resolve, reject) => {
+          signal?.addEventListener('abort', () =>
+            reject(new DOMException('cancelled', 'AbortError')),
+          )
+        }),
+    )
+    const wrapper = mountPanel()
+    await selectDirectory(
+      wrapper,
+      Array.from({ length: 5 }, (_, index) => directoryFile(`project/src/file${index}.py`)),
+    )
+    void wrapper.get('[data-testid="upload-documents"]').trigger('click')
+    await vi.waitFor(() => expect(mockedUpload).toHaveBeenCalledTimes(3))
+
+    await wrapper.get('[data-testid="cancel-document-upload"]').trigger('click')
+    await flushPromises()
+
+    expect(mockedUpload).toHaveBeenCalledTimes(3)
+    expect(wrapper.text()).toContain('已取消')
+    expect(wrapper.text()).toContain('跳过 5')
     expect(wrapper.emitted('completed')).toHaveLength(1)
   })
 

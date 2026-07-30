@@ -20,6 +20,7 @@ export interface RagSource {
   chunk_id: string
   index_generation: string
   document_name: string
+  relative_path?: string
   version_number: number
   chunk_index: number
   content_hash: string
@@ -69,6 +70,8 @@ export interface RagDoneEvent extends ConversationEventFields {
   query_rewrite_latency_ms?: number
   history_turn_count?: number
   retrieval_query?: string
+  path_scope_mode?: 'none' | 'exact'
+  scoped_relative_path?: string | null
 }
 
 export interface RagErrorEvent extends ConversationEventFields {

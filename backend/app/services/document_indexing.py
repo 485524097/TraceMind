@@ -11,6 +11,7 @@ from app.core.config import Settings
 from app.embedding import EmbeddingError, EmbeddingProvider, validate_embeddings
 from app.indexing import QdrantGateway, VectorIndexError, VectorPoint
 from app.models.document import DocumentChunk, DocumentVersion
+from app.repositories.document import DocumentRepository
 from app.repositories.document_indexing import (
     DocumentIndexingRepository,
     IndexingVersionRecord,
@@ -24,6 +25,7 @@ from app.services.exceptions import (
     HybridSearchUnavailableError,
     SemanticSearchUnavailableError,
 )
+from app.services.retrieval_query import ExplicitDocumentPathResolver, PreparedRetrievalQuery
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +54,7 @@ class SemanticSearchResult:
     chunk_id: UUID
     index_generation: UUID
     document_name: str
+    relative_path: str
     version_number: int
     chunk_index: int
     content_hash: str
@@ -73,6 +76,9 @@ def deterministic_point_id(version_id: UUID, generation: UUID, chunk_index: int)
 
 def build_document_embedding_text(record: IndexingVersionRecord, chunk: DocumentChunk) -> str:
     lines = [f"Document: {record.document.name}"]
+    relative_path = record.document.relative_path or record.document.name
+    if relative_path != record.document.name:
+        lines.append(f"Path: {relative_path}")
     if chunk.section_title:
         lines.append(f"Section: {chunk.section_title}")
     lines.append(f"Type: {chunk.chunk_type}")
@@ -84,6 +90,9 @@ def build_document_embedding_text(record: IndexingVersionRecord, chunk: Document
 
 def build_sparse_document_text(record: IndexingVersionRecord, chunk: DocumentChunk) -> str:
     parts = [record.document.name]
+    relative_path = record.document.relative_path or record.document.name
+    if relative_path != record.document.name:
+        parts.append(f"Path: {relative_path}")
     if chunk.section_title:
         parts.append(chunk.section_title)
     parts.append(chunk.content)
@@ -100,6 +109,7 @@ class DocumentIndexingService:
         *,
         dispatcher: DocumentIndexingDispatcher | None = None,
         repository: DocumentIndexingRepository | None = None,
+        path_resolver: ExplicitDocumentPathResolver | None = None,
     ) -> None:
         self.session = session
         self.settings = settings
@@ -107,6 +117,23 @@ class DocumentIndexingService:
         self.gateway = gateway
         self.dispatcher = dispatcher
         self.repository = repository or DocumentIndexingRepository(session)
+        self.path_resolver = path_resolver or ExplicitDocumentPathResolver(
+            DocumentRepository(session),
+            set(settings.document_allowed_extensions),
+        )
+
+    async def prepare_retrieval_query(
+        self,
+        knowledge_base_id: UUID,
+        query: str,
+        *,
+        document_id: UUID | None,
+    ) -> PreparedRetrievalQuery:
+        return await self.path_resolver.prepare(
+            knowledge_base_id,
+            query,
+            document_id=document_id,
+        )
 
     async def request_index(
         self,
@@ -265,15 +292,19 @@ class DocumentIndexingService:
         limit: int,
         language: str | None,
         document_id: UUID | None,
+        prepared_query: PreparedRetrievalQuery | None = None,
     ) -> list[SemanticSearchResult]:
+        prepared = prepared_query or await self.prepare_retrieval_query(
+            knowledge_base_id, query, document_id=document_id
+        )
         generations = await self.repository.list_active_generations(
-            knowledge_base_id, document_id=document_id
+            knowledge_base_id, document_id=prepared.scoped_document_id
         )
         if not generations:
             return []
         try:
             await self.gateway.ensure_collection()
-            vector = await asyncio.to_thread(self.provider.embed_query, query)
+            vector = await asyncio.to_thread(self.provider.embed_query, prepared.semantic_query)
             validate_embeddings([vector], dimension=self.provider.dimension)
             hits = await self.gateway.search(
                 vector,
@@ -281,13 +312,14 @@ class DocumentIndexingService:
                 generations=[item.generation for item in generations],
                 limit=limit,
                 language=language,
-                document_id=document_id,
+                document_id=prepared.scoped_document_id,
                 score_threshold=self.settings.semantic_search_score_threshold,
                 excluded_chunk_types=("heading",),
             )
-            return [
+            results = [
                 self._search_result(hit.score, hit.payload, ranking_mode="dense") for hit in hits
             ]
+            return self._enforce_document_scope(results, prepared.scoped_document_id)
         except (EmbeddingError, VectorIndexError) as exc:
             raise SemanticSearchUnavailableError("Semantic search is unavailable") from exc
 
@@ -299,28 +331,32 @@ class DocumentIndexingService:
         limit: int,
         language: str | None,
         document_id: UUID | None,
+        prepared_query: PreparedRetrievalQuery | None = None,
     ) -> list[SemanticSearchResult]:
+        prepared = prepared_query or await self.prepare_retrieval_query(
+            knowledge_base_id, query, document_id=document_id
+        )
         generations = await self.repository.list_active_generations(
-            knowledge_base_id, document_id=document_id
+            knowledge_base_id, document_id=prepared.scoped_document_id
         )
         if not generations:
             return []
         try:
             await self.gateway.ensure_collection()
-            vector = await asyncio.to_thread(self.provider.embed_query, query)
+            vector = await asyncio.to_thread(self.provider.embed_query, prepared.semantic_query)
             validate_embeddings([vector], dimension=self.provider.dimension)
             hits = await self.gateway.hybrid_search(
                 vector,
-                query,
+                prepared.semantic_query,
                 knowledge_base_id=knowledge_base_id,
                 generations=[item.generation for item in generations],
                 limit=limit,
                 language=language,
-                document_id=document_id,
+                document_id=prepared.scoped_document_id,
                 dense_score_threshold=self.settings.semantic_search_score_threshold,
                 excluded_chunk_types=("heading",),
             )
-            return [
+            results = [
                 self._search_result(
                     hit.score,
                     hit.payload,
@@ -330,6 +366,7 @@ class DocumentIndexingService:
                 )
                 for rank, hit in enumerate(hits, start=1)
             ]
+            return self._enforce_document_scope(results, prepared.scoped_document_id)
         except (EmbeddingError, VectorIndexError) as exc:
             raise HybridSearchUnavailableError("Hybrid search is unavailable") from exc
 
@@ -453,6 +490,7 @@ class DocumentIndexingService:
                 "chunk_id": str(chunk.id),
                 "index_generation": str(generation),
                 "document_name": document.name,
+                "relative_path": document.relative_path or document.name,
                 "version_number": version.version_number,
                 "chunk_index": chunk.chunk_index,
                 "content": chunk.content,
@@ -485,6 +523,7 @@ class DocumentIndexingService:
                 chunk_id=UUID(str(payload["chunk_id"])),
                 index_generation=UUID(str(payload["index_generation"])),
                 document_name=str(payload["document_name"]),
+                relative_path=str(payload.get("relative_path") or payload["document_name"]),
                 version_number=int(payload["version_number"]),
                 chunk_index=int(payload["chunk_index"]),
                 content_hash=str(payload["content_hash"]),
@@ -502,3 +541,12 @@ class DocumentIndexingService:
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise SemanticSearchUnavailableError("Semantic search payload is invalid") from exc
+
+    @staticmethod
+    def _enforce_document_scope(
+        results: list[SemanticSearchResult],
+        document_id: UUID | None,
+    ) -> list[SemanticSearchResult]:
+        if document_id is None:
+            return results
+        return [result for result in results if result.document_id == document_id]

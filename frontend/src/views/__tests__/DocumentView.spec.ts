@@ -44,6 +44,7 @@ const document: DocumentItem = {
   id: 'document-id',
   knowledge_base_id: 'kb-id',
   name: 'sample.md',
+  relative_path: 'src/sample.md',
   source_type: 'upload',
   created_at: '2026-07-17T00:00:00Z',
   updated_at: '2026-07-17T01:00:00Z',
@@ -155,7 +156,7 @@ describe('DocumentView', () => {
     mockedList.mockResolvedValue(response([document]))
     const wrapper = mountView()
     await flushPromises()
-    await wrapper.get('input[aria-label="文档名称搜索"]').setValue('sample')
+    await wrapper.get('input[aria-label="文档名称或路径搜索"]').setValue('sample')
     await wrapper.get('.document-toolbar form').trigger('submit')
     await flushPromises()
     expect(mockedList).toHaveBeenLastCalledWith('kb-id', 'sample')
