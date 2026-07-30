@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { apiRequest } from '@/services/api'
-import { hybridSearch, rerankedSearch, semanticSearch } from '@/services/documents'
+import {
+  hybridSearch,
+  rerankedSearch,
+  semanticSearch,
+  uploadDocument,
+} from '@/services/documents'
 
 vi.mock('@/services/api', () => ({
   apiRequest: vi.fn(),
@@ -53,5 +58,21 @@ describe('document search services', () => {
         body: JSON.stringify({ query: 'DiscoveryClient', language: 'java', limit: 5 }),
       },
     )
+  })
+
+  it('adds an optional relative path to the existing multipart upload request', async () => {
+    mockedApiRequest.mockResolvedValue({})
+    const file = new File(['content'], 'main.py')
+    const controller = new AbortController()
+
+    await uploadDocument('kb-id', file, 'backend/main.py', controller.signal)
+
+    const [path, init] = mockedApiRequest.mock.calls[0] ?? []
+    expect(path).toBe('/api/v1/knowledge-bases/kb-id/documents')
+    expect(init?.method).toBe('POST')
+    expect(init?.signal).toBe(controller.signal)
+    const body = init?.body as FormData
+    expect(body.get('file')).toBe(file)
+    expect(body.get('relative_path')).toBe('backend/main.py')
   })
 })

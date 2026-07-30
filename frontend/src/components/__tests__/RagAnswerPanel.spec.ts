@@ -18,6 +18,7 @@ const source: RagSource = {
   chunk_id: 'chunk',
   index_generation: 'generation',
   document_name: 'sample.md',
+  relative_path: 'docs/sample.md',
   version_number: 2,
   chunk_index: 3,
   content_hash: 'a'.repeat(64),
@@ -52,6 +53,8 @@ describe('RagAnswerPanel', () => {
         retrieval_latency_ms: 1,
         llm_latency_ms: 2,
         total_latency_ms: 3,
+        path_scope_mode: 'exact',
+        scoped_relative_path: 'src/main/java/demo/UserService.java',
       })
     })
     const wrapper = mount(RagAnswerPanel, {
@@ -70,10 +73,13 @@ describe('RagAnswerPanel', () => {
       expect.any(AbortSignal),
     ])
     expect(wrapper.text()).toContain('使用 Spring [S1]')
-    expect(wrapper.text()).toContain('sample.md · V2')
+    expect(wrapper.text()).toContain('docs/sample.md · V2')
     expect(wrapper.text()).toContain('第 10-14 行')
     expect(wrapper.text()).toContain('Reranker 原始分数 0.9100')
     expect(wrapper.text()).toContain('原 RRF 分数 0.7000')
+    expect(wrapper.get('[data-testid="rag-path-scope"]').text()).toContain(
+      'src/main/java/demo/UserService.java',
+    )
     expect(wrapper.text()).not.toContain('置信度')
     expect(wrapper.get('.rag-source-content').text()).toContain('<script>not html</script>')
     expect(wrapper.find('script').exists()).toBe(false)

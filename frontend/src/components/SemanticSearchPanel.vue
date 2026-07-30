@@ -3,7 +3,7 @@ import { ElButton, ElEmpty, ElMessage } from 'element-plus'
 import { ref, watch } from 'vue'
 
 import { hybridSearch, rerankedSearch, semanticSearch } from '@/services/documents'
-import type { SemanticSearchResult } from '@/types/document'
+import type { SemanticSearchResponse, SemanticSearchResult } from '@/types/document'
 
 const props = defineProps<{ knowledgeBaseId: string }>()
 const query = ref('')
@@ -11,10 +11,15 @@ const language = ref('')
 const loading = ref(false)
 const searched = ref(false)
 const results = ref<SemanticSearchResult[]>([])
+const queryMetadata = ref<Pick<
+  SemanticSearchResponse,
+  'path_scope_mode' | 'scoped_relative_path' | 'semantic_query'
+>>({})
 const mode = ref<'reranker' | 'hybrid' | 'dense'>('reranker')
 
 watch(mode, () => {
   results.value = []
+  queryMetadata.value = {}
   searched.value = false
 })
 
@@ -41,6 +46,11 @@ async function search(): Promise<void> {
       5,
     )
     results.value = response.items
+    queryMetadata.value = {
+      path_scope_mode: response.path_scope_mode,
+      scoped_relative_path: response.scoped_relative_path,
+      semantic_query: response.semantic_query,
+    }
     searched.value = true
   } catch {
     ElMessage.error(
@@ -83,6 +93,16 @@ async function search(): Promise<void> {
         </label>
         <ElButton native-type="submit" :loading="loading" :disabled="!query.trim()">检索</ElButton>
       </form>
+      <dl
+        v-if="queryMetadata.path_scope_mode === 'exact'"
+        class="semantic-search-scope"
+        data-testid="semantic-search-scope"
+      >
+        <dt>路径限定</dt>
+        <dd>{{ queryMetadata.scoped_relative_path }}</dd>
+        <dt>语义查询</dt>
+        <dd>{{ queryMetadata.semantic_query }}</dd>
+      </dl>
       <div v-if="searched && results.length === 0" class="semantic-search-empty">
         <ElEmpty description="未找到足够相关的内容" />
         <p>请换个问法，或确认文档中包含相关信息。</p>
@@ -90,7 +110,7 @@ async function search(): Promise<void> {
       <div v-else-if="results.length" class="semantic-search-results">
         <article v-for="result in results" :key="result.chunk_id" class="search-result-card">
           <header class="search-result-header">
-            <strong>{{ result.document_name }} · V{{ result.version_number }}</strong>
+            <strong>{{ result.relative_path || result.document_name }} · V{{ result.version_number }}</strong>
             <span v-if="mode === 'reranker'" class="search-result-score">
               Reranker 原始分数 {{ result.score.toFixed(4) }}
             </span>

@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
@@ -59,6 +60,7 @@ class SemanticSearchResultResponse(BaseModel):
     chunk_id: UUID
     index_generation: UUID
     document_name: str
+    relative_path: str
     version_number: int
     chunk_index: int
     content_hash: str
@@ -76,3 +78,6 @@ class SemanticSearchResultResponse(BaseModel):
 
 class SemanticSearchResponse(BaseModel):
     items: list[SemanticSearchResultResponse]
+    path_scope_mode: Literal["none", "exact"] = "none"
+    scoped_relative_path: str | None = None
+    semantic_query: str | None = None

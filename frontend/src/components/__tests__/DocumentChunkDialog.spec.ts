@@ -12,6 +12,7 @@ const document: DocumentItem = {
   id: 'document-id',
   knowledge_base_id: 'kb-id',
   name: 'sample.md',
+  relative_path: 'sample.md',
   source_type: 'upload',
   created_at: '2026-07-20T00:00:00Z',
   updated_at: '2026-07-20T00:00:00Z',

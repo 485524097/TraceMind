@@ -141,6 +141,8 @@ async def stream_rag_answer(
             "query_rewrite_latency_ms": prepared.query_rewrite_latency_ms,
             "history_turn_count": len(prepared.conversation_history),
             "retrieval_query": prepared.retrieval_query,
+            "path_scope_mode": prepared.path_scope_mode,
+            "scoped_relative_path": prepared.scoped_relative_path,
             "llm_first_token_latency_ms": llm_first_token_latency_ms,
         }
 

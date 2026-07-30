@@ -520,6 +520,10 @@ onBeforeUnmount(() => {
                 <dd>{{ doneMetadata(message)?.reranker_fallback ? '是' : '否' }}</dd>
                 <dt>来源数量</dt>
                 <dd>{{ doneMetadata(message)?.source_count ?? message.sources?.length ?? 0 }}</dd>
+                <template v-if="doneMetadata(message)?.path_scope_mode === 'exact'">
+                  <dt>路径限定</dt>
+                  <dd>{{ doneMetadata(message)?.scoped_relative_path }}</dd>
+                </template>
                 <dt>查询改写耗时</dt>
                 <dd>{{ formatLatency(doneMetadata(message)?.query_rewrite_latency_ms) }}</dd>
                 <dt>检索耗时</dt>
@@ -547,7 +551,7 @@ onBeforeUnmount(() => {
                 :key="source.source_id"
                 class="rag-source-card"
               >
-                <strong>[{{ source.source_id }}] {{ source.document_name }}</strong>
+                <strong>[{{ source.source_id }}] {{ source.relative_path || source.document_name }}</strong>
                 <p>{{ source.section_title || '未命名章节' }} · {{ sourceLocation(source) }}</p>
                 <pre class="rag-source-content">{{ source.content }}</pre>
               </article>

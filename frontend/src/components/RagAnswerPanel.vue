@@ -144,6 +144,13 @@ onBeforeUnmount(stop)
         <p v-if="doneMetadata && !doneMetadata.grounded" class="rag-grounding-warning">
           该回答未包含有效引用，请结合原始来源核对。
         </p>
+        <p
+          v-if="doneMetadata?.path_scope_mode === 'exact'"
+          class="rag-path-scope"
+          data-testid="rag-path-scope"
+        >
+          路径限定：{{ doneMetadata.scoped_relative_path }}
+        </p>
       </article>
 
       <section v-if="sources.length" class="rag-source-list" aria-label="引用来源">
@@ -155,7 +162,7 @@ onBeforeUnmount(stop)
           class="rag-source-card"
         >
           <header class="rag-source-header">
-            <strong>[{{ source.source_id }}] {{ source.document_name }} · V{{ source.version_number }}</strong>
+            <strong>[{{ source.source_id }}] {{ source.relative_path || source.document_name }} · V{{ source.version_number }}</strong>
             <span>{{ sourceScore(source) }}</span>
           </header>
           <p v-if="source.ranking_mode === 'reranker'" class="rag-source-ranking">

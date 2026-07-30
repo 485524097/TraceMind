@@ -70,15 +70,15 @@ class FakeDocumentRepository:
         document = self.documents.get(document_id)
         return document if document and document.knowledge_base_id == knowledge_base_id else None
 
-    async def get_document_by_normalized_name(
-        self, knowledge_base_id: UUID, normalized_name: str
+    async def get_document_by_normalized_path(
+        self, knowledge_base_id: UUID, normalized_path: str
     ) -> Document | None:
         return next(
             (
                 document
                 for document in self.documents.values()
                 if document.knowledge_base_id == knowledge_base_id
-                and document.normalized_name == normalized_name
+                and document.normalized_path == normalized_path
             ),
             None,
         )
@@ -133,7 +133,11 @@ class FakeDocumentRepository:
             record
             for document_id in self.documents
             if (record := await self.get_document_record(knowledge_base_id, document_id))
-            and (query is None or query.casefold() in record.document.name.casefold())
+            and (
+                query is None
+                or query.casefold() in record.document.name.casefold()
+                or query.casefold() in record.document.relative_path.casefold()
+            )
         ]
         return records[offset : offset + limit]
 
@@ -204,6 +208,8 @@ async def test_first_upload_creates_document_and_version_one(tmp_path: Path) -> 
 
     assert result.action is DocumentImportAction.created
     assert result.record.version_count == 1
+    assert result.record.document.relative_path == "说明.MD"
+    assert result.record.document.normalized_path == "说明.md"
     assert result.record.latest_version.version_number == 1
     assert (
         storage.resolve_relative(result.record.latest_version.storage_path).read_bytes() == b"first"
@@ -245,6 +251,29 @@ async def test_different_names_with_same_hash_create_different_documents(tmp_pat
     assert first.record.document.id != second.record.document.id
 
 
+async def test_directory_paths_distinguish_same_basename_and_version_same_path(
+    tmp_path: Path,
+) -> None:
+    service, _, _, _, knowledge_base_id = make_service(tmp_path)
+    first = await service.import_document(
+        knowledge_base_id, upload("README.md", b"one"), relative_path=r".\api\\README.md"
+    )
+    first_id = first.record.document.id
+    assert first.record.document.relative_path == "api/README.md"
+    second = await service.import_document(
+        knowledge_base_id, upload("README.md", b"two"), relative_path="web/README.md"
+    )
+    updated = await service.import_document(
+        knowledge_base_id, upload("readme.MD", b"three"), relative_path="API/readme.MD"
+    )
+
+    assert first_id != second.record.document.id
+    assert second.record.document.relative_path == "web/README.md"
+    assert updated.record.document.id == first_id
+    assert updated.record.latest_version.version_number == 2
+    assert updated.record.document.relative_path == "API/readme.MD"
+
+
 async def test_missing_knowledge_base_is_rejected(tmp_path: Path) -> None:
     service, _, _, _, _ = make_service(tmp_path)
     with pytest.raises(KnowledgeBaseNotFoundError):
@@ -276,6 +305,20 @@ async def test_missing_and_cross_knowledge_base_document_are_rejected(tmp_path: 
         await service.get_document(first_id, uuid4())
     with pytest.raises(DocumentNotFoundError):
         await service.get_document(second_id, imported.record.document.id)
+
+
+async def test_same_normalized_path_is_scoped_to_knowledge_base(tmp_path: Path) -> None:
+    first_id, second_id = uuid4(), uuid4()
+    service, _, _, _, _ = make_service(tmp_path, (first_id, second_id))
+
+    first = await service.import_document(
+        first_id, upload("README.md", b"first"), relative_path="src/README.md"
+    )
+    second = await service.import_document(
+        second_id, upload("README.md", b"second"), relative_path="SRC/readme.MD"
+    )
+
+    assert first.record.document.id != second.record.document.id
 
 
 async def test_commit_failure_rolls_back_and_removes_final_file(tmp_path: Path) -> None:

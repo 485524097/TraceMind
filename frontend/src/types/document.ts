@@ -35,6 +35,7 @@ export interface DocumentItem {
   id: string
   knowledge_base_id: string
   name: string
+  relative_path: string
   source_type: string
   created_at: string
   updated_at: string
@@ -124,6 +125,7 @@ export interface SemanticSearchResult {
   chunk_id: string
   index_generation: string
   document_name: string
+  relative_path?: string
   version_number: number
   chunk_index: number
   content_hash: string
@@ -141,4 +143,7 @@ export interface SemanticSearchResult {
 
 export interface SemanticSearchResponse {
   items: SemanticSearchResult[]
+  path_scope_mode?: 'none' | 'exact'
+  scoped_relative_path?: string | null
+  semantic_query?: string | null
 }

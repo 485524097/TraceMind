@@ -215,7 +215,7 @@ onBeforeUnmount(() => {
 
     <section class="document-toolbar">
       <form @submit.prevent="loadDocuments">
-        <input v-model="query" aria-label="文档名称搜索" placeholder="按名称搜索文档" />
+        <input v-model="query" aria-label="文档名称或路径搜索" placeholder="按名称或路径搜索文档" />
         <ElButton native-type="submit" :loading="loading">搜索</ElButton>
       </form>
     </section>
@@ -232,7 +232,7 @@ onBeforeUnmount(() => {
           </thead>
           <tbody>
             <tr v-for="document in items" :key="document.id">
-              <td class="name-cell">{{ document.name }}</td>
+              <td class="name-cell">{{ document.relative_path || document.name }}</td>
               <td>{{ document.latest_version.extension }} · V{{ document.latest_version.version_number }}</td>
               <td>{{ formatSize(document.latest_version.file_size) }}</td>
               <td>

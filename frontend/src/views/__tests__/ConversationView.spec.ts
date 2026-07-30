@@ -60,6 +60,7 @@ const source: RagSource = {
   chunk_id: 'chunk',
   index_generation: 'generation',
   document_name: 'guide.md',
+  relative_path: 'docs/guide.md',
   version_number: 1,
   chunk_index: 0,
   content_hash: 'a'.repeat(64),
@@ -155,7 +156,7 @@ describe('ConversationView', () => {
     expect(sources.attributes('data-message-id')).toBe('answer')
     expect(sources.attributes('open')).toBeUndefined()
     await wrapper.get('details summary').trigger('click')
-    expect(wrapper.text()).toContain('guide.md')
+    expect(wrapper.text()).toContain('docs/guide.md')
     expect(wrapper.text()).toContain('第 2-4 行')
   })
 
@@ -339,6 +340,8 @@ describe('ConversationView', () => {
             query_rewrite_mode: 'skipped',
             history_turn_count: 2,
             retrieval_query: 'PostgreSQL 如何配置？',
+            path_scope_mode: 'exact',
+            scoped_relative_path: 'src/main/java/demo/UserService.java',
           }),
         }),
         message('rewritten', 'completed', 'history answer', null, {
@@ -365,6 +368,8 @@ describe('ConversationView', () => {
     expect(wrapper.text()).toContain('首 Token 延迟')
     expect(wrapper.text()).toContain('30 ms')
     expect(wrapper.text()).toContain('来源数量')
+    expect(wrapper.text()).toContain('路径限定')
+    expect(wrapper.text()).toContain('src/main/java/demo/UserService.java')
     expect(wrapper.text()).not.toContain('Conversation History')
   })
 })

@@ -33,6 +33,7 @@ class RagSource(BaseModel):
     chunk_id: UUID
     index_generation: UUID
     document_name: str
+    relative_path: str
     version_number: int
     chunk_index: int
     content_hash: str

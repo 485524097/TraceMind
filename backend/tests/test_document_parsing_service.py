@@ -188,6 +188,8 @@ def make_version(
         knowledge_base_id=knowledge_base_id,
         name="sample.md",
         normalized_name="sample.md",
+        relative_path="sample.md",
+        normalized_path="sample.md",
         source_type="upload",
     )
     storage = LocalFileStorage(tmp_path / "uploads", max_size=1024, chunk_size=64)

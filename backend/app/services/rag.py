@@ -17,6 +17,7 @@ from app.services.query_rewrite import (
     HistoryAwareQueryRewriteService,
     QueryRewriteResult,
 )
+from app.services.retrieval_query import PreparedRetrievalQuery
 
 logger = logging.getLogger(__name__)
 NO_ANSWER_MESSAGE = "知识库中未找到足够相关的信息。"
@@ -39,6 +40,8 @@ class PreparedRag:
     query_rewrite_mode: str
     query_rewrite_latency_ms: int
     query_rewrite_fallback_reason: str | None
+    path_scope_mode: str
+    scoped_relative_path: str | None
     started_at: float
 
 
@@ -72,10 +75,15 @@ class RagService:
     ) -> PreparedRag:
         started_at = perf_counter()
         trace_id = trace_id or uuid4()
-        rewrite = QueryRewriteResult(query, "not_applicable")
+        scoped_query = await self.indexing_service.prepare_retrieval_query(
+            knowledge_base_id,
+            query,
+            document_id=document_id,
+        )
+        rewrite = QueryRewriteResult(scoped_query.semantic_query, "not_applicable")
         history = conversation_history or ()
         if conversation_history is not None:
-            rewrite = await self.query_rewrite_service.rewrite(query, history)
+            rewrite = await self.query_rewrite_service.rewrite(scoped_query.semantic_query, history)
         retrieval_query = rewrite.query
         logger.info(
             "RAG query rewrite trace_id=%s conversation_id=%s query_rewrite_mode=%s "
@@ -90,12 +98,28 @@ class RagService:
             rewrite.latency_ms,
             rewrite.fallback_reason,
         )
+        logger.info(
+            "RAG path scope trace_id=%s conversation_id=%s path_scope_mode=%s "
+            "scoped_path_length=%s",
+            trace_id,
+            conversation_id,
+            scoped_query.path_scope_mode,
+            len(scoped_query.explicit_relative_path or ""),
+        )
+        retrieval_scope = PreparedRetrievalQuery(
+            original_query=query,
+            semantic_query=retrieval_query,
+            scoped_document_id=scoped_query.scoped_document_id,
+            path_scope_mode=scoped_query.path_scope_mode,
+            explicit_relative_path=scoped_query.explicit_relative_path,
+        )
         candidates = await self.indexing_service.hybrid_search(
             knowledge_base_id,
             query=retrieval_query,
             limit=self.settings.rag_rerank_candidate_limit,
             language=language,
             document_id=document_id,
+            prepared_query=retrieval_scope,
         )
         results = candidates[: self.settings.rag_retrieval_limit]
         retrieval_mode = "hybrid"
@@ -142,7 +166,16 @@ class RagService:
             fallback_reason,
         )
         answer_history = history if rewrite.mode in {"rewritten", "fallback"} else ()
-        messages = build_rag_messages(query, context, answer_history) if context.sources else None
+        messages = (
+            build_rag_messages(
+                query,
+                context,
+                answer_history,
+                scoped_relative_path=scoped_query.explicit_relative_path,
+            )
+            if context.sources
+            else None
+        )
         return PreparedRag(
             trace_id,
             knowledge_base_id,
@@ -158,6 +191,8 @@ class RagService:
             rewrite.mode,
             rewrite.latency_ms,
             rewrite.fallback_reason,
+            scoped_query.path_scope_mode,
+            scoped_query.explicit_relative_path,
             started_at,
         )
 
@@ -285,6 +320,8 @@ class RagService:
             "query_rewrite_latency_ms": prepared.query_rewrite_latency_ms,
             "history_turn_count": len(prepared.conversation_history),
             "retrieval_query": prepared.retrieval_query,
+            "path_scope_mode": prepared.path_scope_mode,
+            "scoped_relative_path": prepared.scoped_relative_path,
             "source_count": len(prepared.context.sources),
             "llm_first_token_latency_ms": llm_first_token_latency_ms,
             "llm_latency_ms": llm_latency_ms,

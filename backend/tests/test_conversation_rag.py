@@ -22,6 +22,8 @@ class FakePrepared:
     query_rewrite_latency_ms: int = 7
     conversation_history: tuple[ConversationTurn, ...] = (ConversationTurn("历史问题", "历史回答"),)
     retrieval_query: str = "独立检索问题"
+    path_scope_mode: str = "none"
+    scoped_relative_path: str | None = None
 
 
 @dataclass
@@ -100,6 +102,8 @@ async def test_completed_answer_persists_guarded_content_sources_and_metadata(
         "query_rewrite_latency_ms": 7,
         "history_turn_count": 1,
         "retrieval_query": "独立检索问题",
+        "path_scope_mode": "none",
+        "scoped_relative_path": None,
     }
     stream, persistence, exchange = prepared_stream(
         [
@@ -167,6 +171,8 @@ async def test_llm_error_persists_only_safe_public_error() -> None:
             "query_rewrite_latency_ms": 7,
             "history_turn_count": 1,
             "retrieval_query": "独立检索问题",
+            "path_scope_mode": "none",
+            "scoped_relative_path": None,
         },
     }
     assert "upstream" not in str(kwargs).lower()
@@ -193,6 +199,8 @@ async def test_disconnect_persists_cancelled_without_pending_message() -> None:
             "query_rewrite_latency_ms": 7,
             "history_turn_count": 1,
             "retrieval_query": "独立检索问题",
+            "path_scope_mode": "none",
+            "scoped_relative_path": None,
             "llm_first_token_latency_ms": 0,
         },
     )
@@ -233,6 +241,8 @@ async def test_task_cancellation_persists_cancelled_status() -> None:
             "query_rewrite_latency_ms": 7,
             "history_turn_count": 1,
             "retrieval_query": "独立检索问题",
+            "path_scope_mode": "none",
+            "scoped_relative_path": None,
             "llm_first_token_latency_ms": 0,
         },
     )

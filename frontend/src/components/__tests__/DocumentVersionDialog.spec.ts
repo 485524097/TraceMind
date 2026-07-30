@@ -49,6 +49,7 @@ const document: DocumentItem = {
   id: 'document-id',
   knowledge_base_id: 'kb-id',
   name: 'sample.md',
+  relative_path: 'sample.md',
   source_type: 'upload',
   created_at: version.created_at,
   updated_at: version.created_at,

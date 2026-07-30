@@ -27,6 +27,7 @@ def search_result(
         chunk_id=uuid4(),
         index_generation=uuid4(),
         document_name="application.yml",
+        relative_path="config/application.yml",
         version_number=1,
         chunk_index=rank,
         content_hash="a" * 64,

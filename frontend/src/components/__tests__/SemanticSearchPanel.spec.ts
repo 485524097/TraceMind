@@ -25,6 +25,7 @@ function result(content = 'class DocumentService'): SemanticSearchResult {
     chunk_id: 'chunk-id',
     index_generation: 'generation-id',
     document_name: 'service.py',
+    relative_path: 'backend/service.py',
     version_number: 2,
     chunk_index: 3,
     content_hash: 'a'.repeat(64),
@@ -67,7 +68,7 @@ describe('SemanticSearchPanel', () => {
 
     expect(mockedRerankedSearch).toHaveBeenCalledWith('kb-id', 'service layer', 'python', 5)
     expect(wrapper.findAll('.search-result-card')).toHaveLength(1)
-    expect(wrapper.text()).toContain('service.py · V2')
+    expect(wrapper.text()).toContain('backend/service.py · V2')
     expect(wrapper.text()).toContain('Reranker 原始分数 0.9123')
     expect(wrapper.text()).toContain('原 RRF 分数 0.7100')
     expect(wrapper.text()).toContain('原 RRF 排名 2')
@@ -85,6 +86,25 @@ describe('SemanticSearchPanel', () => {
     expect(wrapper.text()).toContain('未找到足够相关的内容')
     expect(wrapper.text()).toContain('请换个问法，或确认文档中包含相关信息。')
     expect(wrapper.findAll('.search-result-card')).toHaveLength(0)
+  })
+
+  it('shows exact path scope and semantic query for dense debugging', async () => {
+    mockedSearch.mockResolvedValue({
+      items: [result('return source;')],
+      path_scope_mode: 'exact',
+      scoped_relative_path: 'src/main/java/demo/UserService.java',
+      semantic_query: 'source 方法返回什么？',
+    })
+    const wrapper = mount(SemanticSearchPanel, { props: { knowledgeBaseId: 'kb-id' } })
+    await wrapper.get('select[aria-label="检索模式"]').setValue('dense')
+
+    await submit(wrapper, 'src/main/java/demo/UserService.java 中 source 方法返回什么？')
+
+    const scope = wrapper.get('[data-testid="semantic-search-scope"]')
+    expect(scope.text()).toContain('路径限定')
+    expect(scope.text()).toContain('src/main/java/demo/UserService.java')
+    expect(scope.text()).toContain('语义查询')
+    expect(scope.text()).toContain('source 方法返回什么？')
   })
 
   it('keeps API failures separate from an empty result', async () => {

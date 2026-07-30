@@ -18,7 +18,7 @@ from app.services.exceptions import (
     UnsupportedDocumentTypeError,
 )
 from app.storage.local import LocalFileStorage
-from app.storage.names import normalize_document_name
+from app.storage.names import normalize_document_name, normalize_document_path
 
 ALLOWED = {".md", ".txt", ".pdf"}
 
@@ -60,6 +60,36 @@ def test_rejects_invalid_names(filename: str) -> None:
 def test_rejects_unsupported_extension() -> None:
     with pytest.raises(UnsupportedDocumentTypeError):
         normalize_document_name("archive.exe", ALLOWED)
+
+
+def test_normalizes_relative_document_paths_with_existing_case_strategy() -> None:
+    result = normalize_document_path(r" .\源码\\服务\README.MD ", ALLOWED)
+
+    assert result.relative_path == "源码/服务/README.MD"
+    assert result.normalized_path == "源码/服务/readme.md"
+    assert result.display_name == "README.MD"
+    assert result.normalized_name == "readme.md"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "",
+        "   ",
+        ".",
+        "/root/file.md",
+        r"C:\root\file.md",
+        r".\C:\root\file.md",
+        "../file.md",
+        "folder/../file.md",
+        "folder/",
+        "folder/.",
+        "bad\x00.md",
+    ],
+)
+def test_rejects_unsafe_document_paths(path: str) -> None:
+    with pytest.raises(InvalidDocumentNameError):
+        normalize_document_path(path, ALLOWED)
 
 
 async def test_streams_upload_and_calculates_hash_and_size(tmp_path: Path) -> None:
