@@ -138,12 +138,13 @@ describe('DocumentUploadPanel', () => {
 
     await wrapper.get('[data-testid="upload-documents"]').trigger('click')
     await vi.waitFor(() => expect(mockedUpload).toHaveBeenCalledTimes(7))
-    await flushPromises()
+    await vi.waitFor(() => {
+      expect(wrapper.text()).toContain('完成 7')
+      expect(wrapper.text()).toContain('成功 7')
+    })
 
     expect(maximum).toBe(3)
     expect(mockedUpload.mock.calls[0]?.[2]).toBe('src/file0.py')
-    expect(wrapper.text()).toContain('完成 7')
-    expect(wrapper.text()).toContain('成功 7')
   })
 
   it('cancels active and not-yet-started directory uploads', async () => {

@@ -28,6 +28,10 @@ const source: RagSource = {
   page_number: null,
   start_line: 10,
   end_line: 14,
+  symbol_kind: 'method',
+  symbol_name: 'source',
+  symbol_qualified_name: 'demo.UserService.source',
+  symbol_signature: 'public String source(String username)',
   ranking_mode: 'reranker',
   retrieval_score: 0.7,
   rerank_score: 0.91,
@@ -75,6 +79,10 @@ describe('RagAnswerPanel', () => {
     expect(wrapper.text()).toContain('使用 Spring [S1]')
     expect(wrapper.text()).toContain('docs/sample.md · V2')
     expect(wrapper.text()).toContain('第 10-14 行')
+    expect(wrapper.text()).toContain('public String source(String username)')
+    expect(wrapper.get('.rag-source-card p span').attributes('title')).toBe(
+      'public String source(String username)',
+    )
     expect(wrapper.text()).toContain('Reranker 原始分数 0.9100')
     expect(wrapper.text()).toContain('原 RRF 分数 0.7000')
     expect(wrapper.get('[data-testid="rag-path-scope"]').text()).toContain(
@@ -116,6 +124,37 @@ describe('RagAnswerPanel', () => {
     expect(wrapper.text()).not.toContain('知识库中未找到足够相关的信息')
     expect(wrapper.text()).toContain('该回答未包含有效引用')
     wrapper.unmount()
+  })
+
+  it('falls back through qualified symbol and legacy section metadata', async () => {
+    const qualified = {
+      ...source,
+      symbol_signature: null,
+      symbol_qualified_name: 'demo.UserService.source',
+    }
+    const legacy: RagSource = {
+      ...source,
+      source_id: 'S2',
+      symbol_kind: undefined,
+      symbol_name: undefined,
+      symbol_qualified_name: undefined,
+      symbol_signature: undefined,
+    }
+    mockedStream.mockImplementation(async (_id, _request, callbacks) => {
+      if (!callbacks) return
+      callbacks.onRetrieval({
+        trace_id: 'trace',
+        source_count: 2,
+        sources: [qualified, legacy],
+      })
+    })
+    const wrapper = mount(RagAnswerPanel, { props: { knowledgeBaseId: 'kb' } })
+    await wrapper.get('input[aria-label="知识库问题"]').setValue('symbols')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('demo.UserService.source')
+    expect(wrapper.text()).toContain('架构')
   })
 
   it('aborts a generation without displaying a service error', async () => {

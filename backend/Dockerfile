@@ -13,11 +13,10 @@ COPY --from=uv /uv /uvx /bin/
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-COPY alembic.ini ./
-COPY alembic ./alembic
-COPY app ./app
+COPY --chown=app:app alembic.ini ./
+COPY --chown=app:app alembic ./alembic
+COPY --chown=app:app app ./app
 
-RUN chown -R app:app /app
 USER app
 
 EXPOSE 8000

@@ -30,6 +30,10 @@ export interface RagSource {
   page_number: number | null
   start_line: number | null
   end_line: number | null
+  symbol_kind?: string | null
+  symbol_name?: string | null
+  symbol_qualified_name?: string | null
+  symbol_signature?: string | null
   ranking_mode?: string | null
   retrieval_score?: number | null
   rerank_score?: number | null

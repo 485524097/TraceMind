@@ -36,6 +36,16 @@ function sourceScore(source: RagSource): string {
   return `RRF 分数 ${source.score.toFixed(4)}`
 }
 
+function sourceIdentity(source: RagSource): string {
+  return (
+    source.symbol_signature ||
+    source.symbol_qualified_name ||
+    source.symbol_name ||
+    source.section_title ||
+    source.document_name
+  )
+}
+
 function reset(): void {
   answer.value = ''
   sources.value = []
@@ -170,7 +180,8 @@ onBeforeUnmount(stop)
             {{ source.retrieval_rank ?? '—' }}
           </p>
           <p>
-            {{ source.section_title || '未命名章节' }} · {{ location(source) }} ·
+            <span :title="source.symbol_signature || undefined">{{ sourceIdentity(source) }}</span>
+            · {{ location(source) }} ·
             {{ source.chunk_type }}<template v-if="source.language"> · {{ source.language }}</template>
           </p>
           <pre class="rag-source-content">{{ source.content }}</pre>

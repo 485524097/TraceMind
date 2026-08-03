@@ -112,6 +112,10 @@ class DocumentParsingRepository:
                     section_title=draft.section_title,
                     chunk_type=draft.chunk_type,
                     language=draft.language,
+                    symbol_kind=draft.symbol_kind,
+                    symbol_name=draft.symbol_name,
+                    symbol_qualified_name=draft.symbol_qualified_name,
+                    symbol_signature=draft.symbol_signature,
                 )
                 for draft in drafts
             ]

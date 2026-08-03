@@ -329,6 +329,16 @@ function sourceLocation(source: RagSource): string {
   return `Chunk ${source.chunk_index}`
 }
 
+function sourceIdentity(source: RagSource): string {
+  return (
+    source.symbol_signature ||
+    source.symbol_qualified_name ||
+    source.symbol_name ||
+    source.section_title ||
+    source.document_name
+  )
+}
+
 function answerSegments(message: ConversationMessage) {
   return parseAnswerSegments(
     message.content,
@@ -552,7 +562,9 @@ onBeforeUnmount(() => {
                 class="rag-source-card"
               >
                 <strong>[{{ source.source_id }}] {{ source.relative_path || source.document_name }}</strong>
-                <p>{{ source.section_title || '未命名章节' }} · {{ sourceLocation(source) }}</p>
+                <p :title="source.symbol_signature || undefined">
+                  {{ sourceIdentity(source) }} · {{ sourceLocation(source) }}
+                </p>
                 <pre class="rag-source-content">{{ source.content }}</pre>
               </article>
             </details>

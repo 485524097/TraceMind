@@ -15,6 +15,7 @@ from app.parsing.exceptions import (
     ParseLimitExceededError,
     PdfEncryptedError,
 )
+from app.parsing.java import JavaTreeSitterParser
 from app.parsing.markdown import MarkdownParser
 from app.parsing.pdf import PdfParser
 from app.parsing.registry import ParserRegistry
@@ -270,3 +271,140 @@ def test_registry_maps_every_supported_extension() -> None:
     }
     assert registry.supported_extensions == expected
     assert cast(object, registry.get(".MD")).parser_name == "markdown"
+    assert isinstance(registry.get(".java"), JavaTreeSitterParser)
+    assert all(isinstance(registry.get(extension), CodeParser) for extension in LANGUAGES)
+
+
+def parse_java(tmp_path: Path, source: str):
+    return JavaTreeSitterParser().parse(
+        write(tmp_path / "Sample.java", source.encode("utf-8")),
+        CONTEXT,
+    )
+
+
+def symbol_blocks(parsed):
+    return [block for block in parsed.blocks if block.symbol_kind is not None]
+
+
+def test_java_types_members_nested_and_initializers(tmp_path: Path) -> None:
+    source = """package demo;
+public class Outer {
+  private String first, second;
+  static { boot(); }
+  { init(); }
+  Outer() {}
+  void work() { if (true) { boot(); } }
+  interface Nested { void call(); }
+}
+interface Contract {}
+enum State { READY, DONE }
+record Item(String name) { Item {} }
+@interface Marker {}
+"""
+    parsed = parse_java(tmp_path, source)
+    symbols = symbol_blocks(parsed)
+
+    assert {"Outer", "Nested", "Contract", "State", "Item", "Marker"} <= {
+        block.symbol_name for block in symbols if block.symbol_kind == "type"
+    }
+    assert [(block.symbol_kind, block.symbol_name) for block in symbols].count(
+        ("initializer", "<init-block>")
+    ) == 1
+    assert ("initializer", "<clinit>") in [
+        (block.symbol_kind, block.symbol_name) for block in symbols
+    ]
+    assert ("constructor", "Outer") in [(block.symbol_kind, block.symbol_name) for block in symbols]
+    assert ("constructor", "Item") in [(block.symbol_kind, block.symbol_name) for block in symbols]
+    assert {"READY", "DONE"} <= {
+        block.symbol_name for block in symbols if block.symbol_kind == "enum_constant"
+    }
+    field = next(block for block in symbols if block.symbol_kind == "field")
+    assert field.symbol_name == "first"
+    assert field.symbol_signature == "private String first, second;"
+    outer = next(block for block in symbols if block.symbol_name == "Outer")
+    assert outer.text.endswith("{")
+    assert "private String" not in outer.text
+    assert next(
+        block for block in symbols if block.symbol_name == "call"
+    ).symbol_qualified_name == ("demo.Outer.Nested.call")
+
+
+def test_java_overloads_annotations_generics_throws_and_qualified_names(
+    tmp_path: Path,
+) -> None:
+    parsed = parse_java(
+        tmp_path,
+        """package demo;
+class UserService {
+  @Deprecated public <T> T source(String username) throws Exception { return null; }
+  long source(long id) { return id; }
+}
+""",
+    )
+    methods = [block for block in symbol_blocks(parsed) if block.symbol_kind == "method"]
+
+    assert [block.symbol_name for block in methods] == ["source", "source"]
+    assert {block.symbol_qualified_name for block in methods} == {"demo.UserService.source"}
+    assert len({block.symbol_signature for block in methods}) == 2
+    assert "@Deprecated public <T> T source(String username) throws Exception" in (
+        methods[0].symbol_signature or ""
+    )
+
+
+def test_java_javadoc_attachment_and_uncovered_source(tmp_path: Path) -> None:
+    source = """// header
+package demo;
+import java.util.List;
+/* ordinary */
+/** type docs */
+class Sample {
+  /** field docs */
+  int value;
+  /** detached */
+  // blocker
+  void run() {}
+}
+"""
+    parsed = parse_java(tmp_path, source)
+    sample = next(block for block in symbol_blocks(parsed) if block.symbol_name == "Sample")
+    field = next(block for block in symbol_blocks(parsed) if block.symbol_kind == "field")
+    method = next(block for block in symbol_blocks(parsed) if block.symbol_kind == "method")
+    ordinary = "\n".join(block.text for block in parsed.blocks if block.symbol_kind is None)
+
+    assert sample.text.startswith("/** type docs */")
+    assert field.text.startswith("/** field docs */")
+    assert not method.text.startswith("/**")
+    assert "/** type docs */" not in ordinary
+    assert "/** field docs */" not in ordinary
+    assert "/** detached */" in ordinary
+    assert "// header" in ordinary and "package demo;" in ordinary
+    assert "import java.util.List;" in ordinary and "/* ordinary */" in ordinary
+
+
+def test_java_unicode_crlf_partial_error_and_stable_output(tmp_path: Path) -> None:
+    source = (
+        "package 示例;\r\n"
+        "class 用户 {\r\n"
+        '  String 名称() { return "中"; }\r\n'
+        "  void broken( {\r\n"
+        "}\r\n"
+    )
+    first = parse_java(tmp_path, source)
+    second = parse_java(tmp_path, source)
+    method = next(block for block in symbol_blocks(first) if block.symbol_name == "名称")
+
+    assert "java_partial_syntax_tree" in first.warnings
+    assert method.symbol_qualified_name == "示例.用户.名称"
+    assert (method.start_line, method.end_line) == (3, 3)
+    assert first.blocks == second.blocks
+
+
+def test_java_parser_falls_back_when_language_is_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("app.parsing.java.JAVA_LANGUAGE", None)
+    parsed = parse_java(tmp_path, "class Sample { void run() {} }")
+
+    assert parsed.parser_name == "code"
+    assert parsed.warnings == ["java_parser_fallback"]
+    assert all(block.symbol_kind is None for block in parsed.blocks)

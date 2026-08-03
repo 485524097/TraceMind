@@ -14,6 +14,7 @@ from app.parsing.base import ParseContext, ParsedBlock, ParsedDocument
 from app.parsing.chunker import ChunkDraft
 from app.parsing.exceptions import DocumentEncodingError
 from app.repositories.document_parsing import DocumentParsingRepository, ParsingVersionRecord
+from app.schemas.document import DocumentChunkResponse
 from app.services.document_dispatcher import DocumentParsingDispatcher
 from app.services.document_index_dispatcher import DocumentIndexingDispatcher
 from app.services.document_parsing import DocumentParsingService
@@ -40,7 +41,18 @@ class FakeParser:
         if self.error is not None:
             raise self.error
         return ParsedDocument(
-            [ParsedBlock("first\nsecond", "paragraph", start_line=1, end_line=2)],
+            [
+                ParsedBlock(
+                    "first\nsecond",
+                    "paragraph",
+                    start_line=1,
+                    end_line=2,
+                    symbol_kind="method",
+                    symbol_name="run",
+                    symbol_qualified_name="demo.Sample.run",
+                    symbol_signature="void run()",
+                )
+            ],
             self.parser_name,
             self.parser_version,
         )
@@ -112,6 +124,10 @@ class FakeParsingRepository:
                 section_title=draft.section_title,
                 chunk_type=draft.chunk_type,
                 language=draft.language,
+                symbol_kind=draft.symbol_kind,
+                symbol_name=draft.symbol_name,
+                symbol_qualified_name=draft.symbol_qualified_name,
+                symbol_signature=draft.symbol_signature,
             )
             for draft in drafts
         ]
@@ -259,6 +275,7 @@ async def test_pending_processing_succeeded_creates_chunks(tmp_path: Path) -> No
     assert version.parser_name == "fake"
     assert repository.deleted == repository.created == 1
     assert repository.chunks[0].start_line == 1
+    assert repository.chunks[0].symbol_qualified_name == "demo.Sample.run"
     assert session.commit.await_count == 2
 
 
@@ -457,3 +474,65 @@ async def test_manual_queue_failure_is_preserved(tmp_path: Path) -> None:
         await service.request_parse(
             document.knowledge_base_id, document.id, version.id, force=False
         )
+
+
+async def test_repository_create_chunks_persists_symbol_metadata() -> None:
+    session = AsyncMock(spec=AsyncSession)
+    repository = DocumentParsingRepository(cast(AsyncSession, session))
+    version_id = uuid4()
+    draft = ChunkDraft(
+        chunk_index=0,
+        content="void run() {}",
+        content_hash="a" * 64,
+        char_count=13,
+        page_number=None,
+        start_line=2,
+        end_line=2,
+        section_title=None,
+        chunk_type="code",
+        language="java",
+        symbol_kind="method",
+        symbol_name="run",
+        symbol_qualified_name="demo.Sample.run",
+        symbol_signature="void run()",
+    )
+
+    await repository.create_chunks(version_id, [draft])
+
+    chunks = session.add_all.call_args.args[0]
+    assert len(chunks) == 1
+    assert chunks[0].symbol_kind == "method"
+    assert chunks[0].symbol_name == "run"
+    assert chunks[0].symbol_qualified_name == "demo.Sample.run"
+    assert chunks[0].symbol_signature == "void run()"
+    session.flush.assert_awaited_once()
+
+
+def test_chunk_schema_serializes_symbols_and_accepts_missing_legacy_fields() -> None:
+    base = {
+        "id": uuid4(),
+        "chunk_index": 0,
+        "content": "code",
+        "content_hash": "a" * 64,
+        "char_count": 4,
+        "page_number": None,
+        "start_line": 1,
+        "end_line": 1,
+        "section_title": None,
+        "chunk_type": "code",
+        "language": "java",
+        "created_at": datetime.now(UTC),
+    }
+    legacy = DocumentChunkResponse.model_validate(base)
+    symbol = DocumentChunkResponse.model_validate(
+        {
+            **base,
+            "symbol_kind": "method",
+            "symbol_name": "run",
+            "symbol_qualified_name": "demo.Sample.run",
+            "symbol_signature": "void run()",
+        }
+    )
+
+    assert legacy.symbol_kind is None
+    assert symbol.model_dump()["symbol_qualified_name"] == "demo.Sample.run"

@@ -70,6 +70,10 @@ const source: RagSource = {
   page_number: null,
   start_line: 2,
   end_line: 4,
+  symbol_kind: 'method',
+  symbol_name: 'configure',
+  symbol_qualified_name: 'demo.Guide.configure',
+  symbol_signature: 'void configure()',
 }
 
 function message(
@@ -157,6 +161,7 @@ describe('ConversationView', () => {
     expect(sources.attributes('open')).toBeUndefined()
     await wrapper.get('details summary').trigger('click')
     expect(wrapper.text()).toContain('docs/guide.md')
+    expect(wrapper.text()).toContain('void configure()')
     expect(wrapper.text()).toContain('第 2-4 行')
   })
 

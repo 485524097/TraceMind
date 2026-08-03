@@ -134,6 +134,10 @@ async def test_semantic_search_validation_and_traceable_response() -> None:
             page_number=None,
             start_line=10,
             end_line=14,
+            symbol_kind="method",
+            symbol_name="run",
+            symbol_qualified_name="demo.Sample.run",
+            symbol_signature="void run()",
         )
     ]
     app = make_app(service)
@@ -151,6 +155,8 @@ async def test_semantic_search_validation_and_traceable_response() -> None:
     assert response.json()["items"][0]["start_line"] == 10
     assert response.json()["items"][0]["document_name"] == "sample.md"
     assert response.json()["items"][0]["relative_path"] == "docs/sample.md"
+    assert response.json()["items"][0]["symbol_qualified_name"] == "demo.Sample.run"
+    assert response.json()["items"][0]["symbol_signature"] == "void run()"
     assert blank.status_code == too_many.status_code == 422
     service.search.assert_awaited_once_with(
         knowledge_base_id,

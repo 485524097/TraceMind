@@ -56,3 +56,44 @@ def test_chunker_keeps_fenced_code_and_docx_table_whole_when_within_limit() -> N
     chunks = DeterministicChunker(max_chars=40, overlap_chars=5).chunk(blocks)
     assert [chunk.content for chunk in chunks] == ["```py\nprint(1)\n```", "key\tvalue"]
     assert [chunk.chunk_type for chunk in chunks] == ["code", "table"]
+
+
+def test_chunker_preserves_symbol_metadata_across_long_method_pieces() -> None:
+    block = ParsedBlock(
+        "first line\nsecond line\nthird line",
+        "code",
+        start_line=20,
+        end_line=22,
+        language="java",
+        symbol_kind="method",
+        symbol_name="run",
+        symbol_qualified_name="demo.Sample.run",
+        symbol_signature="void run()",
+    )
+    chunks = DeterministicChunker(max_chars=22, overlap_chars=5).chunk([block])
+
+    assert len(chunks) == 2
+    assert [(chunk.start_line, chunk.end_line) for chunk in chunks] == [(20, 21), (22, 22)]
+    assert {
+        (
+            chunk.symbol_kind,
+            chunk.symbol_name,
+            chunk.symbol_qualified_name,
+            chunk.symbol_signature,
+        )
+        for chunk in chunks
+    } == {("method", "run", "demo.Sample.run", "void run()")}
+    assert chunks == DeterministicChunker(max_chars=22, overlap_chars=5).chunk([block])
+
+
+def test_chunker_defaults_symbol_metadata_to_none() -> None:
+    chunk = DeterministicChunker(max_chars=20, overlap_chars=4).chunk(
+        [ParsedBlock("plain", "code", start_line=1, end_line=1)]
+    )[0]
+
+    assert (
+        chunk.symbol_kind,
+        chunk.symbol_name,
+        chunk.symbol_qualified_name,
+        chunk.symbol_signature,
+    ) == (None, None, None, None)
