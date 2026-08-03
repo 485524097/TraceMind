@@ -333,6 +333,98 @@ def test_sparse_document_text_preserves_exact_identifiers_and_optional_section()
     assert build_sparse_document_text(record, chunk) == f"sample.md\n{chunk.content}"
 
 
+def test_symbol_context_is_stable_in_dense_and_sparse_text() -> None:
+    document, version, chunks = make_version()
+    document.name = "UserService.java"
+    document.relative_path = "src/main/java/demo/UserService.java"
+    chunk = chunks[0]
+    chunk.content = "return username;"
+    chunk.symbol_kind = "method"
+    chunk.symbol_name = "source"
+    chunk.symbol_qualified_name = "demo.UserService.source"
+    chunk.symbol_signature = "public String source(String username)"
+    record = IndexingVersionRecord(document, version)
+
+    dense = build_document_embedding_text(record, chunk)
+    sparse = build_sparse_document_text(record, chunk)
+
+    expected = (
+        "Path: src/main/java/demo/UserService.java\n"
+        "Symbol: demo.UserService.source\n"
+        "Signature: public String source(String username)\n"
+        "Kind: method"
+    )
+    assert expected in dense
+    assert expected in sparse
+    assert dense == build_document_embedding_text(record, chunk)
+    assert sparse == build_sparse_document_text(record, chunk)
+    assert chunk.content == "return username;"
+
+
+async def test_index_point_and_search_result_round_trip_symbol_metadata() -> None:
+    service, _, repository, gateway, document, version = make_service()
+    chunk = repository.chunks[0]
+    chunk.symbol_kind = "method"
+    chunk.symbol_name = "来源"
+    chunk.symbol_qualified_name = "示例.服务.来源"
+    chunk.symbol_signature = "String 来源(String 名称)"
+
+    assert await service.index_version(version.id)
+    payload = gateway.points[0].payload
+    assert payload["symbol_kind"] == "method"
+    assert payload["symbol_name"] == "来源"
+    assert payload["symbol_qualified_name"] == "示例.服务.来源"
+    assert payload["symbol_signature"] == "String 来源(String 名称)"
+
+    generation = version.active_index_generation
+    assert generation is not None
+    repository.active = [ActiveGeneration(document.id, version.id, generation)]
+    gateway.hits = [VectorSearchHit(0.9, payload)]
+    result = (
+        await service.search(
+            document.knowledge_base_id,
+            query="来源",
+            limit=5,
+            language=None,
+            document_id=None,
+        )
+    )[0]
+    assert result.symbol_qualified_name == "示例.服务.来源"
+    assert result.symbol_signature == "String 来源(String 名称)"
+
+
+async def test_old_or_invalid_qdrant_symbol_payload_is_safe_none() -> None:
+    service, _, repository, gateway, document, version = make_service()
+    generation = uuid4()
+    repository.active = [ActiveGeneration(document.id, version.id, generation)]
+    service_payload = DocumentIndexingService._point(
+        repository.record, repository.chunks[0], generation, [1.0, 0.0, 0.0]
+    ).payload
+    for key in (
+        "symbol_kind",
+        "symbol_name",
+        "symbol_qualified_name",
+        "symbol_signature",
+    ):
+        service_payload.pop(key, None)
+    service_payload["symbol_name"] = {"invalid": True}
+    gateway.hits = [VectorSearchHit(0.9, service_payload)]
+
+    result = (
+        await service.search(
+            document.knowledge_base_id,
+            query="legacy",
+            limit=5,
+            language=None,
+            document_id=None,
+        )
+    )[0]
+    assert result.symbol_kind is None
+    assert result.symbol_name is None
+    assert result.symbol_qualified_name is None
+    assert result.symbol_signature is None
+
+
 async def test_force_reindex_replaces_generation_and_cleans_previous() -> None:
     observed_claim: list[tuple[str, UUID | None, UUID | None]] = []
     service, _, _, gateway, _, version = make_service(

@@ -217,6 +217,10 @@ class DocumentChunk(Base):
     section_title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     chunk_type: Mapped[str] = mapped_column(String(32), nullable=False)
     language: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    symbol_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    symbol_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    symbol_qualified_name: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    symbol_signature: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

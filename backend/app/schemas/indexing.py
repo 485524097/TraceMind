@@ -66,6 +66,10 @@ class SemanticSearchResultResponse(BaseModel):
     content_hash: str
     chunk_type: str
     language: str | None
+    symbol_kind: str | None = None
+    symbol_name: str | None = None
+    symbol_qualified_name: str | None = None
+    symbol_signature: str | None = None
     section_title: str | None
     page_number: int | None
     start_line: int | None

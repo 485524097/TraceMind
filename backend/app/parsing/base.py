@@ -26,6 +26,10 @@ class ParsedBlock:
     end_line: int | None = None
     section_title: str | None = None
     language: str | None = None
+    symbol_kind: str | None = None
+    symbol_name: str | None = None
+    symbol_qualified_name: str | None = None
+    symbol_signature: str | None = None
 
     def __post_init__(self) -> None:
         if not self.text.strip():

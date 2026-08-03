@@ -66,11 +66,12 @@ async def test_document_path_migration_backfills_and_round_trips() -> None:
     await asyncio.to_thread(downgrade, "20260729_0005")
     engine = create_async_engine(require_test_database_url())
     knowledge_base_id, document_id = uuid4(), uuid4()
+    knowledge_base_name = f"Migration path test {knowledge_base_id}"
     try:
         async with engine.begin() as connection:
             await connection.execute(
                 text("INSERT INTO knowledge_bases (id, name) VALUES (:id, :name)"),
-                {"id": knowledge_base_id, "name": "Migration path test"},
+                {"id": knowledge_base_id, "name": knowledge_base_name},
             )
             await connection.execute(
                 text(
@@ -102,6 +103,17 @@ async def test_document_path_migration_backfills_and_round_trips() -> None:
     finally:
         await engine.dispose()
         await asyncio.to_thread(migrate, "head")
+        engine = create_async_engine(require_test_database_url())
+        async with engine.begin() as connection:
+            await connection.execute(
+                text("DELETE FROM documents WHERE id = :id"),
+                {"id": document_id},
+            )
+            await connection.execute(
+                text("DELETE FROM knowledge_bases WHERE id = :id"),
+                {"id": knowledge_base_id},
+            )
+        await engine.dispose()
 
 
 @pytest_asyncio.fixture
@@ -685,6 +697,10 @@ async def test_superseded_parse_attempt_cannot_overwrite_new_transaction(
                     section_title=None,
                     chunk_type="paragraph",
                     language=None,
+                    symbol_kind="method",
+                    symbol_name="run",
+                    symbol_qualified_name="demo.Sample.run",
+                    symbol_signature="void run()",
                 )
             ],
         )
@@ -717,6 +733,10 @@ async def test_superseded_parse_attempt_cannot_overwrite_new_transaction(
         assert persisted_version.parser_name == "new-worker"
         assert persisted_version.chunk_count == 1
         assert [chunk.content for chunk in chunks] == ["new worker content"]
+        assert chunks[0].symbol_kind == "method"
+        assert chunks[0].symbol_name == "run"
+        assert chunks[0].symbol_qualified_name == "demo.Sample.run"
+        assert chunks[0].symbol_signature == "void run()"
 
         persisted_document = await verification.get(Document, document_id)
         persisted_knowledge_base = await verification.get(KnowledgeBase, knowledge_base_id)

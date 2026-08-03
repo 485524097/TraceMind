@@ -65,6 +65,10 @@ describe('DocumentChunkDialog', () => {
           section_title: '安装说明',
           chunk_type: 'paragraph',
           language: 'markdown',
+          symbol_kind: 'method',
+          symbol_name: 'run',
+          symbol_qualified_name: 'demo.Sample.run',
+          symbol_signature: 'public void run()',
           created_at: '2026-07-20T00:00:01Z',
         },
       ],
@@ -85,6 +89,9 @@ describe('DocumentChunkDialog', () => {
     expect(wrapper.text()).toContain('正文')
     expect(wrapper.text()).toContain('安装说明，第 3 页，第 12–28 行')
     expect(wrapper.text()).toContain('2 字符')
+    expect(wrapper.text()).toContain('method')
+    expect(wrapper.text()).toContain('demo.Sample.run')
+    expect(wrapper.text()).toContain('public void run()')
   })
 
   it('shows a safe failed-state message', async () => {

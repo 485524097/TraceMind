@@ -29,6 +29,16 @@ function reference(result: SemanticSearchResult): string {
   return `Chunk ${result.chunk_index}`
 }
 
+function symbolIdentity(result: SemanticSearchResult): string {
+  return (
+    result.symbol_signature ||
+    result.symbol_qualified_name ||
+    result.symbol_name ||
+    result.section_title ||
+    '未命名章节'
+  )
+}
+
 async function search(): Promise<void> {
   if (!query.value.trim() || loading.value) return
   loading.value = true
@@ -121,6 +131,13 @@ async function search(): Promise<void> {
           <p v-if="mode === 'reranker'" class="search-result-ranking">
             原 RRF 分数 {{ result.retrieval_score?.toFixed(4) ?? '—' }} · 原 RRF 排名
             {{ result.retrieval_rank ?? '—' }}
+          </p>
+          <p
+            v-if="result.symbol_signature || result.symbol_qualified_name || result.symbol_name"
+            class="search-result-symbol"
+            :title="result.symbol_signature || undefined"
+          >
+            {{ symbolIdentity(result) }}
           </p>
           <p class="search-result-reference">
             {{ result.section_title || '未命名章节' }} · {{ reference(result) }}

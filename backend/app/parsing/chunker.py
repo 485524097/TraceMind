@@ -16,6 +16,10 @@ class ChunkDraft:
     section_title: str | None
     chunk_type: str
     language: str | None
+    symbol_kind: str | None = None
+    symbol_name: str | None = None
+    symbol_qualified_name: str | None = None
+    symbol_signature: str | None = None
 
 
 @dataclass(frozen=True)
@@ -59,6 +63,10 @@ class DeterministicChunker:
                         section_title=block.section_title,
                         chunk_type=block.block_type,
                         language=block.language,
+                        symbol_kind=block.symbol_kind,
+                        symbol_name=block.symbol_name,
+                        symbol_qualified_name=block.symbol_qualified_name,
+                        symbol_signature=block.symbol_signature,
                     )
                 )
         return drafts

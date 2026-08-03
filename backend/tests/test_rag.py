@@ -141,6 +141,34 @@ def test_prompt_treats_same_basename_at_different_paths_as_distinct_documents() 
     assert "not versions of one document" in messages[0].content
 
 
+def test_rag_source_and_prompt_preserve_optional_symbol_identity() -> None:
+    symbolic = replace(
+        result("return username;"),
+        symbol_kind="method",
+        symbol_name="source",
+        symbol_qualified_name="demo.UserService.source",
+        symbol_signature="public String source(String username)",
+    )
+    context = build_rag_context([symbolic], 1_000)
+    source = context.sources[0]
+    payload = json.loads(build_rag_messages("source?", context)[1].content)["sources"][0]
+
+    assert source.symbol_kind == "method"
+    assert source.model_dump(mode="json")["symbol_signature"] == (
+        "public String source(String username)"
+    )
+    assert payload["symbol"] == "demo.UserService.source"
+    assert payload["signature"] == "public String source(String username)"
+    assert payload["kind"] == "method"
+
+    legacy_payload = json.loads(
+        build_rag_messages("legacy?", build_rag_context([result("plain")], 1_000))[1].content
+    )["sources"][0]
+    assert "symbol" not in legacy_payload
+    assert "signature" not in legacy_payload
+    assert "kind" not in legacy_payload
+
+
 def test_citation_guard_handles_split_valid_and_invalid_references() -> None:
     guard = StreamingCitationGuard({"S1", "S12"})
     output = guard.push("A [S") + guard.push("1] B [S99] [S12]") + guard.finish()

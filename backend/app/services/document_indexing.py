@@ -64,6 +64,10 @@ class SemanticSearchResult:
     page_number: int | None
     start_line: int | None
     end_line: int | None
+    symbol_kind: str | None = None
+    symbol_name: str | None = None
+    symbol_qualified_name: str | None = None
+    symbol_signature: str | None = None
     ranking_mode: str | None = None
     retrieval_score: float | None = None
     rerank_score: float | None = None
@@ -79,6 +83,12 @@ def build_document_embedding_text(record: IndexingVersionRecord, chunk: Document
     relative_path = record.document.relative_path or record.document.name
     if relative_path != record.document.name:
         lines.append(f"Path: {relative_path}")
+    if chunk.symbol_qualified_name or chunk.symbol_name:
+        lines.append(f"Symbol: {chunk.symbol_qualified_name or chunk.symbol_name}")
+    if chunk.symbol_signature:
+        lines.append(f"Signature: {chunk.symbol_signature}")
+    if chunk.symbol_kind:
+        lines.append(f"Kind: {chunk.symbol_kind}")
     if chunk.section_title:
         lines.append(f"Section: {chunk.section_title}")
     lines.append(f"Type: {chunk.chunk_type}")
@@ -93,6 +103,12 @@ def build_sparse_document_text(record: IndexingVersionRecord, chunk: DocumentChu
     relative_path = record.document.relative_path or record.document.name
     if relative_path != record.document.name:
         parts.append(f"Path: {relative_path}")
+    if chunk.symbol_qualified_name or chunk.symbol_name:
+        parts.append(f"Symbol: {chunk.symbol_qualified_name or chunk.symbol_name}")
+    if chunk.symbol_signature:
+        parts.append(f"Signature: {chunk.symbol_signature}")
+    if chunk.symbol_kind:
+        parts.append(f"Kind: {chunk.symbol_kind}")
     if chunk.section_title:
         parts.append(chunk.section_title)
     parts.append(chunk.content)
@@ -501,6 +517,10 @@ class DocumentIndexingService:
                 "page_number": chunk.page_number,
                 "start_line": chunk.start_line,
                 "end_line": chunk.end_line,
+                "symbol_kind": chunk.symbol_kind,
+                "symbol_name": chunk.symbol_name,
+                "symbol_qualified_name": chunk.symbol_qualified_name,
+                "symbol_signature": chunk.symbol_signature,
             },
         )
 
@@ -535,6 +555,10 @@ class DocumentIndexingService:
                 page_number=int(payload["page_number"]) if payload.get("page_number") else None,
                 start_line=int(payload["start_line"]) if payload.get("start_line") else None,
                 end_line=int(payload["end_line"]) if payload.get("end_line") else None,
+                symbol_kind=_optional_payload_string(payload, "symbol_kind"),
+                symbol_name=_optional_payload_string(payload, "symbol_name"),
+                symbol_qualified_name=_optional_payload_string(payload, "symbol_qualified_name"),
+                symbol_signature=_optional_payload_string(payload, "symbol_signature"),
                 ranking_mode=ranking_mode,
                 retrieval_score=retrieval_score,
                 retrieval_rank=retrieval_rank,
@@ -550,3 +574,8 @@ class DocumentIndexingService:
         if document_id is None:
             return results
         return [result for result in results if result.document_id == document_id]
+
+
+def _optional_payload_string(payload: dict[str, Any], key: str) -> str | None:
+    value = payload.get(key)
+    return value if isinstance(value, str) and value else None

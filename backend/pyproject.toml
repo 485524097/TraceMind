@@ -18,6 +18,8 @@ dependencies = [
     "redis>=8.0.1",
     "sentence-transformers>=5.6,<6",
     "sqlalchemy>=2.0.51",
+    "tree-sitter>=0.26,<0.27",
+    "tree-sitter-java==0.23.5",
     "uvicorn[standard]>=0.51.0",
 ]
 

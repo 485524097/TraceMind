@@ -35,6 +35,10 @@ function result(content = 'class DocumentService'): SemanticSearchResult {
     page_number: null,
     start_line: 10,
     end_line: 14,
+    symbol_kind: 'method',
+    symbol_name: 'source',
+    symbol_qualified_name: 'demo.UserService.source',
+    symbol_signature: 'public String source(String username)',
     ranking_mode: 'reranker',
     retrieval_score: 0.71,
     rerank_score: 0.91234,
@@ -73,6 +77,7 @@ describe('SemanticSearchPanel', () => {
     expect(wrapper.text()).toContain('原 RRF 分数 0.7100')
     expect(wrapper.text()).toContain('原 RRF 排名 2')
     expect(wrapper.text()).toContain('Document service')
+    expect(wrapper.text()).toContain('public String source(String username)')
     expect(wrapper.text()).toContain('第 10-14 行')
     expect(wrapper.text()).toContain('class DocumentService')
   })

@@ -2,6 +2,7 @@ from app.parsing.base import DocumentParser
 from app.parsing.code import CodeParser
 from app.parsing.docx import DocxParser
 from app.parsing.exceptions import UnsupportedParserError
+from app.parsing.java import JavaTreeSitterParser
 from app.parsing.markdown import MarkdownParser
 from app.parsing.pdf import PdfParser
 from app.parsing.text import PlainTextParser
@@ -12,10 +13,16 @@ class ParserRegistry:
         configured = parsers or (
             MarkdownParser(),
             PlainTextParser(),
+            JavaTreeSitterParser(),
             CodeParser(),
             PdfParser(),
             DocxParser(),
         )
+        extensions = [
+            extension for parser in configured for extension in parser.supported_extensions
+        ]
+        if len(extensions) != len(set(extensions)):
+            raise ValueError("Parser extensions must be registered exactly once")
         self._parsers = {
             extension: parser for parser in configured for extension in parser.supported_extensions
         }

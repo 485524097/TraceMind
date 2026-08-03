@@ -91,7 +91,15 @@ async def consume(stream: PreparedRagStream, request: DisconnectRequest | None =
 async def test_completed_answer_persists_guarded_content_sources_and_metadata(
     retrieval_mode: str, fallback: bool
 ) -> None:
-    source = {"source_id": "S1", "content": "生成时正文", "document_name": "doc.md"}
+    source = {
+        "source_id": "S1",
+        "content": "生成时正文",
+        "document_name": "doc.md",
+        "symbol_kind": "method",
+        "symbol_name": "run",
+        "symbol_qualified_name": "demo.Sample.run",
+        "symbol_signature": "void run()",
+    }
     done = {
         "trace_id": "trace",
         "finish_reason": "stop",
@@ -124,6 +132,9 @@ async def test_completed_answer_persists_guarded_content_sources_and_metadata(
     )
     source["content"] = "后来改变"
     assert persistence.finish_exchange.await_args.kwargs["sources"][0]["content"] == "生成时正文"
+    assert persistence.finish_exchange.await_args.kwargs["sources"][0]["symbol_signature"] == (
+        "void run()"
+    )
 
 
 async def test_no_answer_is_persisted_as_terminal_message() -> None:

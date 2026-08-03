@@ -102,6 +102,10 @@ class DocumentChunkResponse(BaseModel):
     section_title: str | None
     chunk_type: str
     language: str | None
+    symbol_kind: str | None = None
+    symbol_name: str | None = None
+    symbol_qualified_name: str | None = None
+    symbol_signature: str | None = None
     created_at: datetime
 
 

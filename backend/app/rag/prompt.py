@@ -47,20 +47,7 @@ def build_rag_messages(
             {"user": turn.user, "assistant": turn.assistant} for turn in history
         ],
         "scoped_relative_path": scoped_relative_path,
-        "sources": [
-            {
-                "source_id": source.source_id,
-                "document_id": str(source.document_id),
-                "document_version_id": str(source.document_version_id),
-                "relative_path": source.relative_path,
-                "document_name": source.document_name,
-                "version": source.version_number,
-                "section": source.section_title,
-                "location": _location(source),
-                "content": source.content,
-            }
-            for source in context.sources
-        ],
+        "sources": [_source_payload(source) for source in context.sources],
     }
     return [
         LLMMessage(role="system", content=SYSTEM_PROMPT),
@@ -69,3 +56,24 @@ def build_rag_messages(
             content=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
         ),
     ]
+
+
+def _source_payload(source: RagSource) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "source_id": source.source_id,
+        "document_id": str(source.document_id),
+        "document_version_id": str(source.document_version_id),
+        "relative_path": source.relative_path,
+        "document_name": source.document_name,
+        "version": source.version_number,
+        "section": source.section_title,
+        "location": _location(source),
+        "content": source.content,
+    }
+    if source.symbol_qualified_name or source.symbol_name:
+        payload["symbol"] = source.symbol_qualified_name or source.symbol_name
+    if source.symbol_signature:
+        payload["signature"] = source.symbol_signature
+    if source.symbol_kind:
+        payload["kind"] = source.symbol_kind
+    return payload
