@@ -408,3 +408,104 @@ def test_java_parser_falls_back_when_language_is_unavailable(
     assert parsed.parser_name == "code"
     assert parsed.warnings == ["java_parser_fallback"]
     assert all(block.symbol_kind is None for block in parsed.blocks)
+    assert all(block.symbol_lookup_keys is None for block in parsed.blocks)
+
+
+def test_java_lookup_keys_cover_types_members_fields_initializers_and_record(
+    tmp_path: Path,
+) -> None:
+    parsed = parse_java(
+        tmp_path,
+        """package demo;
+record Item(String name, int count) { Item {} }
+class Outer {
+  private int first, second;
+  static { boot(); }
+  { init(); }
+  Outer(String value) {}
+  void run() {}
+  class Nested { void call(int[] ids) {} }
+}
+enum State { READY, DONE }
+""",
+    )
+    symbols = symbol_blocks(parsed)
+
+    outer = next(
+        block for block in symbols if block.symbol_kind == "type" and block.symbol_name == "Outer"
+    )
+    assert outer.symbol_lookup_keys == ["v1:type:demo.Outer", "v1:type:Outer"]
+    nested = next(
+        block for block in symbols if block.symbol_kind == "type" and block.symbol_name == "Nested"
+    )
+    assert nested.symbol_lookup_keys == [
+        "v1:type:demo.Outer.Nested",
+        "v1:type:Outer.Nested",
+        "v1:type:Nested",
+    ]
+    nested_method = next(
+        block for block in symbols if block.symbol_kind == "method" and block.symbol_name == "call"
+    )
+    assert "v1:method:Outer.Nested#call(int[])" in (nested_method.symbol_lookup_keys or [])
+    field = next(block for block in symbols if block.symbol_kind == "field")
+    assert field.symbol_name == "first"
+    assert field.symbol_lookup_keys == [
+        "v1:field:demo.Outer#first",
+        "v1:field:demo.Outer#second",
+        "v1:field:Outer#first",
+        "v1:field:Outer#second",
+    ]
+    constructor = next(
+        block
+        for block in symbols
+        if block.symbol_kind == "constructor" and block.symbol_name == "Outer"
+    )
+    assert "v1:constructor:demo.Outer#<init>(String)" in (constructor.symbol_lookup_keys or [])
+    compact = next(
+        block
+        for block in symbols
+        if block.symbol_kind == "constructor" and block.symbol_name == "Item"
+    )
+    assert "v1:constructor:demo.Item#<init>(String,int)" in (compact.symbol_lookup_keys or [])
+    assert next(
+        block for block in symbols if block.symbol_name == "<clinit>"
+    ).symbol_lookup_keys == [
+        "v1:initializer:demo.Outer#<clinit>",
+        "v1:initializer:Outer#<clinit>",
+    ]
+    assert next(
+        block for block in symbols if block.symbol_name == "<init-block>"
+    ).symbol_lookup_keys == [
+        "v1:initializer:demo.Outer#<init-block>",
+        "v1:initializer:Outer#<init-block>",
+    ]
+    assert "v1:enum_constant:demo.State#READY" in (
+        next(block for block in symbols if block.symbol_name == "READY").symbol_lookup_keys or []
+    )
+    assert all(
+        block.symbol_lookup_keys
+        and len(block.symbol_lookup_keys) == len(set(block.symbol_lookup_keys))
+        for block in symbols
+    )
+
+
+def test_java_lookup_keys_distinguish_overloads_and_normalize_java_types(tmp_path: Path) -> None:
+    source = """package de\u0301mo;
+class UserService {
+  void source(Map < String, ? extends User > users, String... names) {}
+  void source(String values[]) {}
+}
+"""
+    parsed = parse_java(tmp_path, source)
+    methods = [block for block in symbol_blocks(parsed) if block.symbol_kind == "method"]
+
+    assert methods[0].symbol_lookup_keys == [
+        "v1:method:démo.UserService#source",
+        "v1:method:démo.UserService#source(Map<String,? extends User>,String[])",
+        "v1:method:UserService#source",
+        "v1:method:UserService#source(Map<String,? extends User>,String[])",
+    ]
+    assert "v1:method:démo.UserService#source(String[])" in (methods[1].symbol_lookup_keys or [])
+    assert methods[0].symbol_lookup_keys != methods[1].symbol_lookup_keys
+    second = parse_java(tmp_path, source)
+    assert parsed.blocks == second.blocks

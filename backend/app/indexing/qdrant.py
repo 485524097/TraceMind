@@ -29,6 +29,18 @@ class VectorSearchHit:
     payload: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class PayloadPoint:
+    id: str
+    payload: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class PayloadScrollResult:
+    points: list[PayloadPoint]
+    truncated: bool = False
+
+
 class QdrantGateway:
     payload_indexes = (
         "knowledge_base_id",
@@ -37,6 +49,7 @@ class QdrantGateway:
         "index_generation",
         "language",
         "chunk_type",
+        "symbol_lookup_keys",
     )
 
     def __init__(
@@ -126,22 +139,32 @@ class QdrantGateway:
                 raise IncompatibleCollectionError(
                     "Qdrant sparse vector configuration is incompatible"
                 )
-            existing_indexes = set(info.payload_schema)
+            missing_payload_indexes = [
+                field_name
+                for field_name in self.payload_indexes
+                if info.payload_schema.get(field_name) is None
+            ]
+            for field_name in missing_payload_indexes:
+                try:
+                    await self.client.create_payload_index(
+                        self.collection_name,
+                        field_name=field_name,
+                        field_schema=models.PayloadSchemaType.KEYWORD,
+                        wait=True,
+                    )
+                except UnexpectedResponse as exc:
+                    if exc.status_code not in {400, 409}:
+                        raise
+            if missing_payload_indexes:
+                info = await self.client.get_collection(self.collection_name)
             for field_name in self.payload_indexes:
-                if field_name not in existing_indexes:
-                    try:
-                        await self.client.create_payload_index(
-                            self.collection_name,
-                            field_name=field_name,
-                            field_schema=models.PayloadSchemaType.KEYWORD,
-                            wait=True,
-                        )
-                    except UnexpectedResponse as exc:
-                        if exc.status_code not in {400, 409}:
-                            raise
-                        refreshed = await self.client.get_collection(self.collection_name)
-                        if field_name not in refreshed.payload_schema:
-                            raise
+                current = info.payload_schema.get(field_name)
+                if current is None:
+                    raise VectorIndexError("Qdrant payload index could not be verified")
+                if getattr(current, "data_type", None) != models.PayloadSchemaType.KEYWORD:
+                    raise IncompatibleCollectionError(
+                        f"Qdrant payload index {field_name} is incompatible"
+                    )
         except VectorIndexError:
             raise
         except Exception as exc:
@@ -202,6 +225,7 @@ class QdrantGateway:
         document_id: UUID | None,
         score_threshold: float,
         excluded_chunk_types: Collection[str],
+        symbol_lookup_key: str | None = None,
     ) -> list[VectorSearchHit]:
         query_filter = self._search_filter(
             knowledge_base_id,
@@ -209,6 +233,7 @@ class QdrantGateway:
             language=language,
             document_id=document_id,
             excluded_chunk_types=excluded_chunk_types,
+            symbol_lookup_key=symbol_lookup_key,
         )
         try:
             response = await self.client.query_points(
@@ -240,6 +265,7 @@ class QdrantGateway:
         document_id: UUID | None,
         dense_score_threshold: float,
         excluded_chunk_types: Collection[str],
+        symbol_lookup_key: str | None = None,
     ) -> list[VectorSearchHit]:
         query_filter = self._search_filter(
             knowledge_base_id,
@@ -247,6 +273,7 @@ class QdrantGateway:
             language=language,
             document_id=document_id,
             excluded_chunk_types=excluded_chunk_types,
+            symbol_lookup_key=symbol_lookup_key,
         )
         fusion_limit = max(
             limit,
@@ -286,6 +313,49 @@ class QdrantGateway:
         except Exception as exc:
             raise VectorIndexError("Hybrid search is unavailable") from exc
 
+    async def scroll_symbol_matches(
+        self,
+        *,
+        knowledge_base_id: UUID,
+        generations: list[UUID],
+        symbol_lookup_key: str,
+        language: str | None,
+        document_id: UUID | None,
+        max_points: int = 200,
+        page_size: int = 64,
+    ) -> PayloadScrollResult:
+        query_filter = self._search_filter(
+            knowledge_base_id,
+            generations,
+            language=language,
+            document_id=document_id,
+            excluded_chunk_types=("heading",),
+            symbol_lookup_key=symbol_lookup_key,
+        )
+        points: list[PayloadPoint] = []
+        offset: models.ExtendedPointId | None = None
+        try:
+            while len(points) < max_points:
+                records, next_offset = await self.client.scroll(
+                    self.collection_name,
+                    scroll_filter=query_filter,
+                    limit=min(page_size, max_points - len(points)),
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                points.extend(
+                    PayloadPoint(str(record.id), dict(record.payload or {})) for record in records
+                )
+                if next_offset is None:
+                    return PayloadScrollResult(points)
+                if not records:
+                    return PayloadScrollResult(points, truncated=True)
+                offset = next_offset
+            return PayloadScrollResult(points, truncated=offset is not None)
+        except Exception as exc:
+            raise VectorIndexError("Symbol scope validation is unavailable") from exc
+
     async def _delete_by_filter(self, value_filter: models.Filter) -> None:
         try:
             await self.client.delete(
@@ -323,6 +393,7 @@ class QdrantGateway:
         language: str | None,
         document_id: UUID | None,
         excluded_chunk_types: Collection[str],
+        symbol_lookup_key: str | None = None,
     ) -> models.Filter:
         must: list[models.Condition] = [
             cls._equal_condition("knowledge_base_id", knowledge_base_id),
@@ -335,6 +406,8 @@ class QdrantGateway:
             must.append(cls._equal_condition("language", language))
         if document_id is not None:
             must.append(cls._equal_condition("document_id", document_id))
+        if symbol_lookup_key is not None:
+            must.append(cls._equal_condition("symbol_lookup_keys", symbol_lookup_key))
         must_not: list[models.Condition] = []
         if excluded_chunk_types:
             must_not.append(

@@ -46,6 +46,22 @@ def collection_info(
     sparse_modifier: models.Modifier | None = models.Modifier.IDF,
 ):
     vectors = {"dense_v1": models.VectorParams(size=size, distance=distance)}
+    source_payload_schema = (
+        {name: object() for name in QdrantGateway.payload_indexes}
+        if payload_schema is None
+        else payload_schema
+    )
+    typed_payload_schema = {
+        name: (
+            value
+            if isinstance(value, models.PayloadIndexInfo)
+            else models.PayloadIndexInfo(
+                data_type=models.PayloadSchemaType.KEYWORD,
+                points=0,
+            )
+        )
+        for name, value in source_payload_schema.items()
+    }
     return SimpleNamespace(
         config=SimpleNamespace(
             params=SimpleNamespace(
@@ -57,14 +73,17 @@ def collection_info(
                 ),
             )
         ),
-        payload_schema=payload_schema or {},
+        payload_schema=typed_payload_schema,
     )
 
 
 async def test_collection_is_created_with_named_cosine_vector_and_payload_indexes() -> None:
     client = AsyncMock(spec=AsyncQdrantClient)
     client.collection_exists.return_value = False
-    client.get_collection.return_value = collection_info()
+    client.get_collection.side_effect = [
+        collection_info(payload_schema={}),
+        collection_info(),
+    ]
 
     await gateway(client).ensure_collection()
 
@@ -74,7 +93,8 @@ async def test_collection_is_created_with_named_cosine_vector_and_payload_indexe
     assert vectors["dense_v1"].distance == models.Distance.COSINE
     sparse = client.create_collection.await_args.kwargs["sparse_vectors_config"]
     assert sparse["bm25_v1"].modifier == models.Modifier.IDF
-    assert client.create_payload_index.await_count == 6
+    assert client.create_payload_index.await_count == 7
+    assert client.get_collection.await_count == 2
 
 
 @pytest.mark.parametrize(
@@ -99,12 +119,15 @@ async def test_concurrent_collection_creation_is_rechecked() -> None:
     client = AsyncMock(spec=AsyncQdrantClient)
     client.collection_exists.side_effect = [False, True]
     client.create_collection.side_effect = UnexpectedResponse(409, "Conflict", b"exists", Headers())
-    client.get_collection.return_value = collection_info()
+    client.get_collection.side_effect = [
+        collection_info(payload_schema={}),
+        collection_info(),
+    ]
 
     await gateway(client).ensure_collection()
 
-    client.get_collection.assert_awaited_once_with("tracemind_chunks")
-    assert client.create_payload_index.await_count == 6
+    assert client.get_collection.await_count == 2
+    assert client.create_payload_index.await_count == 7
 
 
 async def test_concurrent_payload_index_creation_is_rechecked() -> None:
@@ -120,6 +143,22 @@ async def test_concurrent_payload_index_creation_is_rechecked() -> None:
     )
 
     await gateway(client).ensure_collection()
+
+    client.create_payload_index.assert_awaited_once()
+    assert client.get_collection.await_count == 2
+
+
+async def test_successful_payload_index_creation_must_be_visible_on_refresh() -> None:
+    client = AsyncMock(spec=AsyncQdrantClient)
+    existing = set(QdrantGateway.payload_indexes) - {"symbol_lookup_keys"}
+    client.collection_exists.return_value = True
+    client.get_collection.side_effect = [
+        collection_info(payload_schema={name: object() for name in existing}),
+        collection_info(payload_schema={name: object() for name in existing}),
+    ]
+
+    with pytest.raises(VectorIndexError, match="could not be verified"):
+        await gateway(client).ensure_collection()
 
     client.create_payload_index.assert_awaited_once()
     assert client.get_collection.await_count == 2
@@ -388,3 +427,91 @@ async def test_search_returns_empty_and_converts_client_errors() -> None:
         await gateway(client).search([1.0, 0.0, 0.0], **search_kwargs)
     assert str(caught.value) == "Semantic search is unavailable"
     assert "private" not in str(caught.value)
+
+
+async def test_incompatible_payload_index_type_is_rejected_without_rebuild() -> None:
+    client = AsyncMock(spec=AsyncQdrantClient)
+    client.collection_exists.return_value = True
+    schema = {
+        name: models.PayloadIndexInfo(
+            data_type=(
+                models.PayloadSchemaType.TEXT
+                if name == "symbol_lookup_keys"
+                else models.PayloadSchemaType.KEYWORD
+            ),
+            points=0,
+        )
+        for name in QdrantGateway.payload_indexes
+    }
+    client.get_collection.return_value = collection_info(payload_schema=schema)
+
+    with pytest.raises(IncompatibleCollectionError, match="symbol_lookup_keys"):
+        await gateway(client).ensure_collection()
+
+    client.delete_collection.assert_not_called()
+
+
+async def test_symbol_filter_combines_with_existing_search_scope() -> None:
+    client = AsyncMock(spec=AsyncQdrantClient)
+    client.query_points.return_value = SimpleNamespace(points=[])
+    lookup_key = "v1:method:UserService#source"
+
+    await gateway(client).search(
+        [1.0, 0.0, 0.0],
+        knowledge_base_id=uuid4(),
+        generations=[uuid4()],
+        limit=5,
+        language="java",
+        document_id=uuid4(),
+        score_threshold=0.5,
+        excluded_chunk_types=("heading",),
+        symbol_lookup_key=lookup_key,
+    )
+
+    query_filter = client.query_points.await_args.kwargs["query_filter"]
+    symbol_condition = next(
+        condition for condition in query_filter.must if condition.key == "symbol_lookup_keys"
+    )
+    assert symbol_condition.match.value == lookup_key
+
+
+async def test_symbol_scroll_is_paginated_without_vectors() -> None:
+    client = AsyncMock(spec=AsyncQdrantClient)
+    first = SimpleNamespace(id="a", payload={"content": "a"})
+    second = SimpleNamespace(id="b", payload={"content": "b"})
+    client.scroll.side_effect = [([first], "b"), ([second], None)]
+
+    result = await gateway(client).scroll_symbol_matches(
+        knowledge_base_id=uuid4(),
+        generations=[uuid4()],
+        symbol_lookup_key="v1:method:UserService#source",
+        language="java",
+        document_id=None,
+        max_points=10,
+        page_size=1,
+    )
+
+    assert [point.id for point in result.points] == ["a", "b"]
+    assert not result.truncated
+    assert client.scroll.await_count == 2
+    assert client.scroll.await_args_list[0].kwargs["with_payload"] is True
+    assert client.scroll.await_args_list[0].kwargs["with_vectors"] is False
+    assert client.scroll.await_args_list[1].kwargs["offset"] == "b"
+
+
+async def test_symbol_scroll_reports_truncation_when_more_points_exist() -> None:
+    client = AsyncMock(spec=AsyncQdrantClient)
+    client.scroll.return_value = ([SimpleNamespace(id="a", payload={})], "next")
+
+    result = await gateway(client).scroll_symbol_matches(
+        knowledge_base_id=uuid4(),
+        generations=[uuid4()],
+        symbol_lookup_key="v1:method:UserService#source",
+        language=None,
+        document_id=None,
+        max_points=1,
+        page_size=1,
+    )
+
+    assert result.truncated
+    assert len(result.points) == 1

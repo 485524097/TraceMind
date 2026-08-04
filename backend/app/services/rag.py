@@ -79,6 +79,7 @@ class RagService:
             knowledge_base_id,
             query,
             document_id=document_id,
+            resolve_symbol_scope=False,
         )
         rewrite = QueryRewriteResult(scoped_query.semantic_query, "not_applicable")
         history = conversation_history or ()

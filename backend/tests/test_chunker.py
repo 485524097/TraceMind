@@ -69,6 +69,10 @@ def test_chunker_preserves_symbol_metadata_across_long_method_pieces() -> None:
         symbol_name="run",
         symbol_qualified_name="demo.Sample.run",
         symbol_signature="void run()",
+        symbol_lookup_keys=[
+            "v1:method:demo.Sample#run",
+            "v1:method:demo.Sample#run()",
+        ],
     )
     chunks = DeterministicChunker(max_chars=22, overlap_chars=5).chunk([block])
 
@@ -80,9 +84,18 @@ def test_chunker_preserves_symbol_metadata_across_long_method_pieces() -> None:
             chunk.symbol_name,
             chunk.symbol_qualified_name,
             chunk.symbol_signature,
+            tuple(chunk.symbol_lookup_keys or []),
         )
         for chunk in chunks
-    } == {("method", "run", "demo.Sample.run", "void run()")}
+    } == {
+        (
+            "method",
+            "run",
+            "demo.Sample.run",
+            "void run()",
+            ("v1:method:demo.Sample#run", "v1:method:demo.Sample#run()"),
+        )
+    }
     assert chunks == DeterministicChunker(max_chars=22, overlap_chars=5).chunk([block])
 
 
@@ -96,4 +109,21 @@ def test_chunker_defaults_symbol_metadata_to_none() -> None:
         chunk.symbol_name,
         chunk.symbol_qualified_name,
         chunk.symbol_signature,
-    ) == (None, None, None, None)
+        chunk.symbol_lookup_keys,
+    ) == (None, None, None, None, None)
+
+
+def test_chunker_normalizes_empty_lookup_keys_to_none() -> None:
+    chunk = DeterministicChunker(max_chars=20, overlap_chars=4).chunk(
+        [ParsedBlock("plain", "code", symbol_lookup_keys=[])]
+    )[0]
+
+    assert chunk.symbol_lookup_keys is None
+
+
+def test_chunker_rejects_partially_invalid_lookup_keys() -> None:
+    chunk = DeterministicChunker(max_chars=20, overlap_chars=4).chunk(
+        [ParsedBlock("plain", "code", symbol_lookup_keys=["v1:type:Sample", ""])]
+    )[0]
+
+    assert chunk.symbol_lookup_keys is None
