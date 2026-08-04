@@ -76,12 +76,20 @@ async def test_real_qdrant_named_vector_payload_filter_and_cleanup() -> None:
                 "start_line": index + 1,
                 "end_line": index + 1,
                 "active": index != 3,
+                "symbol_lookup_keys": (["v1:method:Integration#search"] if index == 1 else None),
+                "symbol_kind": "method" if index == 1 else None,
+                "symbol_qualified_name": "integration.Integration.search" if index == 1 else None,
+                "symbol_signature": "void search()" if index == 1 else None,
             },
         )
         for index in range(65)
     ]
     try:
         await gateway.ensure_collection()
+        info = await client.get_collection(collection)
+        assert (
+            info.payload_schema["symbol_lookup_keys"].data_type == models.PayloadSchemaType.KEYWORD
+        )
         await gateway.upsert(points)
         assert await gateway.count_generation(generation) == 65
 
@@ -102,6 +110,17 @@ async def test_real_qdrant_named_vector_payload_filter_and_cleanup() -> None:
         assert hits[0].payload["document_id"] == str(document_id)
         assert hits[0].payload["section_title"] == "Search"
         assert hits[0].payload["start_line"] == 2
+
+        symbol_points = await gateway.scroll_symbol_matches(
+            knowledge_base_id=knowledge_base_id,
+            generations=[generation],
+            symbol_lookup_key="v1:method:Integration#search",
+            language="markdown",
+            document_id=document_id,
+        )
+        assert not symbol_points.truncated
+        assert len(symbol_points.points) == 1
+        assert symbol_points.points[0].payload["chunk_index"] == 1
 
         chinese = await gateway.hybrid_search(
             [1.0, 0.0, 0.0, 0.0],

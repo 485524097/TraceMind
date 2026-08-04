@@ -41,8 +41,13 @@ def make_app(
         query: str,
         *,
         document_id: UUID | None,
+        language: str | None = None,
     ) -> PreparedRetrievalQuery:
-        return PreparedRetrievalQuery(query, query, document_id)
+        return PreparedRetrievalQuery(
+            original_query=query,
+            semantic_query=query,
+            scoped_document_id=document_id,
+        )
 
     service.prepare_retrieval_query.side_effect = prepare
     app = create_app(
@@ -164,7 +169,17 @@ async def test_semantic_search_validation_and_traceable_response() -> None:
         limit=5,
         language="python",
         document_id=None,
-        prepared_query=PreparedRetrievalQuery("service layer", "service layer", None),
+        prepared_query=PreparedRetrievalQuery(
+            original_query="service layer",
+            semantic_query="service layer",
+            scoped_document_id=None,
+        ),
+    )
+    service.prepare_retrieval_query.assert_awaited_once_with(
+        knowledge_base_id,
+        "service layer",
+        document_id=None,
+        language="python",
     )
 
 
@@ -220,7 +235,11 @@ async def test_hybrid_search_path_and_safe_error() -> None:
         limit=5,
         language="java",
         document_id=None,
-        prepared_query=PreparedRetrievalQuery("DiscoveryClient", "DiscoveryClient", None),
+        prepared_query=PreparedRetrievalQuery(
+            original_query="DiscoveryClient",
+            semantic_query="DiscoveryClient",
+            scoped_document_id=None,
+        ),
     )
 
     service.hybrid_search.side_effect = HybridSearchUnavailableError("Hybrid search is unavailable")
@@ -288,7 +307,11 @@ async def test_reranked_search_returns_raw_and_original_rrf_scores() -> None:
         limit=10,
         language=None,
         document_id=None,
-        prepared_query=PreparedRetrievalQuery("DiscoveryClient", "DiscoveryClient", None),
+        prepared_query=PreparedRetrievalQuery(
+            original_query="DiscoveryClient",
+            semantic_query="DiscoveryClient",
+            scoped_document_id=None,
+        ),
     )
 
 
@@ -301,11 +324,11 @@ async def test_reranked_search_reports_exact_path_scope_and_uses_semantic_query(
     original_query = f"{relative_path} 中 source 方法返回什么？"
     semantic_query = "source 方法返回什么？"
     prepared = PreparedRetrievalQuery(
-        original_query,
-        semantic_query,
-        document_id,
-        "exact",
-        relative_path,
+        original_query=original_query,
+        semantic_query=semantic_query,
+        scoped_document_id=document_id,
+        path_scope_mode="exact",
+        explicit_relative_path=relative_path,
     )
     candidate = SemanticSearchResult(
         score=0.7,
@@ -384,3 +407,75 @@ async def test_reranked_search_disabled_or_unavailable_returns_503() -> None:
         failed = await client.post(path, json={"query": "private query", "limit": 1})
     assert failed.status_code == 503
     assert "private query" not in failed.text
+
+
+async def test_all_search_apis_expose_safe_exact_symbol_scope_metadata() -> None:
+    knowledge_base_id = uuid4()
+    document_id = uuid4()
+    prepared = PreparedRetrievalQuery(
+        original_query="src/demo/UserService.java 中 UserService#source(String)",
+        semantic_query="UserService#source(String)",
+        scoped_document_id=document_id,
+        path_scope_mode="exact",
+        explicit_relative_path="src/demo/UserService.java",
+        symbol_scope_mode="exact",
+        scoped_symbol_lookup_key="v1:method:UserService#source(String)",
+        scoped_symbol_kind="method",
+        scoped_symbol_qualified_name="demo.UserService.source",
+        scoped_symbol_signature="String source(String username)",
+        symbol_fallback_query="UserService#source(String)",
+    )
+    for endpoint in ("semantic", "hybrid", "reranked"):
+        indexing = AsyncMock(spec=DocumentIndexingService)
+        indexing.prepare_retrieval_query.return_value = prepared
+        indexing.search.return_value = []
+        indexing.hybrid_search.return_value = []
+        reranking = AsyncMock(spec=DocumentRerankingService)
+        reranking.rerank.return_value = []
+        app = make_app(indexing, reranking_service=reranking)
+        indexing.prepare_retrieval_query.side_effect = None
+
+        async for client in client_for(app):
+            response = await client.post(
+                f"/api/v1/knowledge-bases/{knowledge_base_id}/search/{endpoint}",
+                json={"query": prepared.original_query, "limit": 1, "language": "java"},
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["path_scope_mode"] == "exact"
+        assert body["scoped_relative_path"] == "src/demo/UserService.java"
+        assert body["symbol_scope_mode"] == "exact"
+        assert body["scoped_symbol_kind"] == "method"
+        assert body["scoped_symbol_qualified_name"] == "demo.UserService.source"
+        assert body["scoped_symbol_signature"] == "String source(String username)"
+        assert body["semantic_query"] == "UserService#source(String)"
+        assert "lookup" not in response.text
+
+
+async def test_search_api_exposes_ambiguous_fallback_without_internal_key() -> None:
+    indexing = AsyncMock(spec=DocumentIndexingService)
+    prepared = PreparedRetrievalQuery(
+        "UserService#source",
+        "UserService#source",
+        None,
+        symbol_scope_mode="fallback",
+        symbol_scope_reason="ambiguous",
+        symbol_fallback_query="UserService#source",
+    )
+    indexing.prepare_retrieval_query.return_value = prepared
+    indexing.hybrid_search.return_value = []
+    app = make_app(indexing)
+    indexing.prepare_retrieval_query.side_effect = None
+
+    async for client in client_for(app):
+        response = await client.post(
+            f"/api/v1/knowledge-bases/{uuid4()}/search/hybrid",
+            json={"query": prepared.original_query},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["symbol_scope_mode"] == "fallback"
+    assert response.json()["symbol_scope_reason"] == "ambiguous"
+    assert response.json()["semantic_query"] == "UserService#source"
+    assert "lookup" not in response.text

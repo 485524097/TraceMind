@@ -8,6 +8,8 @@ from app.services.exceptions import InvalidDocumentNameError, UnsupportedDocumen
 from app.storage.names import normalize_document_path
 
 PathScopeMode = Literal["none", "exact"]
+SymbolScopeMode = Literal["none", "exact", "fallback"]
+SymbolScopeReason = Literal["not_found", "ambiguous", "unsupported"]
 
 _LEADING_LOCATION_WORD = re.compile(r"^[\s,，:：;；\-—]*(?:中的|里的|内的|中|里|内)\s*")
 _EDGE_PUNCTUATION = " \t\r\n,，:：;；!?！？-—"
@@ -21,6 +23,13 @@ class PreparedRetrievalQuery:
     scoped_document_id: UUID | None
     path_scope_mode: PathScopeMode = "none"
     explicit_relative_path: str | None = None
+    symbol_scope_mode: SymbolScopeMode = "none"
+    symbol_scope_reason: SymbolScopeReason | None = None
+    scoped_symbol_lookup_key: str | None = None
+    scoped_symbol_kind: str | None = None
+    scoped_symbol_qualified_name: str | None = None
+    scoped_symbol_signature: str | None = None
+    symbol_fallback_query: str | None = None
 
 
 class PathDocumentRepository(Protocol):
@@ -46,7 +55,11 @@ class ExplicitDocumentPathResolver:
         document_id: UUID | None,
     ) -> PreparedRetrievalQuery:
         if document_id is not None:
-            return PreparedRetrievalQuery(query, query, document_id)
+            return PreparedRetrievalQuery(
+                original_query=query,
+                semantic_query=query,
+                scoped_document_id=document_id,
+            )
 
         for candidate, start, end in self._path_candidates(query):
             try:
@@ -67,7 +80,11 @@ class ExplicitDocumentPathResolver:
                 explicit_relative_path=safe_path.relative_path,
             )
 
-        return PreparedRetrievalQuery(query, query, None)
+        return PreparedRetrievalQuery(
+            original_query=query,
+            semantic_query=query,
+            scoped_document_id=None,
+        )
 
     def _path_candidates(self, query: str) -> list[tuple[str, int, int]]:
         extensions = sorted(self.allowed_extensions, key=len, reverse=True)

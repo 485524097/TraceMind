@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import threading
 from collections.abc import AsyncIterator
@@ -108,6 +109,124 @@ async def test_document_path_migration_backfills_and_round_trips() -> None:
             await connection.execute(
                 text("DELETE FROM documents WHERE id = :id"),
                 {"id": document_id},
+            )
+            await connection.execute(
+                text("DELETE FROM knowledge_bases WHERE id = :id"),
+                {"id": knowledge_base_id},
+            )
+        await engine.dispose()
+
+
+async def test_symbol_lookup_keys_migration_round_trip_and_persistence() -> None:
+    await asyncio.to_thread(migrate, "head")
+    await asyncio.to_thread(downgrade, "20260730_0007")
+    engine = create_async_engine(require_test_database_url())
+    knowledge_base_id, document_id, version_id, chunk_id = uuid4(), uuid4(), uuid4(), uuid4()
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(
+                text("INSERT INTO knowledge_bases (id, name) VALUES (:id, :name)"),
+                {"id": knowledge_base_id, "name": f"Lookup migration {knowledge_base_id}"},
+            )
+            await connection.execute(
+                text(
+                    "INSERT INTO documents "
+                    "(id, knowledge_base_id, name, normalized_name, relative_path, "
+                    "normalized_path, source_type) VALUES "
+                    "(:id, :knowledge_base_id, 'Sample.java', 'sample.java', "
+                    "'Sample.java', 'sample.java', 'upload')"
+                ),
+                {"id": document_id, "knowledge_base_id": knowledge_base_id},
+            )
+            await connection.execute(
+                text(
+                    "INSERT INTO document_versions "
+                    "(id, document_id, version_number, content_hash, file_size, extension, "
+                    "storage_path) VALUES "
+                    "(:id, :document_id, 1, :content_hash, 1, '.java', :storage_path)"
+                ),
+                {
+                    "id": version_id,
+                    "document_id": document_id,
+                    "content_hash": "a" * 64,
+                    "storage_path": f"safe/{version_id}/content.java",
+                },
+            )
+            await connection.execute(
+                text(
+                    "INSERT INTO document_chunks "
+                    "(id, document_version_id, chunk_index, content, content_hash, char_count, "
+                    "chunk_type) VALUES "
+                    "(:id, :version_id, 0, 'void run() {}', :content_hash, 13, 'code')"
+                ),
+                {"id": chunk_id, "version_id": version_id, "content_hash": "b" * 64},
+            )
+        await engine.dispose()
+
+        await asyncio.to_thread(migrate, "head")
+        engine = create_async_engine(require_test_database_url())
+        async with engine.connect() as connection:
+            columns = await connection.run_sync(
+                lambda sync_connection: {
+                    column["name"]: column
+                    for column in inspect(sync_connection).get_columns("document_chunks")
+                }
+            )
+            legacy_value = await connection.scalar(
+                text("SELECT symbol_lookup_keys FROM document_chunks WHERE id = :id"),
+                {"id": chunk_id},
+            )
+        assert columns["symbol_lookup_keys"]["nullable"]
+        assert "JSON" in str(columns["symbol_lookup_keys"]["type"]).upper()
+        assert legacy_value is None
+
+        keys = ["v1:method:demo.Sample#run", "v1:method:demo.Sample#run()"]
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with factory() as session:
+            chunk = await session.get(DocumentChunk, chunk_id)
+            assert chunk is not None
+            chunk.symbol_lookup_keys = keys
+            await session.commit()
+        async with factory() as session:
+            restored = await session.get(DocumentChunk, chunk_id)
+            assert restored is not None
+            assert restored.symbol_lookup_keys == keys
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "UPDATE document_chunks SET symbol_lookup_keys = CAST(:value AS JSON) "
+                    "WHERE id = :id"
+                ),
+                {"value": json.dumps([]), "id": chunk_id},
+            )
+        async with factory() as session:
+            normalized = await session.get(DocumentChunk, chunk_id)
+            assert normalized is not None
+            assert normalized.symbol_lookup_keys is None
+        await engine.dispose()
+
+        await asyncio.to_thread(downgrade, "-1")
+        engine = create_async_engine(require_test_database_url())
+        async with engine.connect() as connection:
+            columns_after_downgrade = await connection.run_sync(
+                lambda sync_connection: {
+                    column["name"]
+                    for column in inspect(sync_connection).get_columns("document_chunks")
+                }
+            )
+        assert "symbol_lookup_keys" not in columns_after_downgrade
+        await engine.dispose()
+        await asyncio.to_thread(migrate, "head")
+    finally:
+        await engine.dispose()
+        await asyncio.to_thread(migrate, "head")
+        engine = create_async_engine(require_test_database_url())
+        async with engine.begin() as connection:
+            await connection.execute(
+                text("DELETE FROM document_chunks WHERE id = :id"), {"id": chunk_id}
+            )
+            await connection.execute(
+                text("DELETE FROM documents WHERE id = :id"), {"id": document_id}
             )
             await connection.execute(
                 text("DELETE FROM knowledge_bases WHERE id = :id"),
@@ -701,6 +820,10 @@ async def test_superseded_parse_attempt_cannot_overwrite_new_transaction(
                     symbol_name="run",
                     symbol_qualified_name="demo.Sample.run",
                     symbol_signature="void run()",
+                    symbol_lookup_keys=[
+                        "v1:method:demo.Sample#run",
+                        "v1:method:demo.Sample#run()",
+                    ],
                 )
             ],
         )
@@ -737,6 +860,10 @@ async def test_superseded_parse_attempt_cannot_overwrite_new_transaction(
         assert chunks[0].symbol_name == "run"
         assert chunks[0].symbol_qualified_name == "demo.Sample.run"
         assert chunks[0].symbol_signature == "void run()"
+        assert chunks[0].symbol_lookup_keys == [
+            "v1:method:demo.Sample#run",
+            "v1:method:demo.Sample#run()",
+        ]
 
         persisted_document = await verification.get(Document, document_id)
         persisted_knowledge_base = await verification.get(KnowledgeBase, knowledge_base_id)

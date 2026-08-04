@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import (
     CHAR,
+    JSON,
     BigInteger,
     CheckConstraint,
     DateTime,
@@ -16,9 +17,10 @@ from sqlalchemy import (
     Uuid,
     func,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, reconstructor, relationship, validates
 
 from app.models.base import Base
+from app.symbols.java import normalize_symbol_lookup_keys
 
 if TYPE_CHECKING:
     from app.models.knowledge_base import KnowledgeBase
@@ -221,8 +223,17 @@ class DocumentChunk(Base):
     symbol_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     symbol_qualified_name: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     symbol_signature: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    symbol_lookup_keys: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
     document_version: Mapped[DocumentVersion] = relationship(back_populates="chunks", lazy="raise")
+
+    @validates("symbol_lookup_keys")
+    def _normalize_symbol_lookup_keys(self, _key: str, value: list[str] | None) -> list[str] | None:
+        return normalize_symbol_lookup_keys(value)
+
+    @reconstructor
+    def _normalize_loaded_symbol_lookup_keys(self) -> None:
+        self.symbol_lookup_keys = normalize_symbol_lookup_keys(self.symbol_lookup_keys)

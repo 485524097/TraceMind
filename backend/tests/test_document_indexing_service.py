@@ -8,7 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.embedding import EmbeddingError
-from app.indexing import VectorIndexError, VectorPoint, VectorSearchHit
+from app.indexing import (
+    PayloadPoint,
+    PayloadScrollResult,
+    VectorIndexError,
+    VectorPoint,
+    VectorSearchHit,
+)
 from app.models.document import Document, DocumentChunk, DocumentVersion
 from app.repositories.document_indexing import (
     ActiveGeneration,
@@ -64,9 +70,12 @@ class FakeGateway:
         self.deleted_generations: list[UUID] = []
         self.search_calls: list[dict[str, object]] = []
         self.hits: list[VectorSearchHit] = []
+        self.scroll_results: list[PayloadScrollResult] = []
+        self.scroll_calls: list[dict[str, object]] = []
+        self.ensure_calls = 0
 
     async def ensure_collection(self) -> None:
-        return None
+        self.ensure_calls += 1
 
     async def upsert(self, points: list[VectorPoint]) -> None:
         self.points = points
@@ -89,6 +98,10 @@ class FakeGateway:
         self.search_calls.append({"vector": vector, "query": query, "hybrid": True, **kwargs})
         return self.hits
 
+    async def scroll_symbol_matches(self, **kwargs: object) -> PayloadScrollResult:
+        self.scroll_calls.append(kwargs)
+        return self.scroll_results.pop(0) if self.scroll_results else PayloadScrollResult([])
+
 
 class FakeDispatcher:
     def __init__(self) -> None:
@@ -105,6 +118,7 @@ class FakeRepository:
         self.record = IndexingVersionRecord(document, version)
         self.chunks = chunks
         self.active: list[ActiveGeneration] = []
+        self.active_results: list[list[ActiveGeneration]] = []
         self.active_calls: list[tuple[UUID, UUID | None]] = []
 
     async def lock_version(self, version_id: UUID) -> IndexingVersionRecord | None:
@@ -128,9 +142,10 @@ class FakeRepository:
         self, knowledge_base_id: UUID, *, document_id: UUID | None
     ) -> list[ActiveGeneration]:
         self.active_calls.append((knowledge_base_id, document_id))
+        active = self.active_results.pop(0) if self.active_results else self.active
         if document_id is None:
-            return self.active
-        return [item for item in self.active if item.document_id == document_id]
+            return active
+        return [item for item in active if item.document_id == document_id]
 
     is_processing_stale = staticmethod(DocumentIndexingRepository.is_processing_stale)
     is_current_attempt = staticmethod(DocumentIndexingRepository.is_current_attempt)
@@ -368,6 +383,7 @@ async def test_index_point_and_search_result_round_trip_symbol_metadata() -> Non
     chunk.symbol_name = "来源"
     chunk.symbol_qualified_name = "示例.服务.来源"
     chunk.symbol_signature = "String 来源(String 名称)"
+    chunk.symbol_lookup_keys = ["v1:method:示例.服务#来源(String)"]
 
     assert await service.index_version(version.id)
     payload = gateway.points[0].payload
@@ -375,6 +391,7 @@ async def test_index_point_and_search_result_round_trip_symbol_metadata() -> Non
     assert payload["symbol_name"] == "来源"
     assert payload["symbol_qualified_name"] == "示例.服务.来源"
     assert payload["symbol_signature"] == "String 来源(String 名称)"
+    assert payload["symbol_lookup_keys"] == ["v1:method:示例.服务#来源(String)"]
 
     generation = version.active_index_generation
     assert generation is not None
@@ -714,6 +731,9 @@ async def test_search_uses_database_generations_and_filters() -> None:
     assert call["document_id"] == document.id
     assert call["score_threshold"] == 0.50
     assert call["excluded_chunk_types"] == ("heading",)
+    assert call["symbol_lookup_key"] is None
+    assert gateway.ensure_calls == 1
+    assert gateway.scroll_calls == []
 
 
 async def test_search_returns_empty_when_gateway_has_no_results_above_threshold() -> None:
@@ -731,6 +751,49 @@ async def test_search_returns_empty_when_gateway_has_no_results_above_threshold(
 
     assert results == []
     assert gateway.search_calls[0]["score_threshold"] == 0.50
+
+
+async def test_exact_symbol_empty_dense_result_uses_direct_scroll() -> None:
+    provider = FakeProvider()
+    service, _, repository, gateway, document, version = make_service(provider=provider)
+    generation = uuid4()
+    repository.active = [ActiveGeneration(document.id, version.id, generation)]
+    lookup_key = "v1:method:sample#run"
+    payload = DocumentIndexingService._point(
+        repository.record, repository.chunks[0], generation, [1.0, 0.0, 0.0]
+    ).payload
+    payload.update(
+        symbol_lookup_keys=[lookup_key],
+        symbol_kind="method",
+        symbol_qualified_name="sample.run",
+    )
+    gateway.scroll_results = [PayloadScrollResult([PayloadPoint("point", payload)])]
+    prepared = PreparedRetrievalQuery(
+        original_query="sample#run",
+        semantic_query="sample#run",
+        scoped_document_id=None,
+        symbol_scope_mode="exact",
+        scoped_symbol_lookup_key=lookup_key,
+        scoped_symbol_kind="method",
+        scoped_symbol_qualified_name="sample.run",
+        symbol_fallback_query="sample#run",
+    )
+
+    results = await service.search(
+        document.knowledge_base_id,
+        query=prepared.original_query,
+        limit=5,
+        language="java",
+        document_id=None,
+        prepared_query=prepared,
+    )
+
+    assert provider.query_inputs == ["sample#run"]
+    assert gateway.search_calls[0]["symbol_lookup_key"] == lookup_key
+    assert results[0].score == 1.0
+    assert results[0].ranking_mode == "symbol_exact"
+    assert results[0].retrieval_score is None
+    assert results[0].retrieval_rank == 1
 
 
 async def test_hybrid_search_uses_active_generations_and_rrf_gateway() -> None:
@@ -752,6 +815,9 @@ async def test_hybrid_search_uses_active_generations_and_rrf_gateway() -> None:
     assert call["query"] == "DiscoveryClient"
     assert call["generations"] == [generation]
     assert call["dense_score_threshold"] == 0.50
+    assert call["symbol_lookup_key"] is None
+    assert gateway.ensure_calls == 1
+    assert gateway.scroll_calls == []
 
 
 async def test_scoped_query_drives_dense_and_hybrid_embedding_and_filter() -> None:
@@ -792,6 +858,105 @@ async def test_scoped_query_drives_dense_and_hybrid_embedding_and_filter() -> No
     assert gateway.search_calls[0]["document_id"] == document.id
     assert gateway.search_calls[1]["document_id"] == document.id
     assert gateway.search_calls[1]["query"] == prepared.semantic_query
+    assert gateway.search_calls[0]["symbol_lookup_key"] is None
+    assert gateway.search_calls[1]["symbol_lookup_key"] is None
+    assert gateway.ensure_calls == 2
+    assert gateway.scroll_calls == []
+
+
+async def test_path_only_prepare_adds_no_symbol_qdrant_request() -> None:
+    service, _, repository, gateway, document, version = make_service()
+    generation = uuid4()
+    repository.active = [ActiveGeneration(document.id, version.id, generation)]
+    path_prepared = PreparedRetrievalQuery(
+        original_query="src/main/java/demo/UserService.java 中 source 方法返回什么？",
+        semantic_query="source 方法返回什么？",
+        scoped_document_id=document.id,
+        path_scope_mode="exact",
+        explicit_relative_path="src/main/java/demo/UserService.java",
+    )
+    service.path_resolver.prepare = AsyncMock(return_value=path_prepared)
+
+    prepared = await service.prepare_retrieval_query(
+        document.knowledge_base_id,
+        path_prepared.original_query,
+        document_id=None,
+        language="java",
+    )
+    assert prepared == path_prepared
+    assert gateway.ensure_calls == 0
+    assert gateway.scroll_calls == []
+
+    await service.search(
+        document.knowledge_base_id,
+        query=prepared.original_query,
+        limit=5,
+        language="java",
+        document_id=None,
+        prepared_query=prepared,
+    )
+    await service.hybrid_search(
+        document.knowledge_base_id,
+        query=prepared.original_query,
+        limit=5,
+        language="java",
+        document_id=None,
+        prepared_query=prepared,
+    )
+
+    assert gateway.ensure_calls == 2
+    assert gateway.scroll_calls == []
+    assert all(call["symbol_lookup_key"] is None for call in gateway.search_calls)
+
+
+async def test_direct_symbol_retry_occurs_after_invalid_scoped_points() -> None:
+    service, _, repository, gateway, document, version = make_service()
+    first_generation, refreshed_generation = uuid4(), uuid4()
+    initial = [ActiveGeneration(document.id, version.id, first_generation)]
+    refreshed = [ActiveGeneration(document.id, version.id, refreshed_generation)]
+    repository.active_results = [initial, refreshed]
+    lookup_key = "v1:method:sample#run"
+    invalid_payload = DocumentIndexingService._point(
+        repository.record, repository.chunks[0], first_generation, [1.0, 0.0, 0.0]
+    ).payload
+    invalid_payload.update(
+        symbol_kind="method",
+        symbol_qualified_name="other.run",
+    )
+    valid_payload = dict(invalid_payload)
+    valid_payload.update(
+        index_generation=str(refreshed_generation),
+        symbol_qualified_name="sample.run",
+    )
+    gateway.scroll_results = [
+        PayloadScrollResult([PayloadPoint("invalid", invalid_payload)]),
+        PayloadScrollResult([PayloadPoint("valid", valid_payload)]),
+    ]
+    prepared = PreparedRetrievalQuery(
+        original_query="sample#run",
+        semantic_query="sample#run",
+        scoped_document_id=None,
+        symbol_scope_mode="exact",
+        scoped_symbol_lookup_key=lookup_key,
+        scoped_symbol_kind="method",
+        scoped_symbol_qualified_name="sample.run",
+    )
+
+    results = await service.search(
+        document.knowledge_base_id,
+        query=prepared.original_query,
+        limit=5,
+        language="java",
+        document_id=None,
+        prepared_query=prepared,
+    )
+
+    assert [result.symbol_qualified_name for result in results] == ["sample.run"]
+    assert len(gateway.scroll_calls) == 2
+    assert all(call["symbol_lookup_key"] == lookup_key for call in gateway.scroll_calls)
+    assert all(call["document_id"] is None for call in gateway.scroll_calls)
+    assert gateway.scroll_calls[0]["generations"] == [first_generation]
+    assert gateway.scroll_calls[1]["generations"] == [refreshed_generation]
 
 
 async def test_search_returns_empty_without_database_active_generation() -> None:

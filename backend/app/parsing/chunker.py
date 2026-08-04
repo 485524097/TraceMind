@@ -2,6 +2,7 @@ import hashlib
 from dataclasses import dataclass
 
 from app.parsing.base import ParsedBlock
+from app.symbols.java import normalize_symbol_lookup_keys
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,14 @@ class ChunkDraft:
     symbol_name: str | None = None
     symbol_qualified_name: str | None = None
     symbol_signature: str | None = None
+    symbol_lookup_keys: list[str] | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "symbol_lookup_keys",
+            normalize_symbol_lookup_keys(self.symbol_lookup_keys),
+        )
 
 
 @dataclass(frozen=True)
@@ -67,6 +76,7 @@ class DeterministicChunker:
                         symbol_name=block.symbol_name,
                         symbol_qualified_name=block.symbol_qualified_name,
                         symbol_signature=block.symbol_signature,
+                        symbol_lookup_keys=block.symbol_lookup_keys,
                     )
                 )
         return drafts

@@ -2,12 +2,19 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import tree_sitter_java as tsjava
 from tree_sitter import Language, Node, Parser
 
 from app.parsing.base import BlockType, ParseContext, ParsedBlock, ParsedDocument, read_utf8_text
 from app.parsing.code import code_blocks
+from app.symbols.java import (
+    JavaSymbolKind,
+    build_java_member_lookup_keys,
+    build_java_type_lookup_keys,
+    normalize_java_type,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +52,7 @@ class JavaBlockSpan:
     symbol_name: str | None = None
     symbol_qualified_name: str | None = None
     symbol_signature: str | None = None
+    symbol_lookup_keys: list[str] | None = None
 
 
 class JavaTreeSitterParser:
@@ -127,6 +135,7 @@ class JavaTreeSitterParser:
         declaration_start = node.start_byte
         start = self._attached_javadoc_start(node, source, consumed_javadocs)
         signature = self._signature(source, declaration_start, body.start_byte)
+        type_lookup_keys = build_java_type_lookup_keys(qualified, name)
         spans.append(
             JavaBlockSpan(
                 start,
@@ -135,7 +144,14 @@ class JavaTreeSitterParser:
                 symbol_name=name,
                 symbol_qualified_name=qualified,
                 symbol_signature=signature,
+                symbol_lookup_keys=type_lookup_keys,
             )
+        )
+
+        record_parameter_types = (
+            self._parameter_types(node.child_by_field_name("parameters"), source)
+            if node.type == "record_declaration"
+            else None
         )
 
         for child in body.named_children:
@@ -162,6 +178,7 @@ class JavaTreeSitterParser:
                         "initializer",
                         "<init-block>",
                         consumed_javadocs,
+                        lookup_names=("<init-block>",),
                     )
                 )
             elif child.type in MEMBER_KINDS:
@@ -172,6 +189,24 @@ class JavaTreeSitterParser:
                 if symbol_name is None:
                     warnings.add("java_symbol_invalid_range")
                     continue
+                lookup_names = (
+                    tuple(self._field_names(child, source))
+                    if child.type == "field_declaration"
+                    else ("<init>",)
+                    if child.type
+                    in {
+                        "constructor_declaration",
+                        "compact_constructor_declaration",
+                    }
+                    else (symbol_name,)
+                )
+                parameter_types = None
+                if child.type == "compact_constructor_declaration":
+                    parameter_types = record_parameter_types
+                elif child.type in {"method_declaration", "constructor_declaration"}:
+                    parameter_types = self._parameter_types(
+                        child.child_by_field_name("parameters"), source
+                    )
                 spans.append(
                     self._member_span(
                         child,
@@ -181,6 +216,8 @@ class JavaTreeSitterParser:
                         MEMBER_KINDS[child.type],
                         symbol_name,
                         consumed_javadocs,
+                        lookup_names=lookup_names,
+                        parameter_types=parameter_types,
                     )
                 )
 
@@ -193,9 +230,13 @@ class JavaTreeSitterParser:
         kind: str,
         name: str,
         consumed_javadocs: set[tuple[int, int]],
+        *,
+        lookup_names: tuple[str, ...],
+        parameter_types: tuple[str, ...] | None = None,
     ) -> JavaBlockSpan:
         start = self._attached_javadoc_start(node, source, consumed_javadocs)
         signature_end = self._signature_end(node)
+        qualified_owner = self._qualified(package, enclosing)
         return JavaBlockSpan(
             start,
             node.end_byte,
@@ -203,6 +244,12 @@ class JavaTreeSitterParser:
             symbol_name=name,
             symbol_qualified_name=self._qualified(package, (*enclosing, name)),
             symbol_signature=self._signature(source, node.start_byte, signature_end),
+            symbol_lookup_keys=build_java_member_lookup_keys(
+                cast(JavaSymbolKind, kind),
+                qualified_owner,
+                lookup_names,
+                parameter_types=parameter_types,
+            ),
         )
 
     @staticmethod
@@ -252,6 +299,58 @@ class JavaTreeSitterParser:
             )
             return self._node_name(declarator, source) if declarator is not None else None
         return self._node_name(node, source)
+
+    def _field_names(self, node: Node, source: bytes) -> list[str]:
+        names: list[str] = []
+        for child in node.named_children:
+            if child.type != "variable_declarator":
+                continue
+            name = self._node_name(child, source)
+            if name is not None:
+                names.append(name)
+        return names
+
+    def _parameter_types(self, parameters: Node | None, source: bytes) -> tuple[str, ...] | None:
+        if parameters is None:
+            return None
+        values: list[str] = []
+        for parameter in parameters.named_children:
+            type_node = parameter.child_by_field_name("type")
+            is_varargs = parameter.type == "spread_parameter"
+            if type_node is None and is_varargs:
+                type_node = next(
+                    (
+                        child
+                        for child in parameter.named_children
+                        if child.type not in {"modifiers", "variable_declarator"}
+                    ),
+                    None,
+                )
+            if type_node is None:
+                return None
+            type_text = self._node_text(type_node, source)
+            if type_text is None:
+                return None
+            dimensions = parameter.child_by_field_name("dimensions")
+            if dimensions is not None:
+                dimension_text = self._node_text(dimensions, source)
+                if dimension_text is None:
+                    return None
+                type_text += dimension_text
+            if is_varargs:
+                type_text += "..."
+            normalized = normalize_java_type(type_text)
+            if normalized is None:
+                return None
+            values.append(normalized)
+        return tuple(values)
+
+    @staticmethod
+    def _node_text(node: Node, source: bytes) -> str | None:
+        try:
+            return source[node.start_byte : node.end_byte].decode("utf-8")
+        except UnicodeDecodeError:
+            return None
 
     @staticmethod
     def _qualified(package: str, parts: tuple[str, ...]) -> str:
@@ -385,6 +484,7 @@ class JavaTreeSitterParser:
                     symbol_name=span.symbol_name,
                     symbol_qualified_name=span.symbol_qualified_name,
                     symbol_signature=span.symbol_signature,
+                    symbol_lookup_keys=span.symbol_lookup_keys,
                 )
             )
         return blocks

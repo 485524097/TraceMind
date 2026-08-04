@@ -53,11 +53,13 @@ def indexing_mock() -> AsyncMock:
         query: str,
         *,
         document_id: UUID | None,
+        resolve_symbol_scope: bool = True,
     ) -> PreparedRetrievalQuery:
+        assert resolve_symbol_scope is False
         return PreparedRetrievalQuery(
-            query,
-            query,
-            document_id,
+            original_query=query,
+            semantic_query=query,
+            scoped_document_id=document_id,
         )
 
     indexing.prepare_retrieval_query.side_effect = prepare
@@ -236,7 +238,11 @@ async def test_rag_service_uses_hybrid_search_and_streams_grounded_answer() -> N
         limit=10,
         language="java",
         document_id=document_id,
-        prepared_query=PreparedRetrievalQuery("question", "question", document_id),
+        prepared_query=PreparedRetrievalQuery(
+            original_query="question",
+            semantic_query="question",
+            scoped_document_id=document_id,
+        ),
     )
     indexing.search.assert_not_awaited()
     assert [item[0] for item in events] == ["retrieval", "token", "token", "done"]
@@ -453,11 +459,11 @@ async def test_explicit_path_scope_survives_query_rewrite_and_limits_rag_sources
     indexing = indexing_mock()
     indexing.prepare_retrieval_query.side_effect = None
     indexing.prepare_retrieval_query.return_value = PreparedRetrievalQuery(
-        original_query,
-        semantic_query,
-        main_document_id,
-        "exact",
-        main_path,
+        original_query=original_query,
+        semantic_query=semantic_query,
+        scoped_document_id=main_document_id,
+        path_scope_mode="exact",
+        explicit_relative_path=main_path,
     )
     indexing.hybrid_search.return_value = [candidate]
     rewriter = AsyncMock(spec=HistoryAwareQueryRewriteService)

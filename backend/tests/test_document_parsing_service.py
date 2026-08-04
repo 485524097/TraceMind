@@ -51,6 +51,10 @@ class FakeParser:
                     symbol_name="run",
                     symbol_qualified_name="demo.Sample.run",
                     symbol_signature="void run()",
+                    symbol_lookup_keys=[
+                        "v1:method:demo.Sample#run",
+                        "v1:method:demo.Sample#run()",
+                    ],
                 )
             ],
             self.parser_name,
@@ -128,6 +132,7 @@ class FakeParsingRepository:
                 symbol_name=draft.symbol_name,
                 symbol_qualified_name=draft.symbol_qualified_name,
                 symbol_signature=draft.symbol_signature,
+                symbol_lookup_keys=draft.symbol_lookup_keys,
             )
             for draft in drafts
         ]
@@ -276,6 +281,10 @@ async def test_pending_processing_succeeded_creates_chunks(tmp_path: Path) -> No
     assert repository.deleted == repository.created == 1
     assert repository.chunks[0].start_line == 1
     assert repository.chunks[0].symbol_qualified_name == "demo.Sample.run"
+    assert repository.chunks[0].symbol_lookup_keys == [
+        "v1:method:demo.Sample#run",
+        "v1:method:demo.Sample#run()",
+    ]
     assert session.commit.await_count == 2
 
 
@@ -495,6 +504,10 @@ async def test_repository_create_chunks_persists_symbol_metadata() -> None:
         symbol_name="run",
         symbol_qualified_name="demo.Sample.run",
         symbol_signature="void run()",
+        symbol_lookup_keys=[
+            "v1:method:demo.Sample#run",
+            "v1:method:demo.Sample#run()",
+        ],
     )
 
     await repository.create_chunks(version_id, [draft])
@@ -505,6 +518,11 @@ async def test_repository_create_chunks_persists_symbol_metadata() -> None:
     assert chunks[0].symbol_name == "run"
     assert chunks[0].symbol_qualified_name == "demo.Sample.run"
     assert chunks[0].symbol_signature == "void run()"
+    assert chunks[0].symbol_lookup_keys == [
+        "v1:method:demo.Sample#run",
+        "v1:method:demo.Sample#run()",
+    ]
+    assert DocumentChunk(symbol_lookup_keys=[]).symbol_lookup_keys is None
     session.flush.assert_awaited_once()
 
 

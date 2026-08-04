@@ -116,6 +116,7 @@ class DocumentParsingRepository:
                     symbol_name=draft.symbol_name,
                     symbol_qualified_name=draft.symbol_qualified_name,
                     symbol_signature=draft.symbol_signature,
+                    symbol_lookup_keys=draft.symbol_lookup_keys,
                 )
                 for draft in drafts
             ]
