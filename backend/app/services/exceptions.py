@@ -89,7 +89,14 @@ class DocumentNotReadyForIndexError(DocumentError):
 
 
 class SemanticSearchUnavailableError(DocumentError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        scope_metadata: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.scope_metadata = scope_metadata
 
 
 class HybridSearchUnavailableError(DocumentError):

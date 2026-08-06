@@ -18,8 +18,13 @@ from app.llm import LLMProvider
 from app.schemas.rag import RagStreamRequest
 from app.services.conversation import ConversationExchange, ConversationService
 from app.services.document_reranking import DocumentRerankingService
-from app.services.exceptions import ConversationNotFoundError, HybridSearchUnavailableError
-from app.services.rag import PreparedRag, RagService
+from app.services.exceptions import ConversationNotFoundError
+from app.services.rag import (
+    PreparedRag,
+    RagRetrievalUnavailableError,
+    RagService,
+    build_rag_scope_metadata,
+)
 
 router = APIRouter(prefix="/knowledge-bases/{knowledge_base_id}/rag", tags=["rag"])
 logger = logging.getLogger(__name__)
@@ -98,14 +103,17 @@ async def prepare_rag_stream(
                 language=body.language,
                 document_id=body.document_id,
             )
-    except HybridSearchUnavailableError as exc:
+    except RagRetrievalUnavailableError as exc:
         if exchange is not None:
             await conversation_service.finish_exchange(
                 exchange,
                 status="failed",
                 content="回答生成服务暂时不可用，请稍后重试。",
                 sources=None,
-                generation_metadata={"error_code": "retrieval_unavailable"},
+                generation_metadata={
+                    "error_code": "retrieval_unavailable",
+                    **exc.scope_metadata,
+                },
             )
         raise HTTPException(status_code=503, detail="Hybrid search is unavailable") from exc
     return PreparedRagStream(
@@ -135,14 +143,13 @@ async def stream_rag_answer(
     llm_first_token_latency_ms = 0
     terminal_saved = exchange is None
 
-    def rewrite_metadata() -> dict[str, object]:
+    def execution_metadata() -> dict[str, object]:
         return {
+            **build_rag_scope_metadata(prepared),
             "query_rewrite_mode": prepared.query_rewrite_mode,
             "query_rewrite_latency_ms": prepared.query_rewrite_latency_ms,
             "history_turn_count": len(prepared.conversation_history),
             "retrieval_query": prepared.retrieval_query,
-            "path_scope_mode": prepared.path_scope_mode,
-            "scoped_relative_path": prepared.scoped_relative_path,
             "llm_first_token_latency_ms": llm_first_token_latency_ms,
         }
 
@@ -190,7 +197,7 @@ async def stream_rag_answer(
                         str(data.get("message") or "回答生成服务暂时不可用，请稍后重试。"),
                         {
                             "error_code": str(data.get("code") or "generation_failed"),
-                            **rewrite_metadata(),
+                            **execution_metadata(),
                         },
                     )
                 elif event == "done":
@@ -198,12 +205,12 @@ async def stream_rag_answer(
                         "no_answer" if data.get("finish_reason") == "no_answer" else "completed"
                     )
                     content = no_answer_content or "".join(answer_parts)
-                    await finish(status, content, dict(data))
+                    await finish(status, content, {**execution_metadata(), **dict(data)})
                 if await request.is_disconnected():
                     await finish(
                         "no_answer" if no_answer_content is not None else "cancelled",
                         no_answer_content or "".join(answer_parts),
-                        {"cancelled": no_answer_content is None, **rewrite_metadata()},
+                        {"cancelled": no_answer_content is None, **execution_metadata()},
                     )
                     logger.info(
                         "RAG disconnected trace_id=%s knowledge_base_id=%s disconnected=true",
@@ -223,7 +230,7 @@ async def stream_rag_answer(
             await finish(
                 "no_answer" if no_answer_content is not None else "cancelled",
                 no_answer_content or "".join(answer_parts),
-                {"cancelled": no_answer_content is None, **rewrite_metadata()},
+                {"cancelled": no_answer_content is None, **execution_metadata()},
             )
         except SQLAlchemyError:
             logger.exception("Cancelled conversation response could not be persisted")
@@ -233,7 +240,7 @@ async def stream_rag_answer(
             await finish(
                 "failed",
                 "回答生成服务暂时不可用，请稍后重试。",
-                {"error_code": "generation_failed", **rewrite_metadata()},
+                {"error_code": "generation_failed", **execution_metadata()},
             )
         except SQLAlchemyError:
             logger.exception("Failed conversation response could not be persisted")
@@ -244,7 +251,7 @@ async def stream_rag_answer(
                 await finish(
                     "no_answer" if no_answer_content is not None else "cancelled",
                     no_answer_content or "".join(answer_parts),
-                    {"cancelled": no_answer_content is None, **rewrite_metadata()},
+                    {"cancelled": no_answer_content is None, **execution_metadata()},
                 )
             except SQLAlchemyError:
                 logger.exception("Conversation response finalization failed")

@@ -157,6 +157,81 @@ describe('RagAnswerPanel', () => {
     expect(wrapper.text()).toContain('架构')
   })
 
+  it('shows exact scope on retrieval and replaces it with final done metadata', async () => {
+    mockedStream.mockImplementation(async (_id, _request, callbacks) => {
+      if (!callbacks) return
+      callbacks.onRetrieval({
+        trace_id: 'trace',
+        source_count: 1,
+        sources: [{ ...source, ranking_mode: 'symbol_exact', score: 1 }],
+        symbol_scope_mode: 'exact',
+        scoped_symbol_kind: 'method',
+        scoped_symbol_qualified_name: 'demo.UserService.source',
+        scoped_symbol_signature: 'source(String)',
+      })
+      await Promise.resolve()
+      callbacks.onDone({
+        trace_id: 'trace',
+        finish_reason: 'stop',
+        grounded: true,
+        valid_citation_count: 1,
+        invalid_citation_count: 0,
+        retrieval_latency_ms: 1,
+        llm_latency_ms: 2,
+        total_latency_ms: 3,
+        symbol_scope_mode: 'exact',
+        scoped_symbol_kind: 'method',
+        scoped_symbol_qualified_name: 'demo.UserService.source',
+        scoped_symbol_signature: 'source(String username)',
+      })
+    })
+    const wrapper = mount(RagAnswerPanel, { props: { knowledgeBaseId: 'kb' } })
+    await wrapper.get('input[aria-label="知识库问题"]').setValue('source')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="rag-execution-scope"]').text()).toContain(
+      '精确符号：source(String username)',
+    )
+    expect(wrapper.text()).toContain('精确符号命中')
+    expect(wrapper.text()).not.toContain('100%')
+    expect(wrapper.html()).not.toContain('symbol_lookup')
+  })
+
+  it.each([
+    ['no_answer', '符号未找到，已回退普通检索'],
+    ['error', '符号存在歧义，已回退普通检索'],
+  ] as const)('retains fallback scope for %s events', async (eventType, label) => {
+    mockedStream.mockImplementation(async (_id, _request, callbacks) => {
+      if (!callbacks) return
+      callbacks.onRetrieval({ trace_id: 'trace', source_count: 0, sources: [] })
+      if (eventType === 'no_answer') {
+        callbacks.onNoAnswer({
+          trace_id: 'trace',
+          message: '没有答案',
+          symbol_scope_mode: 'fallback',
+          symbol_scope_reason: 'not_found',
+        })
+        callbacks.onDone({
+          trace_id: 'trace', finish_reason: 'no_answer', grounded: false,
+          valid_citation_count: 0, invalid_citation_count: 0,
+          retrieval_latency_ms: 1, llm_latency_ms: 0, total_latency_ms: 1,
+          symbol_scope_mode: 'fallback', symbol_scope_reason: 'not_found',
+        })
+      } else {
+        callbacks.onError({
+          trace_id: 'trace', code: 'llm_unavailable', message: '暂时不可用',
+          symbol_scope_mode: 'fallback', symbol_scope_reason: 'ambiguous',
+        })
+      }
+    })
+    const wrapper = mount(RagAnswerPanel, { props: { knowledgeBaseId: 'kb' } })
+    await wrapper.get('input[aria-label="知识库问题"]').setValue('source')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="rag-execution-scope"]').text()).toContain(label)
+  })
+
   it('aborts a generation without displaying a service error', async () => {
     let signal: AbortSignal | undefined
     mockedStream.mockImplementation(

@@ -377,4 +377,52 @@ describe('ConversationView', () => {
     expect(wrapper.text()).toContain('src/main/java/demo/UserService.java')
     expect(wrapper.text()).not.toContain('Conversation History')
   })
+
+  it('restores exact and fallback symbol scopes from persisted history', async () => {
+    mockedGet.mockResolvedValue(
+      detail(first, [
+        message('exact', 'completed', 'exact', [{ ...source, ranking_mode: 'symbol_exact' }], {
+          ...doneEvent(),
+          symbol_scope_mode: 'exact',
+          scoped_symbol_kind: 'method',
+          scoped_symbol_qualified_name: 'demo.UserService.source',
+          scoped_symbol_signature: 'source(String)',
+        }),
+        message('fallback', 'failed', 'fallback', null, {
+          ...doneEvent(),
+          symbol_scope_mode: 'fallback',
+          symbol_scope_reason: 'ambiguous',
+        }),
+        message('legacy', 'cancelled', 'legacy', null, { grounded: false }),
+      ]),
+    )
+    const wrapper = mount(ConversationView)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('精确符号：source(String)')
+    expect(wrapper.text()).toContain('符号存在歧义，已回退普通检索')
+    expect(wrapper.text()).toContain('精确符号命中')
+    expect(wrapper.text()).toContain('docs/guide.md')
+    expect(wrapper.text()).toContain('void configure()')
+    expect(wrapper.text()).toContain('第 2-4 行')
+    expect(wrapper.html()).not.toContain('symbol_lookup')
+  })
+
+  it('does not render missing or damaged symbol scope metadata', async () => {
+    mockedGet.mockResolvedValue(
+      detail(first, [
+        message('legacy', 'completed', 'legacy', null, { grounded: true }),
+        message('damaged', 'completed', 'damaged', null, {
+          grounded: true,
+          symbol_scope_mode: 'internal-value' as never,
+          symbol_scope_reason: 'private-error' as never,
+        }),
+      ]),
+    )
+    const wrapper = mount(ConversationView)
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('符号限定')
+    expect(wrapper.text()).not.toContain('internal-value')
+    expect(wrapper.text()).not.toContain('private-error')
+  })
 })

@@ -1,0 +1,10 @@
+{
+  "case_pass_rate": 1.0,
+  "scope_resolution_accuracy": 1.0,
+  "exact_target_recall_at_5": 1.0,
+  "signature_exclusion_accuracy": 1.0,
+  "fallback_reason_accuracy": 1.0,
+  "negative_trigger_accuracy": 1.0,
+  "path_disambiguation_accuracy": 1.0,
+  "p95_latency_ms_hard_limit": null
+}

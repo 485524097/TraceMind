@@ -10,6 +10,14 @@ export interface ConversationEventFields {
   message_id?: string
 }
 
+export interface SymbolScopeEventFields {
+  symbol_scope_mode?: 'none' | 'exact' | 'fallback'
+  symbol_scope_reason?: 'not_found' | 'ambiguous' | 'unsupported' | null
+  scoped_symbol_kind?: string | null
+  scoped_symbol_qualified_name?: string | null
+  scoped_symbol_signature?: string | null
+}
+
 export interface RagSource {
   source_id: string
   score: number
@@ -40,7 +48,7 @@ export interface RagSource {
   retrieval_rank?: number | null
 }
 
-export interface RagRetrievalEvent extends ConversationEventFields {
+export interface RagRetrievalEvent extends ConversationEventFields, SymbolScopeEventFields {
   trace_id: string
   source_count: number
   sources: RagSource[]
@@ -51,12 +59,12 @@ export interface RagTokenEvent extends ConversationEventFields {
   text: string
 }
 
-export interface RagNoAnswerEvent extends ConversationEventFields {
+export interface RagNoAnswerEvent extends ConversationEventFields, SymbolScopeEventFields {
   trace_id: string
   message: string
 }
 
-export interface RagDoneEvent extends ConversationEventFields {
+export interface RagDoneEvent extends ConversationEventFields, SymbolScopeEventFields {
   trace_id: string
   finish_reason: string
   grounded: boolean
@@ -78,7 +86,7 @@ export interface RagDoneEvent extends ConversationEventFields {
   scoped_relative_path?: string | null
 }
 
-export interface RagErrorEvent extends ConversationEventFields {
+export interface RagErrorEvent extends ConversationEventFields, SymbolScopeEventFields {
   trace_id: string
   code: string
   message: string

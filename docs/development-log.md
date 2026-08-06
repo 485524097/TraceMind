@@ -2,6 +2,110 @@
 
 本文件用于保留每次开发的决策与验证证据。按时间倒序新增记录；不要用提交信息替代本日志。
 
+## 2026-08-05 - Stage 12A 最终自动化验收补充
+
+- **目标**：补齐 Stage 12A-3、Stage 12A-4 及 Hybrid 跨 generation 确定性 RRF 修复的最终自动化验收证据；本记录覆盖此前日志中“集成测试跳过”和“旧 24 条严格 baseline 未通过”的中间状态。
+- **RAG 与 Conversation 作用域贯通**：Symbol Scope 在 Query Rewrite 前完成解析和验证；Query Rewrite 只替换剩余的 `semantic_query`，不能改变已冻结的显式 `document_id`、Path Scope、Symbol Scope 或 overload signature。Hybrid Search 与 Reranker 复用同一个 `PreparedRetrievalQuery`，不会根据改写后的文本二次解析作用域。最终回答 Prompt 始终使用用户原始问题。
+- **安全元数据**：只有 `symbol_scope_mode=exact` 时，Prompt 才接收经过验证的 kind、qualified name 和 signature。SSE 与 Conversation `generation_metadata` 只公开 `symbol_scope_mode`、`symbol_scope_reason`、`scoped_symbol_kind`、`scoped_symbol_qualified_name` 和 `scoped_symbol_signature`，不向 Prompt、SSE、Conversation、日志或前端暴露内部 `symbol_lookup_key`。
+- **前端展示**：Search 调试页、RAG 当前执行过程和 Conversation 历史详情均展示安全 Symbol Scope。exact 显示“精确符号：<signature/qualified name/kind>”；`not_found`、`ambiguous` 和 `unsupported` 分别显示安全回退文案；none 不显示符号作用域行。旧响应、旧会话、未知枚举和损坏元数据统一安全降级为 none。
+- **引用展示**：引用身份按 relative path、symbol signature、qualified name、symbol name、section、line range 的顺序展示。`ranking_mode=symbol_exact` 显示为“精确符号命中”；direct-scroll 的 `score=1.0` 不解释为 100% 相关度或模型置信度。
+- **Hybrid 确定性修复**：确认原实现存在分支同分排序和最终 Fusion 同分排序两层跨 generation 不稳定。Dense 与 Sparse 改为使用 Qdrant `query_batch_points` 独立获取候选，分支按 `(-raw_score, stable_payload_key)` 排序，再在应用层使用固定 `k=2`、weight=1 的 RRF，最终按 `(-rrf_score, stable_payload_key)` 排序。
+- **稳定排序键**：依次使用 `relative_path`（缺失时回退 `document_name`）、`start_line`、`end_line`、`chunk_index`、`content_hash`、`document_id`、`chunk_id`，Point ID 仅作为最后兜底。未使用 generation 或随机 UUID 作为主要排序身份。
+- **未修改范围**：未修改 Dense threshold、BM25 文本或配置、Filter 语义、Candidate/Final Top K、Reranker、Semantic Search、Symbol direct scroll、固定评测 dataset、corpus、expected 或 baseline。
+- **后端验证**：
+  - 确定性 RRF/Qdrant Gateway：28 passed。
+  - Stage 12A 专项：88 passed。
+  - 非集成全量：467 passed，21 deselected。
+  - 隔离 PostgreSQL/Qdrant 集成全量：21 passed，467 deselected，1 warning，耗时 66.92 秒。
+  - 集成测试使用名称以 `_test` 结尾的隔离数据库 `tracemind_test`，未使用开发数据库。
+  - Ruff format：153 files already formatted。
+  - Ruff check：通过。
+  - mypy：90 source files 通过。
+  - compileall：通过。
+- **前端验证**：
+  - lint：通过。
+  - type-check：通过。
+  - Vitest：15 files，87 tests passed。
+  - production build：通过。
+- **固定 24 条 Hybrid Evaluation**：
+  - 退出码：0。
+  - Recall@5：0.840909。
+  - MRR@5：0.742424。
+  - All-required@5：0.818182。
+  - Hit@1：0.590909。
+  - P95：4092.49 ms，仅保留环境相关 warning。
+  - 24 条普通查询均保持 `symbol_scope_mode=none`。
+  - baseline、corpus、dataset 和 expected 未修改。
+- **Java Symbol Evaluation**：
+  - 12/12 cases passed。
+  - Case Pass Rate：1.0。
+  - Scope Resolution Accuracy：1.0。
+  - Exact Target Recall@5：1.0。
+  - Signature Exclusion Accuracy：1.0。
+  - Fallback Reason Accuracy：1.0。
+  - Negative Trigger Accuracy：1.0。
+  - Path Disambiguation Accuracy：1.0。
+  - 临时知识库和 Qdrant 数据清理成功。
+- **三 generation 可复现性实验**：
+  - Query Vector SHA 跨 generation 一致，最大绝对差为 0。
+  - 同 generation 连续五次 Dense、Dense Exact、Sparse 和 Fusion 排序一致。
+  - Dense、Dense Exact、Sparse 和应用层 Fusion Top 10 跨 generation 一致。
+  - `ret-010` 目标排名固定为 1 / 1 / 1。
+  - `ret-015` 目标排名固定为 3 / 3 / 3。
+  - `ret-016` 目标排名固定为 1 / 1 / 1。
+  - Point ID 跨 generation 仍然变化，但不再影响最终结果。
+  - 临时知识库和 Qdrant generation 清理成功。
+- **依赖证据**：`backend/pyproject.toml` 和 `backend/uv.lock` 相对 `develop` 无 Diff。当前环境未执行 `uv lock --check`，但本阶段未修改依赖声明或锁文件。
+- **兼容性**：旧 Java 文档仍需重新解析并重新索引才能生成 lookup keys；仅强制重新索引旧 Chunk 无效。旧非 Java 文档和旧 Qdrant Point 继续兼容普通检索。
+- **浏览器手工验收**：
+  - 精确重载 Search：通过，仅命中 `demo.UserService#source(String)`。
+  - 跨 package 的简单 owner 查询：正确判定 `ambiguous` 并回退普通检索。
+  - 使用实际 relative path `demo/UserService.java` 后，Path Scope 与 Symbol Scope 联合消歧通过。
+  - 不存在符号：正确判定 `not_found` 并回退普通检索。
+  - RAG exact scope：通过，执行详情展示验证后的签名，引用包含相对路径、方法签名和行号。
+  - `ranking_mode=symbol_exact` 正确显示为“精确符号命中”，未显示为 100% 相关度或模型置信度。
+  - Conversation 页面刷新后，回答、引用和 Symbol Scope 均从持久化 metadata 正常恢复。
+  - 普通 Redis 查询保持 `symbol_scope_mode=none`，不显示符号作用域行。
+  - Search、RAG 和 Conversation 的 Network Response 中未发现 `"scoped_symbol_lookup_key":` 或 `"symbol_lookup_keys":` 字段。
+- **当前状态**：自动化测试、独立 Symbol Evaluation、固定 24 条回归、三 generation 可复现性实验、隔离集成测试和浏览器手工验收均已完成。当前工作区未提交、未推送。
+
+## 2026-08-04 - Hybrid 跨 generation 确定性 RRF 排序
+
+- **目标**：修复相同语料重新索引后 Point ID 随 generation 改变，进而导致 Hybrid 同分候选顺序和固定评测 MRR/Hit@1 漂移的问题；保持召回参数、过滤语义、RRF 公式和最终 Top K 不变。
+- **两层根因**：三代修复前实验确认 query vector SHA 完全一致且最大绝对差为 0，Dense 与 Dense Exact 一致，候选集合也一致；但 Dense/Sparse 分支的原始同分候选由 Qdrant 按 generation-dependent Point ID 等内部顺序返回，随后内建 Fusion 又用这些分支 rank 计算 RRF。`ret-010`、`ret-016` 的最终前两名均为 `0.8333334`，旧应用层再以 Point ID 破同分；`ret-015` 的三个 Sparse score 完全相同，底层分支 rank 随代变化并进一步产生 `0.25/0.20/0.16666667`。因此只替换最终 Fusion tie-break 无法修复已经进入 RRF 计算的分支 rank 漂移。
+- **决策与实现**：`QdrantGateway.hybrid_search` 使用 qdrant-client 1.18.0 已有且类型匹配的 `query_batch_points`，并行批量取得原 Dense 与 Sparse 候选；Dense 保留原 threshold，Sparse 不增加 threshold，两个分支继续使用同一 Filter 和原 prefetch limit。集中纯函数按 `relative_path`（缺失回退 `document_name`）、有效起止行、`chunk_index`、`content_hash`、`document_id`、`chunk_id` 排序，Point ID 仅作最终兜底；各分支只在 raw score 完全相同时使用该键，不 round、不加 epsilon。
+- **RRF 语义**：应用层仍使用 Qdrant 默认的 zero-based `1 / (2 + rank)`，固定 `k=2`、Dense/Sparse weight 均为 1，不混合原始 Dense/BM25 score；同 Point 两分支贡献累加，最终按 `(-rrf_score, stable_payload_key)` 排序并截取原 API limit。未修改 Dense threshold、BM25 文本/配置、prefetch limit、Filter、Symbol Scope、Reranker、Top K、dataset、corpus、expected 或 baseline。
+- **未采用方案**：不再依赖 Qdrant 内建 Fusion 的未声明同分顺序；不把 generation 或随机 UUID 作为主要稳定键；不只修最终同分，因为这不能恢复 `ret-015` 在 Sparse 分支中已经漂移的 rank；不针对三个 Case 编写特例。
+- **三代修复后验证**：三个 generation ID 均不同，Fusion Top 5 Point ID 序列也有 3 种，但三个 Case 的 query vector SHA 各只有 1 个且最大绝对差为 0；同代 5 次 Dense、Dense Exact、Sparse、应用层 Fusion 均只有 1 种序列，跨代四层 Top 10 也各只有 1 种序列。`ret-010` 目标 rank 固定 `1/1/1`（line 53 在 149 前），`ret-015` 固定 `3/3/3`（等分 Sparse 按 line 118、145、157），`ret-016` 固定 `1/1/1`（line 155 在 157 前）。作为根因对照，底层 Qdrant Fusion 的 `ret-015` 仍为 `3/4/5`，而应用层结果已稳定。实验正常清理临时文档、知识库和 Qdrant generation。
+- **质量回归**：固定 24 条 Hybrid Evaluation 退出码 0；Recall@5 `0.840909`、MRR@5 `0.742424`、All-required@5 `0.818182`、Hit@1 `0.590909`，无质量失败且 baseline 未改。P95 `4092.49 ms` 仍触发观察性延迟 warning。24 个普通查询的 scope 字段均因默认 `none` 被响应的 `exclude_defaults` 省略，未启用 Symbol Scope。独立 Java Symbol Evaluation 12/12 通过，七项硬指标均为 1.0000，临时数据清理成功；本次冷启动 P95 `46739.19 ms` 仅记录。
+- **自动化验证**：确定性 RRF/Qdrant Gateway 28 passed；Stage 12A 后端专项 88 passed；后端非集成 467 passed / 21 deselected；Ruff check、153 files format check、compileall、mypy 90 个 app source files 通过。前端 lint、type-check、15 files / 87 tests、build 通过。隔离 PostgreSQL/Qdrant 集成全量真实执行：21 passed / 467 deselected / 1 warning，耗时 66.92 秒。`TEST_DATABASE_URL` 指向名称以 `_test` 结尾的隔离数据库 `tracemind_test`，未使用开发数据库。
+- **兼容与恢复**：旧 Point 缺失路径、行号或 hash 时稳定键安全降级，仍可参加普通检索；无需重建 Collection 或数据库迁移。若需回滚，只需恢复 Hybrid 为 Qdrant 内建 Fusion，不涉及数据迁移；诊断报告保留 Qdrant Fusion 与应用层 Fusion 两组结果，便于复查。
+
+## 2026-08-04 - Java 符号作用域贯通 RAG 与会话元数据
+
+- **目标**：把 Stage 12A-2 已验证的 Java Symbol Scope 安全贯通到 RAG、Query Rewrite、Prompt、SSE 与 Conversation generation metadata，同时保持普通问题、路径限定和显式 `document_id` 的既有行为。
+- **范围**：RAG 检索编排、Query Rewrite 边界、Reranker 结果标签、Grounded Prompt、安全 SSE 元数据、Conversation 成功/无答案/失败/取消持久化和旧会话 JSON 兼容；不修改 Qdrant Filter、Dense/BM25/RRF、Reranker 参数、Top K、Citation Guard、前端和固定评测资产。
+- **决策**：在 Query Rewrite 前只调用一次 `prepare_retrieval_query`，先完成路径和符号解析与 Qdrant 验证，再仅用 rewrite 结果替换 `semantic_query`。Hybrid 接收冻结的 `PreparedRetrievalQuery`，禁止根据改写文本重新解析范围；最终 Prompt 的 question 始终使用用户原始问题。只有 `symbol_scope_mode=exact` 时才向 Prompt 提供已验证的 kind、qualified name 和 signature；`fallback`/`none` 不提供符号身份。
+- **安全与兼容**：SSE 和 Conversation metadata 只暴露 scope mode/reason 及已验证的符号显示字段，不暴露内部 `symbol_lookup_key`、Prompt、源码正文或内部异常。检索准备和 Hybrid 的技术故障统一映射为安全 503，并尽可能保留故障前已冻结的安全范围信息。旧 Conversation metadata 字典读取时补齐 `symbol_scope_mode=none` 和空符号字段，无需数据库迁移。
+- **排序语义**：Reranker 不改变候选排序算法、分数或参数；仅在输入候选来自 exact direct-scroll 时保留 `ranking_mode=symbol_exact`，避免符号精确命中的来源身份在 RAG 主链中丢失。
+- **未采用方案**：不让 Query Rewrite 重新生成符号范围，避免改写引入或改变精确过滤；不把 lookup key 作为公开调试字段，避免泄露内部持久化格式；不在本阶段增加前端展示或独立 Java symbol evaluation dataset，留待 12A-4。
+- **问题与处理**：验证环境中的 PowerShell 找不到 `py` 启动器，且沙箱内项目 `.venv` 的 uv trampoline 返回 Windows permission denied；改为在获准的沙箱外直接调用现有 `.venv\\Scripts` 工具。该错误发生在测试进程启动前，不是业务代码或测试失败。
+- **验证**：12A-3 定向测试 102 passed；全量非集成测试 461 passed / 21 deselected；隔离 PostgreSQL/Qdrant 集成测试 21 passed / 461 deselected；mypy 检查 90 个 source files，Ruff format/check、compileall 和 `git diff --check` 通过。当前机器 PATH 无 `uv` 且项目 Python 无 `uv` 模块，因此 `uv lock --check` 未能执行；本次未修改 `pyproject.toml` 或 `uv.lock`。
+- **遗留项**：12A-4 再实现前端符号作用域展示与独立符号检索评测；本阶段不更新现有 24 条 Hybrid baseline，也不运行该评测，因为没有修改检索算法、过滤设计、参数或排序顺序。
+
+## 2026-08-04 - Symbol Scope 前端展示与独立 Java 检索评测
+
+- **目标**：在不让前端重新解析 Java 符号、不公开 lookup key、不修改检索参数的前提下，把后端已验证的 Symbol Scope 展示到 Search 调试页、RAG 当前执行过程和 Conversation 历史详情，并建立独立的 Java Symbol Retrieval Evaluation。
+- **前端展示**：Search 在 Path Scope 附近显示符号类型、qualified name 和 signature；RAG 从 retrieval 事件起即时显示，并由 done/no-answer/error 的最终安全元数据更新；Conversation 只读取 assistant message 已持久化的 `generation_metadata`，页面刷新后仍可恢复。统一工具将未知、损坏或缺失枚举降级为 `none`，不显示无价值的“无符号”行。
+- **用户文案**：exact 为“精确符号：<signature/qualified name/kind>”；`not_found` 为“符号未找到，已回退普通检索”；`ambiguous` 为“符号存在歧义，已回退普通检索”；`unsupported` 为“符号匹配范围过大，已回退普通检索”；none 不显示。旧 SSE 和旧 Conversation JSON 缺少字段时按 none 处理。
+- **引用规则**：主身份仍是 `relative_path`，符号身份按 signature → qualified name → symbol name → section 降级，随后展示行号。`ranking_mode=symbol_exact` 显示“精确符号命中”，不把 direct-scroll 的 `score=1.0` 表述为 100% 相关或模型置信度；既有 retrieval/rerank score 语义未改变。
+- **独立评测资产**：新增 5 个无外部依赖 Java 文件，覆盖 demo/example 同名 `UserService`、String/int overload、多个 constructor、field、nested type、record compact constructor 和 Unicode identifier；12 条独立 cases 覆盖完整限定、简单 owner、参数重载排除、overload family、路径/document_id 消歧、constructor、compact constructor、Unicode、not_found、ambiguous、普通配置键 negative trigger、qualified-dot 和 direct scroll。新 corpus、dataset、baseline、report 与旧 24 条资产完全隔离。
+- **评测链路与结果**：runner 通过本地 HTTP API 创建临时 Knowledge Base、逐文件上传并等待真实 Parser/DocumentChunk/Embedding/Qdrant 主链，再调用 Hybrid Search；最终 12/12 通过，Case Pass Rate、Scope Resolution Accuracy、Exact Target Recall@5、Signature Exclusion Accuracy、Fallback Reason Accuracy、Negative Trigger Accuracy、Path Disambiguation Accuracy 均为 1.0000，P95 3483.88 ms 仅记录。所有临时 Java 文档、知识库和 Qdrant generation 均清理成功，残留临时知识库为 0。
+- **旧 24 条回归**：未修改旧 dataset、corpus、expected 或 `hybrid_v1` baseline。使用新临时知识库重新解析和索引后，Recall@5 仍为 0.8409、All-required@5 仍为 0.8182，但 MRR@5 为 0.6970、Hit@1 为 0.5000，严格 runner 退出码 1；`ret-010`、`ret-016` 的目标从第 1 移到第 2，`ret-015` 从第 5 升到第 3。全部旧查询仍由既有专项测试确认为 `symbol_scope_mode=none`，因此没有证据表明排序漂移来自 Symbol Scope；禁止通过更新 baseline 或反复重建直到偶然通过来掩盖该结果。P95 4254.66 ms，保留已有延迟警告。临时旧评测知识库和 points 已清理，残留为 0。
+- **验证**：前端 Symbol Scope 专项 4 files / 32 tests，前端全量 15 files / 87 tests，lint、type-check、build 通过；Symbol Evaluation 单元测试 3 passed；后端非集成 464 passed / 21 deselected，隔离集成 21 passed / 464 deselected；Ruff format 151 files、Ruff check、mypy 90 source files、compileall 和 `git diff --check` 通过。`git diff --exit-code develop -- backend/pyproject.toml backend/uv.lock` 返回 0；当前环境 PATH 无 `uv` 且项目 Python 无 `uv` 模块，因此未运行 `uv lock --check`。
+- **问题与处理**：首次端到端运行因本地开发数据库停留在 Alembic `20260730_0006` 导致 Chunk replacement `ProgrammingError`；临时数据清理后按标准迁移升级到 `20260803_0008 (head)`，再运行成功。旧固定 corpus 的索引实测约 11–12 分钟，首次 10 分钟等待超时后已清理，第二次使用 20 分钟安全上限完成。实际外部 LLM 回答的浏览器手工验收未执行；Search 主链由真实评测覆盖，RAG/Conversation UI 和故障/无答案恢复由自动化测试覆盖。
+- **兼容与遗留**：Stage 12A 前已解析的旧 Java 文档仍需用户主动重新解析并重新索引才能生成 lookup keys；不自动处理正式数据。当前合并阻塞项是旧 24 条严格 baseline 退出码 1，需要独立调查固定 corpus 重建后的 RRF 同分排序/索引可复现性，不应在本 PR 中调整 Dense/BM25/RRF/Top K 或 baseline。
+
 ## 2026-08-03 - Java 符号精确作用域与安全回退
 
 - **目标**：在不改变普通 Dense/Hybrid/Reranked 排名参数的前提下，将可可靠解析且能在当前知识库 active generation 中验证的 Java 符号冻结为精确 Qdrant 作用域；不存在、歧义或超出安全扫描上限时保留用户符号文本并回退普通检索。
