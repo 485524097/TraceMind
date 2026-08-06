@@ -112,6 +112,58 @@ describe('SemanticSearchPanel', () => {
     expect(scope.text()).toContain('source 方法返回什么？')
   })
 
+  it('shows exact overload scope together with path metadata', async () => {
+    mockedHybridSearch.mockResolvedValue({
+      items: [{ ...result(), ranking_mode: 'symbol_exact', score: 1 }],
+      path_scope_mode: 'exact',
+      scoped_relative_path: 'src/main/java/demo/UserService.java',
+      semantic_query: '实现',
+      symbol_scope_mode: 'exact',
+      symbol_scope_reason: null,
+      scoped_symbol_kind: 'method',
+      scoped_symbol_qualified_name: 'demo.UserService.source',
+      scoped_symbol_signature: 'source(String)',
+    })
+    const wrapper = mount(SemanticSearchPanel, { props: { knowledgeBaseId: 'kb-id' } })
+    await wrapper.get('select[aria-label="检索模式"]').setValue('hybrid')
+    await submit(wrapper, 'src/main/java/demo/UserService.java 中的 UserService#source(String)')
+
+    const scope = wrapper.get('[data-testid="semantic-search-scope"]')
+    expect(scope.text()).toContain('src/main/java/demo/UserService.java')
+    expect(scope.text()).toContain('精确符号：source(String)')
+    expect(scope.text()).toContain('demo.UserService.source')
+    expect(scope.text()).toContain('method')
+    expect(wrapper.text()).toContain('精确符号命中')
+    expect(wrapper.text()).not.toContain('100%')
+    expect(wrapper.html()).not.toContain('symbol_lookup')
+  })
+
+  it.each([
+    ['not_found', '符号未找到，已回退普通检索'],
+    ['ambiguous', '符号存在歧义，已回退普通检索'],
+    ['unsupported', '符号匹配范围过大，已回退普通检索'],
+  ] as const)('shows safe fallback reason %s', async (reason, label) => {
+    mockedRerankedSearch.mockResolvedValue({
+      items: [result()],
+      symbol_scope_mode: 'fallback',
+      symbol_scope_reason: reason,
+    })
+    const wrapper = mount(SemanticSearchPanel, { props: { knowledgeBaseId: 'kb-id' } })
+    await submit(wrapper, 'UserService#missing')
+    expect(wrapper.get('[data-testid="semantic-search-scope"]').text()).toContain(label)
+  })
+
+  it('keeps none, missing, and unknown scope metadata visually quiet', async () => {
+    mockedRerankedSearch
+      .mockResolvedValueOnce({ items: [result()], symbol_scope_mode: 'none' })
+      .mockResolvedValueOnce({ items: [result()] })
+    const wrapper = mount(SemanticSearchPanel, { props: { knowledgeBaseId: 'kb-id' } })
+    await submit(wrapper)
+    expect(wrapper.find('[data-testid="semantic-search-scope"]').exists()).toBe(false)
+    await submit(wrapper)
+    expect(wrapper.find('[data-testid="semantic-search-scope"]').exists()).toBe(false)
+  })
+
   it('keeps API failures separate from an empty result', async () => {
     mockedRerankedSearch.mockRejectedValue(new Error('unavailable'))
     const wrapper = mount(SemanticSearchPanel, { props: { knowledgeBaseId: 'kb-id' } })

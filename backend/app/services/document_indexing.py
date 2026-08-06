@@ -169,7 +169,18 @@ class DocumentIndexingService:
                 language=language,
             )
         except VectorIndexError as exc:
-            raise SemanticSearchUnavailableError("Semantic search is unavailable") from exc
+            raise SemanticSearchUnavailableError(
+                "Semantic search is unavailable",
+                scope_metadata={
+                    "path_scope_mode": prepared.path_scope_mode,
+                    "scoped_relative_path": prepared.explicit_relative_path,
+                    "symbol_scope_mode": "none",
+                    "symbol_scope_reason": None,
+                    "scoped_symbol_kind": None,
+                    "scoped_symbol_qualified_name": None,
+                    "scoped_symbol_signature": None,
+                },
+            ) from exc
 
     async def request_index(
         self,

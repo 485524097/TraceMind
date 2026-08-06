@@ -154,4 +154,9 @@ export interface SemanticSearchResponse {
   path_scope_mode?: 'none' | 'exact'
   scoped_relative_path?: string | null
   semantic_query?: string | null
+  symbol_scope_mode?: 'none' | 'exact' | 'fallback'
+  symbol_scope_reason?: 'not_found' | 'ambiguous' | 'unsupported' | null
+  scoped_symbol_kind?: string | null
+  scoped_symbol_qualified_name?: string | null
+  scoped_symbol_signature?: string | null
 }

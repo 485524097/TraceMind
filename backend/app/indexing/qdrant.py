@@ -30,6 +30,13 @@ class VectorSearchHit:
 
 
 @dataclass(frozen=True)
+class HybridCandidate:
+    point_id: str
+    score: float
+    payload: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class PayloadPoint:
     id: str
     payload: dict[str, Any]
@@ -39,6 +46,72 @@ class PayloadPoint:
 class PayloadScrollResult:
     points: list[PayloadPoint]
     truncated: bool = False
+
+
+def stable_payload_key(payload: dict[str, Any], point_id: str) -> tuple[object, ...]:
+    """Return a generation-independent ordering key without inspecting content."""
+
+    def text(key: str) -> str:
+        value = payload.get(key)
+        return value if isinstance(value, str) else ""
+
+    def line(key: str) -> tuple[bool, int]:
+        value = payload.get(key)
+        if type(value) is int:
+            return False, value
+        return True, 0
+
+    def integer(key: str) -> tuple[bool, int]:
+        value = payload.get(key)
+        if type(value) is int:
+            return False, value
+        return True, 0
+
+    relative_path = text("relative_path") or text("document_name")
+    return (
+        relative_path,
+        line("start_line"),
+        line("end_line"),
+        integer("chunk_index"),
+        text("content_hash"),
+        text("document_id"),
+        text("chunk_id"),
+        point_id,
+    )
+
+
+def deterministic_rrf(
+    dense_candidates: Collection[HybridCandidate],
+    sparse_candidates: Collection[HybridCandidate],
+    *,
+    limit: int,
+) -> list[VectorSearchHit]:
+    """Fuse independently stable branches using Qdrant's default RRF k=2."""
+
+    def branch_order(candidate: HybridCandidate) -> tuple[object, ...]:
+        return (
+            -candidate.score,
+            stable_payload_key(candidate.payload, candidate.point_id),
+        )
+
+    scores: dict[str, float] = {}
+    candidates_by_id: dict[str, HybridCandidate] = {}
+    for branch in (dense_candidates, sparse_candidates):
+        for rank, candidate in enumerate(sorted(branch, key=branch_order)):
+            scores[candidate.point_id] = scores.get(candidate.point_id, 0.0) + 1.0 / (2 + rank)
+            candidates_by_id.setdefault(candidate.point_id, candidate)
+
+    fused = sorted(
+        candidates_by_id.values(),
+        key=lambda candidate: (
+            -scores[candidate.point_id],
+            stable_payload_key(candidate.payload, candidate.point_id),
+        ),
+    )
+    return [
+        VectorSearchHit(score=scores[candidate.point_id], payload=candidate.payload)
+        for candidate in fused[:limit]
+    ]
 
 
 class QdrantGateway:
@@ -275,41 +348,43 @@ class QdrantGateway:
             excluded_chunk_types=excluded_chunk_types,
             symbol_lookup_key=symbol_lookup_key,
         )
-        fusion_limit = max(
-            limit,
-            self.dense_prefetch_limit,
-            self.sparse_prefetch_limit,
-        )
         try:
-            response = await self.client.query_points(
+            responses = await self.client.query_batch_points(
                 self.collection_name,
-                prefetch=[
-                    models.Prefetch(
+                requests=[
+                    models.QueryRequest(
                         query=vector,
                         using=self.vector_name,
                         filter=query_filter,
                         limit=max(limit, self.dense_prefetch_limit),
                         score_threshold=dense_score_threshold,
+                        with_payload=True,
+                        with_vector=False,
                     ),
-                    models.Prefetch(
+                    models.QueryRequest(
                         query=self._bm25_document(query),
                         using=self.sparse_vector_name,
                         filter=query_filter,
                         limit=max(limit, self.sparse_prefetch_limit),
+                        with_payload=True,
+                        with_vector=False,
                     ),
                 ],
-                query=models.FusionQuery(fusion=models.Fusion.RRF),
-                limit=fusion_limit,
-                with_payload=True,
-                with_vectors=False,
             )
-            return [
-                VectorSearchHit(float(point.score), dict(point.payload or {}))
-                for point in sorted(
-                    response.points,
-                    key=lambda point: (-float(point.score), str(point.id)),
-                )[:limit]
+            if len(responses) != 2:
+                raise VectorIndexError("Hybrid search returned an unexpected branch count")
+            dense_response, sparse_response = responses
+            dense_candidates = [
+                HybridCandidate(str(point.id), float(point.score), dict(point.payload or {}))
+                for point in dense_response.points
             ]
+            sparse_candidates = [
+                HybridCandidate(str(point.id), float(point.score), dict(point.payload or {}))
+                for point in sparse_response.points
+            ]
+            return deterministic_rrf(dense_candidates, sparse_candidates, limit=limit)
+        except VectorIndexError:
+            raise
         except Exception as exc:
             raise VectorIndexError("Hybrid search is unavailable") from exc
 

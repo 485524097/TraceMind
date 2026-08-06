@@ -2,7 +2,7 @@ import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import perf_counter
 from uuid import UUID, uuid4
 
@@ -13,6 +13,7 @@ from app.reranker import RerankerError, RerankerUnavailableError
 from app.services.conversation import ConversationTurn
 from app.services.document_indexing import DocumentIndexingService
 from app.services.document_reranking import DocumentRerankingService
+from app.services.exceptions import HybridSearchUnavailableError, SemanticSearchUnavailableError
 from app.services.query_rewrite import (
     HistoryAwareQueryRewriteService,
     QueryRewriteResult,
@@ -42,7 +43,18 @@ class PreparedRag:
     query_rewrite_fallback_reason: str | None
     path_scope_mode: str
     scoped_relative_path: str | None
+    symbol_scope_mode: str
+    symbol_scope_reason: str | None
+    scoped_symbol_kind: str | None
+    scoped_symbol_qualified_name: str | None
+    scoped_symbol_signature: str | None
     started_at: float
+
+
+class RagRetrievalUnavailableError(HybridSearchUnavailableError):
+    def __init__(self, scope_metadata: dict[str, object]) -> None:
+        super().__init__("Hybrid search is unavailable")
+        self.scope_metadata = scope_metadata
 
 
 class RagService:
@@ -75,12 +87,17 @@ class RagService:
     ) -> PreparedRag:
         started_at = perf_counter()
         trace_id = trace_id or uuid4()
-        scoped_query = await self.indexing_service.prepare_retrieval_query(
-            knowledge_base_id,
-            query,
-            document_id=document_id,
-            resolve_symbol_scope=False,
-        )
+        try:
+            scoped_query = await self.indexing_service.prepare_retrieval_query(
+                knowledge_base_id,
+                query,
+                document_id=document_id,
+                language=language,
+            )
+        except SemanticSearchUnavailableError as exc:
+            raise RagRetrievalUnavailableError(
+                exc.scope_metadata or _empty_scope_metadata()
+            ) from exc
         rewrite = QueryRewriteResult(scoped_query.semantic_query, "not_applicable")
         history = conversation_history or ()
         if conversation_history is not None:
@@ -100,28 +117,31 @@ class RagService:
             rewrite.fallback_reason,
         )
         logger.info(
-            "RAG path scope trace_id=%s conversation_id=%s path_scope_mode=%s "
-            "scoped_path_length=%s",
+            "RAG retrieval scope trace_id=%s conversation_id=%s path_scope_mode=%s "
+            "scoped_path_length=%s symbol_scope_mode=%s symbol_scope_reason=%s "
+            "symbol_kind=%s scoped_symbol_name_length=%s scoped_symbol_signature_length=%s",
             trace_id,
             conversation_id,
             scoped_query.path_scope_mode,
             len(scoped_query.explicit_relative_path or ""),
+            scoped_query.symbol_scope_mode,
+            scoped_query.symbol_scope_reason,
+            scoped_query.scoped_symbol_kind,
+            len(scoped_query.scoped_symbol_qualified_name or ""),
+            len(scoped_query.scoped_symbol_signature or ""),
         )
-        retrieval_scope = PreparedRetrievalQuery(
-            original_query=query,
-            semantic_query=retrieval_query,
-            scoped_document_id=scoped_query.scoped_document_id,
-            path_scope_mode=scoped_query.path_scope_mode,
-            explicit_relative_path=scoped_query.explicit_relative_path,
-        )
-        candidates = await self.indexing_service.hybrid_search(
-            knowledge_base_id,
-            query=retrieval_query,
-            limit=self.settings.rag_rerank_candidate_limit,
-            language=language,
-            document_id=document_id,
-            prepared_query=retrieval_scope,
-        )
+        retrieval_scope = replace(scoped_query, semantic_query=retrieval_query)
+        try:
+            candidates = await self.indexing_service.hybrid_search(
+                knowledge_base_id,
+                query=retrieval_query,
+                limit=self.settings.rag_rerank_candidate_limit,
+                language=language,
+                document_id=document_id,
+                prepared_query=retrieval_scope,
+            )
+        except HybridSearchUnavailableError as exc:
+            raise RagRetrievalUnavailableError(_scope_metadata_from_query(scoped_query)) from exc
         results = candidates[: self.settings.rag_retrieval_limit]
         retrieval_mode = "hybrid"
         rerank_latency_ms = 0
@@ -173,28 +193,48 @@ class RagService:
                 context,
                 answer_history,
                 scoped_relative_path=scoped_query.explicit_relative_path,
+                scoped_symbol_kind=(
+                    scoped_query.scoped_symbol_kind
+                    if scoped_query.symbol_scope_mode == "exact"
+                    else None
+                ),
+                scoped_symbol_qualified_name=(
+                    scoped_query.scoped_symbol_qualified_name
+                    if scoped_query.symbol_scope_mode == "exact"
+                    else None
+                ),
+                scoped_symbol_signature=(
+                    scoped_query.scoped_symbol_signature
+                    if scoped_query.symbol_scope_mode == "exact"
+                    else None
+                ),
             )
             if context.sources
             else None
         )
         return PreparedRag(
-            trace_id,
-            knowledge_base_id,
-            query,
-            retrieval_query,
-            history,
-            context,
-            messages,
-            retrieval_latency_ms,
-            retrieval_mode,
-            rerank_latency_ms,
-            reranker_fallback,
-            rewrite.mode,
-            rewrite.latency_ms,
-            rewrite.fallback_reason,
-            scoped_query.path_scope_mode,
-            scoped_query.explicit_relative_path,
-            started_at,
+            trace_id=trace_id,
+            knowledge_base_id=knowledge_base_id,
+            original_query=query,
+            retrieval_query=retrieval_query,
+            conversation_history=history,
+            context=context,
+            messages=messages,
+            retrieval_latency_ms=retrieval_latency_ms,
+            retrieval_mode=retrieval_mode,
+            rerank_latency_ms=rerank_latency_ms,
+            reranker_fallback=reranker_fallback,
+            query_rewrite_mode=rewrite.mode,
+            query_rewrite_latency_ms=rewrite.latency_ms,
+            query_rewrite_fallback_reason=rewrite.fallback_reason,
+            path_scope_mode=scoped_query.path_scope_mode,
+            scoped_relative_path=scoped_query.explicit_relative_path,
+            symbol_scope_mode=scoped_query.symbol_scope_mode,
+            symbol_scope_reason=scoped_query.symbol_scope_reason,
+            scoped_symbol_kind=scoped_query.scoped_symbol_kind,
+            scoped_symbol_qualified_name=scoped_query.scoped_symbol_qualified_name,
+            scoped_symbol_signature=scoped_query.scoped_symbol_signature,
+            started_at=started_at,
         )
 
     async def stream_answer(
@@ -205,13 +245,20 @@ class RagService:
         yield (
             "retrieval",
             {
-                "trace_id": trace_id,
+                **self._execution_metadata(prepared),
                 "source_count": len(sources),
                 "sources": sources,
             },
         )
         if prepared.messages is None:
-            yield "no_answer", {"trace_id": trace_id, "message": NO_ANSWER_MESSAGE}
+            yield (
+                "no_answer",
+                {
+                    **build_rag_scope_metadata(prepared),
+                    "trace_id": trace_id,
+                    "message": NO_ANSWER_MESSAGE,
+                },
+            )
             yield "done", self._done(prepared, "no_answer", False, 0, 0, 0, 0)
             return
 
@@ -258,6 +305,7 @@ class RagService:
             yield (
                 "error",
                 {
+                    **build_rag_scope_metadata(prepared),
                     "trace_id": trace_id,
                     "code": "llm_unavailable",
                     "message": LLM_ERROR_MESSAGE,
@@ -308,11 +356,22 @@ class RagService:
         llm_first_token_latency_ms: int,
     ) -> dict[str, object]:
         return {
-            "trace_id": str(prepared.trace_id),
+            **RagService._execution_metadata(prepared),
             "finish_reason": finish_reason,
             "grounded": grounded,
             "valid_citation_count": valid_count,
             "invalid_citation_count": invalid_count,
+            "source_count": len(prepared.context.sources),
+            "llm_first_token_latency_ms": llm_first_token_latency_ms,
+            "llm_latency_ms": llm_latency_ms,
+            "total_latency_ms": round((perf_counter() - prepared.started_at) * 1_000),
+        }
+
+    @staticmethod
+    def _execution_metadata(prepared: PreparedRag) -> dict[str, object]:
+        return {
+            **build_rag_scope_metadata(prepared),
+            "trace_id": str(prepared.trace_id),
             "retrieval_latency_ms": prepared.retrieval_latency_ms,
             "retrieval_mode": prepared.retrieval_mode,
             "rerank_latency_ms": prepared.rerank_latency_ms,
@@ -321,10 +380,40 @@ class RagService:
             "query_rewrite_latency_ms": prepared.query_rewrite_latency_ms,
             "history_turn_count": len(prepared.conversation_history),
             "retrieval_query": prepared.retrieval_query,
-            "path_scope_mode": prepared.path_scope_mode,
-            "scoped_relative_path": prepared.scoped_relative_path,
-            "source_count": len(prepared.context.sources),
-            "llm_first_token_latency_ms": llm_first_token_latency_ms,
-            "llm_latency_ms": llm_latency_ms,
-            "total_latency_ms": round((perf_counter() - prepared.started_at) * 1_000),
         }
+
+
+def build_rag_scope_metadata(prepared: PreparedRag) -> dict[str, object]:
+    return {
+        "path_scope_mode": prepared.path_scope_mode,
+        "scoped_relative_path": prepared.scoped_relative_path,
+        "symbol_scope_mode": prepared.symbol_scope_mode,
+        "symbol_scope_reason": prepared.symbol_scope_reason,
+        "scoped_symbol_kind": prepared.scoped_symbol_kind,
+        "scoped_symbol_qualified_name": prepared.scoped_symbol_qualified_name,
+        "scoped_symbol_signature": prepared.scoped_symbol_signature,
+    }
+
+
+def _scope_metadata_from_query(prepared: PreparedRetrievalQuery) -> dict[str, object]:
+    return {
+        "path_scope_mode": prepared.path_scope_mode,
+        "scoped_relative_path": prepared.explicit_relative_path,
+        "symbol_scope_mode": prepared.symbol_scope_mode,
+        "symbol_scope_reason": prepared.symbol_scope_reason,
+        "scoped_symbol_kind": prepared.scoped_symbol_kind,
+        "scoped_symbol_qualified_name": prepared.scoped_symbol_qualified_name,
+        "scoped_symbol_signature": prepared.scoped_symbol_signature,
+    }
+
+
+def _empty_scope_metadata() -> dict[str, object]:
+    return {
+        "path_scope_mode": "none",
+        "scoped_relative_path": None,
+        "symbol_scope_mode": "none",
+        "symbol_scope_reason": None,
+        "scoped_symbol_kind": None,
+        "scoped_symbol_qualified_name": None,
+        "scoped_symbol_signature": None,
+    }

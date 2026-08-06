@@ -13,6 +13,7 @@ from app.indexing import (
     VectorIndexError,
     VectorPoint,
 )
+from app.indexing.qdrant import HybridCandidate, deterministic_rrf, stable_payload_key
 
 
 def gateway(
@@ -268,12 +269,40 @@ async def test_incompatible_sparse_vector_is_rejected_without_rebuild() -> None:
     client.create_vector_name.assert_not_called()
 
 
-async def test_hybrid_search_uses_shared_filters_and_rrf() -> None:
-    client = AsyncMock(spec=AsyncQdrantClient)
-    client.query_points.return_value = SimpleNamespace(
-        points=[SimpleNamespace(id="point-a", score=0.7, payload={"content": "result"})]
+def hybrid_point(
+    point_id: str,
+    score: float,
+    *,
+    line: int,
+    content: str,
+    relative_path: str = "src/main/java/demo/UserService.java",
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=point_id,
+        score=score,
+        payload={
+            "relative_path": relative_path,
+            "document_name": "UserService.java",
+            "start_line": line,
+            "end_line": line + 1,
+            "chunk_index": line,
+            "content_hash": f"hash-{line}",
+            "document_id": "document-id",
+            "chunk_id": f"chunk-{line}",
+            "content": content,
+        },
     )
+
+
+async def test_hybrid_search_uses_shared_filters_and_application_rrf() -> None:
+    client = AsyncMock(spec=AsyncQdrantClient)
+    result = hybrid_point("point-a", 0.7, line=53, content="result")
+    client.query_batch_points.return_value = [
+        SimpleNamespace(points=[result]),
+        SimpleNamespace(points=[result]),
+    ]
     knowledge_base_id, document_id, generation = uuid4(), uuid4(), uuid4()
+    lookup_key = "v1:method:UserService#source"
 
     hits = await gateway(client).hybrid_search(
         [1.0, 0.0, 0.0],
@@ -285,38 +314,156 @@ async def test_hybrid_search_uses_shared_filters_and_rrf() -> None:
         document_id=document_id,
         dense_score_threshold=0.5,
         excluded_chunk_types=("heading",),
+        symbol_lookup_key=lookup_key,
     )
 
-    assert hits[0].score == 0.7
-    call = client.query_points.await_args.kwargs
-    assert call["query"].fusion == models.Fusion.RRF
-    assert "score_threshold" not in call
-    dense, sparse = call["prefetch"]
+    assert hits[0].score == 1.0
+    call = client.query_batch_points.await_args.kwargs
+    dense, sparse = call["requests"]
     assert dense.using == "dense_v1"
     assert dense.score_threshold == 0.5
     assert dense.limit == 20
+    assert dense.with_payload is True
+    assert dense.with_vector is False
     assert sparse.using == "bm25_v1"
     assert sparse.score_threshold is None
     assert sparse.limit == 20
+    assert sparse.with_payload is True
+    assert sparse.with_vector is False
     assert sparse.query.text == "DiscoveryClient"
     assert sparse.query.options == {"language": "none", "tokenizer": "multilingual"}
     assert dense.filter == sparse.filter
-    assert call["limit"] == 20
-
-
-async def test_hybrid_search_sorts_scores_and_equal_scores_by_point_id() -> None:
-    client = AsyncMock(spec=AsyncQdrantClient)
-    payload_a = {"content": "same-score-a", "marker": ["unchanged"]}
-    payload_b = {"content": "same-score-b"}
-    payload_high = {"content": "higher-score"}
-    client.query_points.return_value = SimpleNamespace(
-        points=[
-            SimpleNamespace(id="point-b", score=0.75, payload=payload_b),
-            SimpleNamespace(id="point-low", score=0.25, payload={"content": "low"}),
-            SimpleNamespace(id="point-high", score=0.833333, payload=payload_high),
-            SimpleNamespace(id="point-a", score=0.75, payload=payload_a),
-        ]
+    must_keys = {condition.key for condition in dense.filter.must}
+    assert must_keys == {
+        "knowledge_base_id",
+        "index_generation",
+        "language",
+        "document_id",
+        "symbol_lookup_keys",
+    }
+    assert dense.filter.must_not[0].key == "chunk_type"
+    assert dense.filter.must_not[0].match.any == ["heading"]
+    symbol_condition = next(
+        condition for condition in dense.filter.must if condition.key == "symbol_lookup_keys"
     )
+    assert symbol_condition.match.value == lookup_key
+
+
+def test_deterministic_rrf_resolves_crossed_branch_tie_by_payload() -> None:
+    line_53_payload = hybrid_point("unused", 0.0, line=53, content="target").payload
+    line_149_payload = hybrid_point("unused", 0.0, line=149, content="competitor").payload
+    dense_line_53 = HybridCandidate(
+        "generation-a-point-2",
+        0.9,
+        line_53_payload,
+    )
+    dense_line_149 = HybridCandidate(
+        "generation-a-point-1",
+        0.8,
+        line_149_payload,
+    )
+    sparse_line_149 = HybridCandidate(
+        "generation-a-point-1",
+        12.0,
+        line_149_payload,
+    )
+    sparse_line_53 = HybridCandidate(
+        "generation-a-point-2",
+        11.0,
+        line_53_payload,
+    )
+
+    hits = deterministic_rrf(
+        [dense_line_53, dense_line_149],
+        [sparse_line_149, sparse_line_53],
+        limit=2,
+    )
+
+    assert [hit.score for hit in hits] == [pytest.approx(5 / 6), pytest.approx(5 / 6)]
+    assert [hit.payload["start_line"] for hit in hits] == [53, 149]
+
+
+def test_deterministic_rrf_ignores_generation_dependent_point_ids() -> None:
+    def generation(prefix: str) -> tuple[list[HybridCandidate], list[HybridCandidate]]:
+        target_payload = hybrid_point("unused", 0.0, line=155, content="target").payload
+        competitor_payload = hybrid_point("unused", 0.0, line=157, content="competitor").payload
+        dense = [
+            HybridCandidate(
+                f"{prefix}-later-id",
+                0.9,
+                target_payload,
+            ),
+            HybridCandidate(
+                f"{prefix}-earlier-id",
+                0.8,
+                competitor_payload,
+            ),
+        ]
+        sparse = [
+            HybridCandidate(f"{prefix}-earlier-id", 12.0, competitor_payload),
+            HybridCandidate(f"{prefix}-later-id", 11.0, target_payload),
+        ]
+        return dense, sparse
+
+    orders: list[list[int]] = []
+    scores: list[list[float]] = []
+    for prefix in ("generation-1", "generation-2"):
+        dense, sparse = generation(prefix)
+        hits = deterministic_rrf(dense, sparse, limit=2)
+        orders.append([int(hit.payload["start_line"]) for hit in hits])
+        scores.append([hit.score for hit in hits])
+
+    assert orders == [[155, 157], [155, 157]]
+    assert scores[0] == scores[1] == [pytest.approx(5 / 6), pytest.approx(5 / 6)]
+
+
+def test_sparse_equal_score_candidates_use_stable_line_order_for_all_permutations() -> None:
+    candidates = [
+        HybridCandidate(
+            f"point-{line}",
+            12.5,
+            hybrid_point("unused", 0.0, line=line, content=str(line)).payload,
+        )
+        for line in (157, 118, 145)
+    ]
+    orders: list[list[int]] = []
+    score_lists: list[list[float]] = []
+    for sparse in (candidates, list(reversed(candidates)), candidates[1:] + candidates[:1]):
+        hits = deterministic_rrf([], sparse, limit=3)
+        orders.append([int(hit.payload["start_line"]) for hit in hits])
+        score_lists.append([hit.score for hit in hits])
+
+    assert orders == [[118, 145, 157]] * 3
+    assert score_lists[0] == score_lists[1] == score_lists[2] == [0.5, 1 / 3, 0.25]
+
+
+def test_stable_payload_key_places_missing_lines_after_valid_lines_and_handles_old_payload() -> (
+    None
+):
+    valid = {"document_name": "Legacy.java", "start_line": 9, "end_line": 10}
+    missing = {"document_name": "Legacy.java", "start_line": None, "content_hash": object()}
+    malformed = {
+        "relative_path": 42,
+        "document_name": "Legacy.java",
+        "start_line": "9",
+        "end_line": False,
+        "chunk_index": [],
+        "document_id": object(),
+    }
+
+    assert stable_payload_key(valid, "point-z") < stable_payload_key(missing, "point-a")
+    assert stable_payload_key(missing, "point-a") < stable_payload_key(malformed, "point-z")
+
+
+async def test_hybrid_search_preserves_branch_limits_and_final_limit() -> None:
+    client = AsyncMock(spec=AsyncQdrantClient)
+    points = [
+        hybrid_point(f"point-{line}", 1.0, line=line, content=str(line)) for line in (1, 2, 3, 4)
+    ]
+    client.query_batch_points.return_value = [
+        SimpleNamespace(points=points),
+        SimpleNamespace(points=[]),
+    ]
 
     hits = await gateway(
         client,
@@ -334,43 +481,10 @@ async def test_hybrid_search_sorts_scores_and_equal_scores_by_point_id() -> None
         excluded_chunk_types=("heading",),
     )
 
-    assert [hit.score for hit in hits] == [0.833333, 0.75, 0.75]
-    assert [hit.payload["content"] for hit in hits] == [
-        "higher-score",
-        "same-score-a",
-        "same-score-b",
-    ]
-    assert hits[1].payload == payload_a
-    assert payload_a == {"content": "same-score-a", "marker": ["unchanged"]}
-    assert client.query_points.await_args.kwargs["limit"] == 12
-
-
-async def test_hybrid_search_order_is_stable_for_permuted_equal_score_candidates() -> None:
-    candidates = [
-        SimpleNamespace(id="point-c", score=0.583333, payload={"content": "c"}),
-        SimpleNamespace(id="point-a", score=0.583333, payload={"content": "a"}),
-        SimpleNamespace(id="point-b", score=0.583333, payload={"content": "b"}),
-    ]
-    orders: list[list[str]] = []
-    for points in (candidates, list(reversed(candidates))):
-        client = AsyncMock(spec=AsyncQdrantClient)
-        client.query_points.return_value = SimpleNamespace(points=points)
-        hits = await gateway(client).hybrid_search(
-            [1.0, 0.0, 0.0],
-            "query",
-            knowledge_base_id=uuid4(),
-            generations=[uuid4()],
-            limit=2,
-            language=None,
-            document_id=None,
-            dense_score_threshold=0.5,
-            excluded_chunk_types=("heading",),
-        )
-        orders.append([str(hit.payload["content"]) for hit in hits])
-        assert len(hits) == 2
-        assert client.query_points.await_args.kwargs["limit"] == 20
-
-    assert orders == [["a", "b"], ["a", "b"]]
+    dense, sparse = client.query_batch_points.await_args.kwargs["requests"]
+    assert dense.limit == 8
+    assert sparse.limit == 12
+    assert len(hits) == 3
 
 
 async def test_search_passes_threshold_and_heading_exclusion_with_existing_filters() -> None:

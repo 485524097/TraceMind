@@ -5,6 +5,7 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import { streamRagAnswer } from '@/services/rag'
 import { parseAnswerSegments } from '@/services/ragCitations'
 import type { RagDoneEvent, RagSource } from '@/types/rag'
+import { symbolScopeLabel } from '@/utils/symbolScope'
 
 const props = defineProps<{ knowledgeBaseId: string }>()
 const query = ref('')
@@ -16,6 +17,7 @@ const traceId = ref('')
 const noAnswerMessage = ref('')
 const errorMessage = ref('')
 const doneMetadata = ref<RagDoneEvent | null>(null)
+const executionMetadata = ref<Record<string, unknown>>({})
 let controller: AbortController | null = null
 
 const sourceIds = computed(() => new Set(sources.value.map((source) => source.source_id)))
@@ -30,6 +32,7 @@ function location(source: RagSource): string {
 }
 
 function sourceScore(source: RagSource): string {
+  if (source.ranking_mode === 'symbol_exact') return '精确符号命中'
   if (source.ranking_mode === 'reranker') {
     return `Reranker 原始分数 ${source.score.toFixed(4)}`
   }
@@ -53,6 +56,7 @@ function reset(): void {
   noAnswerMessage.value = ''
   errorMessage.value = ''
   doneMetadata.value = null
+  executionMetadata.value = {}
 }
 
 async function generate(): Promise<void> {
@@ -68,18 +72,22 @@ async function generate(): Promise<void> {
         onRetrieval(event) {
           traceId.value = event.trace_id
           sources.value = event.sources
+          executionMetadata.value = { ...executionMetadata.value, ...event }
         },
         onToken(event) {
           answer.value += event.text
         },
         onNoAnswer(event) {
           noAnswerMessage.value = event.message
+          executionMetadata.value = { ...executionMetadata.value, ...event }
         },
         onDone(event) {
           doneMetadata.value = event
+          executionMetadata.value = { ...executionMetadata.value, ...event }
         },
         onError(event) {
           errorMessage.value = event.message
+          executionMetadata.value = { ...executionMetadata.value, ...event }
         },
       },
       controller.signal,
@@ -138,6 +146,20 @@ onBeforeUnmount(stop)
       <div v-if="noAnswerMessage" class="rag-empty-state">
         <ElEmpty :description="noAnswerMessage" />
       </div>
+      <dl
+        v-if="executionMetadata.path_scope_mode === 'exact' || symbolScopeLabel(executionMetadata)"
+        class="rag-execution-scope"
+        data-testid="rag-execution-scope"
+      >
+        <template v-if="executionMetadata.path_scope_mode === 'exact'">
+          <dt>路径限定</dt>
+          <dd data-testid="rag-path-scope">{{ executionMetadata.scoped_relative_path }}</dd>
+        </template>
+        <template v-if="symbolScopeLabel(executionMetadata)">
+          <dt>符号限定</dt>
+          <dd>{{ symbolScopeLabel(executionMetadata) }}</dd>
+        </template>
+      </dl>
       <article v-if="answer" class="rag-answer-card">
         <h3>回答</h3>
         <p class="rag-answer-text">
@@ -153,13 +175,6 @@ onBeforeUnmount(stop)
         </p>
         <p v-if="doneMetadata && !doneMetadata.grounded" class="rag-grounding-warning">
           该回答未包含有效引用，请结合原始来源核对。
-        </p>
-        <p
-          v-if="doneMetadata?.path_scope_mode === 'exact'"
-          class="rag-path-scope"
-          data-testid="rag-path-scope"
-        >
-          路径限定：{{ doneMetadata.scoped_relative_path }}
         </p>
       </article>
 

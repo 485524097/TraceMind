@@ -19,6 +19,7 @@ import type {
   ConversationMessageStatus,
 } from '@/types/conversation'
 import type { RagDoneEvent, RagSource } from '@/types/rag'
+import { symbolScopeLabel } from '@/utils/symbolScope'
 
 const route = useRoute()
 const knowledgeBaseId = String(route.params.knowledgeBaseId)
@@ -534,6 +535,10 @@ onBeforeUnmount(() => {
                   <dt>路径限定</dt>
                   <dd>{{ doneMetadata(message)?.scoped_relative_path }}</dd>
                 </template>
+                <template v-if="symbolScopeLabel(doneMetadata(message))">
+                  <dt>符号限定</dt>
+                  <dd>{{ symbolScopeLabel(doneMetadata(message)) }}</dd>
+                </template>
                 <dt>查询改写耗时</dt>
                 <dd>{{ formatLatency(doneMetadata(message)?.query_rewrite_latency_ms) }}</dd>
                 <dt>检索耗时</dt>
@@ -562,6 +567,7 @@ onBeforeUnmount(() => {
                 class="rag-source-card"
               >
                 <strong>[{{ source.source_id }}] {{ source.relative_path || source.document_name }}</strong>
+                <small v-if="source.ranking_mode === 'symbol_exact'">精确符号命中</small>
                 <p :title="source.symbol_signature || undefined">
                   {{ sourceIdentity(source) }} · {{ sourceLocation(source) }}
                 </p>

@@ -13,12 +13,15 @@ from app.reranker import RerankerUnavailableError
 from app.services.conversation import ConversationTurn
 from app.services.document_indexing import DocumentIndexingService, SemanticSearchResult
 from app.services.document_reranking import DocumentRerankingService
-from app.services.exceptions import HybridSearchUnavailableError
+from app.services.exceptions import (
+    HybridSearchUnavailableError,
+    SemanticSearchUnavailableError,
+)
 from app.services.query_rewrite import (
     HistoryAwareQueryRewriteService,
     QueryRewriteResult,
 )
-from app.services.rag import NO_ANSWER_MESSAGE, RagService
+from app.services.rag import NO_ANSWER_MESSAGE, RagRetrievalUnavailableError, RagService
 from app.services.retrieval_query import PreparedRetrievalQuery
 
 
@@ -53,9 +56,10 @@ def indexing_mock() -> AsyncMock:
         query: str,
         *,
         document_id: UUID | None,
+        language: str | None = None,
         resolve_symbol_scope: bool = True,
     ) -> PreparedRetrievalQuery:
-        assert resolve_symbol_scope is False
+        assert resolve_symbol_scope is True
         return PreparedRetrievalQuery(
             original_query=query,
             semantic_query=query,
@@ -64,6 +68,28 @@ def indexing_mock() -> AsyncMock:
 
     indexing.prepare_retrieval_query.side_effect = prepare
     return indexing
+
+
+def exact_symbol_prepared(
+    query: str,
+    semantic_query: str,
+    *,
+    document_id: UUID | None = None,
+    relative_path: str | None = None,
+) -> PreparedRetrievalQuery:
+    return PreparedRetrievalQuery(
+        original_query=query,
+        semantic_query=semantic_query,
+        scoped_document_id=document_id,
+        path_scope_mode="exact" if relative_path is not None else "none",
+        explicit_relative_path=relative_path,
+        symbol_scope_mode="exact",
+        scoped_symbol_lookup_key="v1:method:demo.UserService#source(String)",
+        scoped_symbol_kind="method",
+        scoped_symbol_qualified_name="demo.UserService.source",
+        scoped_symbol_signature="String source(String username)",
+        symbol_fallback_query=query,
+    )
 
 
 def test_context_preserves_order_deduplicates_and_keeps_metadata() -> None:
@@ -169,6 +195,30 @@ def test_rag_source_and_prompt_preserve_optional_symbol_identity() -> None:
     assert "symbol" not in legacy_payload
     assert "signature" not in legacy_payload
     assert "kind" not in legacy_payload
+
+
+def test_prompt_includes_only_verified_safe_symbol_scope() -> None:
+    context = build_rag_context([result("source")], 1_000)
+    exact = build_rag_messages(
+        "原始问题",
+        context,
+        scoped_relative_path="src/UserService.java",
+        scoped_symbol_kind="method",
+        scoped_symbol_qualified_name="demo.UserService.source",
+        scoped_symbol_signature="String source(String username)",
+    )
+    exact_payload = json.loads(exact[1].content)
+
+    assert exact_payload["question"] == "原始问题"
+    assert exact_payload["scoped_symbol"] == {
+        "kind": "method",
+        "qualified_name": "demo.UserService.source",
+        "signature": "String source(String username)",
+    }
+    assert "lookup" not in exact[1].content
+
+    fallback_payload = json.loads(build_rag_messages("回退问题", context)[1].content)
+    assert fallback_payload["scoped_symbol"] is None
 
 
 def test_citation_guard_handles_split_valid_and_invalid_references() -> None:
@@ -290,7 +340,41 @@ async def test_rag_service_emits_safe_error_and_marks_uncited_answer_ungrounded(
     assert events[-1][0] == "error"
     assert events[-1][1]["message"] == "回答生成服务暂时不可用，请稍后重试。"
     assert events[-1][1]["llm_first_token_latency_ms"] == 0
+    assert events[-1][1]["symbol_scope_mode"] == "none"
+    assert events[-1][1]["scoped_symbol_qualified_name"] is None
+    assert "lookup" not in str(events[-1][1])
     assert "private" not in str(events[-1][1])
+
+
+async def test_llm_error_event_preserves_exact_safe_symbol_scope() -> None:
+    scoped = exact_symbol_prepared("UserService#source", "UserService#source")
+    indexing = indexing_mock()
+    indexing.prepare_retrieval_query.side_effect = None
+    indexing.prepare_retrieval_query.return_value = scoped
+    indexing.hybrid_search.return_value = [
+        replace(
+            result("source"),
+            symbol_kind="method",
+            symbol_qualified_name="demo.UserService.source",
+            ranking_mode="symbol_exact",
+        )
+    ]
+
+    class ErrorProvider(FakeProvider):
+        async def stream(self, messages: list[LLMMessage]) -> AsyncGenerator[LLMStreamDelta]:
+            raise LLMProviderError("private upstream body")
+
+    service = RagService(indexing, ErrorProvider([]), Settings(_env_file=None))
+    prepared = await service.prepare(
+        uuid4(), query=scoped.original_query, language="java", document_id=None
+    )
+    error = (await collect(service, prepared))[-1]
+
+    assert error[0] == "error"
+    assert error[1]["symbol_scope_mode"] == "exact"
+    assert error[1]["scoped_symbol_qualified_name"] == "demo.UserService.source"
+    assert "lookup" not in str(error[1])
+    assert "private" not in str(error[1])
 
 
 async def test_rag_reranks_hybrid_candidates_and_preserves_final_source_order() -> None:
@@ -341,9 +425,17 @@ async def test_rag_reranks_hybrid_candidates_and_preserves_final_source_order() 
 
 
 async def test_rag_reranker_failure_falls_back_and_still_calls_llm() -> None:
-    first = replace(result("first"), retrieval_score=0.8, retrieval_rank=1)
+    scoped = exact_symbol_prepared("UserService#source", "UserService#source")
+    first = replace(
+        result("first"),
+        retrieval_score=None,
+        retrieval_rank=1,
+        ranking_mode="symbol_exact",
+    )
     second = replace(result("second"), retrieval_score=0.7, retrieval_rank=2)
     indexing = indexing_mock()
+    indexing.prepare_retrieval_query.side_effect = None
+    indexing.prepare_retrieval_query.return_value = scoped
     indexing.hybrid_search.return_value = [first, second]
     reranking = AsyncMock(spec=DocumentRerankingService)
     reranking.rerank.side_effect = RerankerUnavailableError(reason="timeout")
@@ -361,8 +453,12 @@ async def test_rag_reranker_failure_falls_back_and_still_calls_llm() -> None:
     assert [source.content for source in prepared.context.sources] == ["first", "second"]
     assert prepared.retrieval_mode == "hybrid_fallback"
     assert prepared.reranker_fallback is True
+    assert prepared.symbol_scope_mode == "exact"
+    assert prepared.context.sources[0].ranking_mode == "symbol_exact"
     assert events[0][0] == "retrieval"
+    assert events[0][1]["symbol_scope_mode"] == "exact"
     assert events[-1][0] == "done"
+    assert events[-1][1]["scoped_symbol_qualified_name"] == "demo.UserService.source"
     assert llm.calls == 1
 
 
@@ -498,6 +594,253 @@ async def test_explicit_path_scope_survives_query_rewrite_and_limits_rag_sources
     assert events[-1][1]["path_scope_mode"] == "exact"
     assert events[-1][1]["scoped_relative_path"] == main_path
     assert events[-1][1]["retrieval_query"] == rewritten_query
+
+
+async def test_exact_symbol_scope_is_frozen_before_rewrite_and_shared_by_rag(caplog) -> None:
+    original_query = "demo.UserService#source(String) 它返回什么？"
+    semantic_query = "它返回什么？"
+    rewritten_query = "source(String) 返回什么？"
+    scoped = exact_symbol_prepared(original_query, semantic_query)
+    candidate = replace(
+        result("return username;"),
+        symbol_kind="method",
+        symbol_name="source",
+        symbol_qualified_name="demo.UserService.source",
+        symbol_signature="String source(String username)",
+        ranking_mode="symbol_exact",
+        retrieval_rank=1,
+    )
+    indexing = indexing_mock()
+    indexing.prepare_retrieval_query.side_effect = None
+    indexing.prepare_retrieval_query.return_value = scoped
+    indexing.hybrid_search.return_value = [candidate]
+    rewriter = AsyncMock(spec=HistoryAwareQueryRewriteService)
+    rewriter.rewrite.return_value = QueryRewriteResult(rewritten_query, "rewritten", 6)
+    history = (ConversationTurn("UserService 是什么？", "用户服务。"),)
+    reranking = AsyncMock(spec=DocumentRerankingService)
+    reranking.rerank.return_value = [candidate]
+    service = RagService(
+        indexing,
+        FakeProvider([LLMStreamDelta("answer [S1]")]),
+        Settings(_env_file=None, reranker_enabled=True),
+        reranking,
+        rewriter,
+    )
+    caplog.set_level("INFO", logger="app.services.rag")
+
+    prepared = await service.prepare(
+        uuid4(),
+        query=original_query,
+        language="java",
+        document_id=None,
+        conversation_id=uuid4(),
+        conversation_history=history,
+    )
+    events = await collect(service, prepared)
+
+    indexing.prepare_retrieval_query.assert_awaited_once()
+    assert "resolve_symbol_scope" not in indexing.prepare_retrieval_query.await_args.kwargs
+    assert indexing.prepare_retrieval_query.await_args.kwargs["language"] == "java"
+    rewriter.rewrite.assert_awaited_once_with(semantic_query, history)
+    retrieval_scope = indexing.hybrid_search.await_args.kwargs["prepared_query"]
+    assert retrieval_scope == replace(scoped, semantic_query=rewritten_query)
+    assert retrieval_scope.scoped_symbol_lookup_key == scoped.scoped_symbol_lookup_key
+    reranking.rerank.assert_awaited_once_with(rewritten_query, [candidate], limit=1)
+    assert prepared.context.sources[0].ranking_mode == "symbol_exact"
+    prompt_payload = json.loads(prepared.messages[-1].content)  # type: ignore[index]
+    assert prompt_payload["question"] == original_query
+    assert prompt_payload["scoped_symbol"]["qualified_name"] == "demo.UserService.source"
+    retrieval_event = events[0][1]
+    done_event = events[-1][1]
+    for metadata in (retrieval_event, done_event):
+        assert metadata["symbol_scope_mode"] == "exact"
+        assert metadata["scoped_symbol_signature"] == "String source(String username)"
+        assert "scoped_symbol_lookup_key" not in metadata
+        assert "symbol_lookup_keys" not in metadata
+    log_text = caplog.text
+    assert scoped.scoped_symbol_lookup_key not in log_text
+    assert original_query not in log_text
+
+
+async def test_path_and_symbol_scopes_survive_rewrite() -> None:
+    path = "src/main/java/demo/UserService.java"
+    document_id = uuid4()
+    original_query = f"{path} 中 UserService#source(String) 它做什么？"
+    scoped = exact_symbol_prepared(
+        original_query,
+        "它做什么？",
+        document_id=document_id,
+        relative_path=path,
+    )
+    indexing = indexing_mock()
+    indexing.prepare_retrieval_query.side_effect = None
+    indexing.prepare_retrieval_query.return_value = scoped
+    indexing.hybrid_search.return_value = []
+    rewriter = AsyncMock(spec=HistoryAwareQueryRewriteService)
+    rewriter.rewrite.return_value = QueryRewriteResult("source 做什么？", "rewritten")
+    service = RagService(
+        indexing,
+        FakeProvider([]),
+        Settings(_env_file=None),
+        query_rewrite_service=rewriter,
+    )
+
+    prepared = await service.prepare(
+        uuid4(),
+        query=original_query,
+        language="java",
+        document_id=None,
+        conversation_history=(ConversationTurn("此前", "历史"),),
+    )
+
+    frozen = indexing.hybrid_search.await_args.kwargs["prepared_query"]
+    assert frozen.scoped_document_id == document_id
+    assert frozen.path_scope_mode == "exact"
+    assert frozen.explicit_relative_path == path
+    assert frozen.symbol_scope_mode == "exact"
+    assert frozen.scoped_symbol_lookup_key == scoped.scoped_symbol_lookup_key
+    assert prepared.scoped_relative_path == path
+
+
+async def test_explicit_document_and_symbol_scopes_survive_rewrite() -> None:
+    document_id = uuid4()
+    original_query = "UserService#source(String) 它做什么？"
+    scoped = exact_symbol_prepared(
+        original_query,
+        "它做什么？",
+        document_id=document_id,
+    )
+    indexing = indexing_mock()
+    indexing.prepare_retrieval_query.side_effect = None
+    indexing.prepare_retrieval_query.return_value = scoped
+    indexing.hybrid_search.return_value = []
+    rewriter = AsyncMock(spec=HistoryAwareQueryRewriteService)
+    rewriter.rewrite.return_value = QueryRewriteResult("source 做什么？", "rewritten")
+    service = RagService(
+        indexing,
+        FakeProvider([]),
+        Settings(_env_file=None),
+        query_rewrite_service=rewriter,
+    )
+
+    await service.prepare(
+        uuid4(),
+        query=original_query,
+        language="java",
+        document_id=document_id,
+        conversation_history=(ConversationTurn("此前", "历史"),),
+    )
+
+    frozen = indexing.hybrid_search.await_args.kwargs["prepared_query"]
+    assert frozen.scoped_document_id == document_id
+    assert frozen.path_scope_mode == "none"
+    assert frozen.explicit_relative_path is None
+    assert frozen.symbol_scope_mode == "exact"
+    assert frozen.scoped_symbol_lookup_key == scoped.scoped_symbol_lookup_key
+
+
+@pytest.mark.parametrize("reason", ["not_found", "ambiguous", "unsupported"])
+async def test_symbol_fallback_keeps_candidate_text_for_rewrite_and_metadata(reason: str) -> None:
+    query = "UserService#missing 为什么失败？"
+    scoped = PreparedRetrievalQuery(
+        original_query=query,
+        semantic_query=query,
+        scoped_document_id=None,
+        symbol_scope_mode="fallback",
+        symbol_scope_reason=reason,  # type: ignore[arg-type]
+        symbol_fallback_query=query,
+    )
+    indexing = indexing_mock()
+    indexing.prepare_retrieval_query.side_effect = None
+    indexing.prepare_retrieval_query.return_value = scoped
+    indexing.hybrid_search.return_value = []
+    rewriter = AsyncMock(spec=HistoryAwareQueryRewriteService)
+    rewriter.rewrite.return_value = QueryRewriteResult(query, "skipped")
+    history = (ConversationTurn("此前", "历史"),)
+    service = RagService(
+        indexing,
+        FakeProvider([]),
+        Settings(_env_file=None),
+        query_rewrite_service=rewriter,
+    )
+
+    prepared = await service.prepare(
+        uuid4(),
+        query=query,
+        language="java",
+        document_id=None,
+        conversation_history=history,
+    )
+    events = await collect(service, prepared)
+
+    rewriter.rewrite.assert_awaited_once_with(query, history)
+    frozen = indexing.hybrid_search.await_args.kwargs["prepared_query"]
+    assert frozen.symbol_scope_mode == "fallback"
+    assert frozen.symbol_scope_reason == reason
+    assert frozen.scoped_symbol_lookup_key is None
+    assert events[0][1]["symbol_scope_reason"] == reason
+    assert events[-1][1]["symbol_scope_reason"] == reason
+    assert prepared.messages is None
+
+
+async def test_symbol_only_query_remains_non_empty_and_rewrite_does_not_rescope() -> None:
+    query = "UserService#source"
+    scoped = exact_symbol_prepared(query, query)
+    indexing = indexing_mock()
+    indexing.prepare_retrieval_query.side_effect = None
+    indexing.prepare_retrieval_query.return_value = scoped
+    indexing.hybrid_search.return_value = []
+    rewriter = AsyncMock(spec=HistoryAwareQueryRewriteService)
+    rewriter.rewrite.return_value = QueryRewriteResult("OtherService#run", "rewritten")
+    service = RagService(
+        indexing,
+        FakeProvider([]),
+        Settings(_env_file=None),
+        query_rewrite_service=rewriter,
+    )
+
+    await service.prepare(
+        uuid4(),
+        query=query,
+        language="java",
+        document_id=None,
+        conversation_history=(ConversationTurn("此前", "历史"),),
+    )
+
+    assert indexing.prepare_retrieval_query.await_count == 1
+    frozen = indexing.hybrid_search.await_args.kwargs["prepared_query"]
+    assert frozen.semantic_query == "OtherService#run"
+    assert frozen.scoped_symbol_qualified_name == "demo.UserService.source"
+    assert frozen.scoped_symbol_lookup_key == scoped.scoped_symbol_lookup_key
+    assert indexing.hybrid_search.await_args.kwargs["query"]
+
+
+async def test_retrieval_technical_error_keeps_safe_scope_without_lookup_key() -> None:
+    scoped = exact_symbol_prepared("UserService#source", "UserService#source")
+    indexing = indexing_mock()
+    indexing.prepare_retrieval_query.side_effect = None
+    indexing.prepare_retrieval_query.return_value = scoped
+    indexing.hybrid_search.side_effect = HybridSearchUnavailableError("private qdrant body")
+    service = RagService(indexing, FakeProvider([]), Settings(_env_file=None))
+
+    with pytest.raises(RagRetrievalUnavailableError) as caught:
+        await service.prepare(
+            uuid4(), query=scoped.original_query, language="java", document_id=None
+        )
+
+    assert caught.value.scope_metadata["symbol_scope_mode"] == "exact"
+    assert caught.value.scope_metadata["scoped_symbol_qualified_name"] == (
+        "demo.UserService.source"
+    )
+    assert "lookup" not in str(caught.value.scope_metadata)
+    assert "private" not in str(caught.value)
+
+    indexing.prepare_retrieval_query.side_effect = SemanticSearchUnavailableError(
+        "private validation body"
+    )
+    with pytest.raises(RagRetrievalUnavailableError) as validation_error:
+        await service.prepare(uuid4(), query="q", language="java", document_id=None)
+    assert validation_error.value.scope_metadata["symbol_scope_mode"] == "none"
 
 
 async def test_query_rewrite_fallback_uses_original_and_rag_still_completes() -> None:

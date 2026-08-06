@@ -4,6 +4,7 @@ import { ref, watch } from 'vue'
 
 import { hybridSearch, rerankedSearch, semanticSearch } from '@/services/documents'
 import type { SemanticSearchResponse, SemanticSearchResult } from '@/types/document'
+import { normalizeSymbolScope, symbolScopeLabel } from '@/utils/symbolScope'
 
 const props = defineProps<{ knowledgeBaseId: string }>()
 const query = ref('')
@@ -13,7 +14,14 @@ const searched = ref(false)
 const results = ref<SemanticSearchResult[]>([])
 const queryMetadata = ref<Pick<
   SemanticSearchResponse,
-  'path_scope_mode' | 'scoped_relative_path' | 'semantic_query'
+  | 'path_scope_mode'
+  | 'scoped_relative_path'
+  | 'semantic_query'
+  | 'symbol_scope_mode'
+  | 'symbol_scope_reason'
+  | 'scoped_symbol_kind'
+  | 'scoped_symbol_qualified_name'
+  | 'scoped_symbol_signature'
 >>({})
 const mode = ref<'reranker' | 'hybrid' | 'dense'>('reranker')
 
@@ -39,6 +47,12 @@ function symbolIdentity(result: SemanticSearchResult): string {
   )
 }
 
+function resultScore(result: SemanticSearchResult): string {
+  if (result.ranking_mode === 'symbol_exact') return '精确符号命中'
+  if (mode.value === 'reranker') return `Reranker 原始分数 ${result.score.toFixed(4)}`
+  return `${mode.value === 'hybrid' ? 'RRF 分数' : '余弦分数'} ${result.score.toFixed(4)}`
+}
+
 async function search(): Promise<void> {
   if (!query.value.trim() || loading.value) return
   loading.value = true
@@ -60,6 +74,11 @@ async function search(): Promise<void> {
       path_scope_mode: response.path_scope_mode,
       scoped_relative_path: response.scoped_relative_path,
       semantic_query: response.semantic_query,
+      symbol_scope_mode: response.symbol_scope_mode,
+      symbol_scope_reason: response.symbol_scope_reason,
+      scoped_symbol_kind: response.scoped_symbol_kind,
+      scoped_symbol_qualified_name: response.scoped_symbol_qualified_name,
+      scoped_symbol_signature: response.scoped_symbol_signature,
     }
     searched.value = true
   } catch {
@@ -104,14 +123,30 @@ async function search(): Promise<void> {
         <ElButton native-type="submit" :loading="loading" :disabled="!query.trim()">检索</ElButton>
       </form>
       <dl
-        v-if="queryMetadata.path_scope_mode === 'exact'"
+        v-if="queryMetadata.path_scope_mode === 'exact' || symbolScopeLabel(queryMetadata)"
         class="semantic-search-scope"
         data-testid="semantic-search-scope"
       >
-        <dt>路径限定</dt>
-        <dd>{{ queryMetadata.scoped_relative_path }}</dd>
-        <dt>语义查询</dt>
-        <dd>{{ queryMetadata.semantic_query }}</dd>
+        <template v-if="queryMetadata.path_scope_mode === 'exact'">
+          <dt>路径限定</dt>
+          <dd>{{ queryMetadata.scoped_relative_path }}</dd>
+          <dt>语义查询</dt>
+          <dd>{{ queryMetadata.semantic_query }}</dd>
+        </template>
+        <template v-if="symbolScopeLabel(queryMetadata)">
+          <dt>符号限定</dt>
+          <dd>{{ symbolScopeLabel(queryMetadata) }}</dd>
+          <template v-if="normalizeSymbolScope(queryMetadata).mode === 'exact'">
+            <dt>符号类型</dt>
+            <dd>{{ normalizeSymbolScope(queryMetadata).kind || '未记录' }}</dd>
+            <dt>限定名称</dt>
+            <dd>{{ normalizeSymbolScope(queryMetadata).qualifiedName || '未记录' }}</dd>
+            <template v-if="normalizeSymbolScope(queryMetadata).signature">
+              <dt>签名</dt>
+              <dd>{{ normalizeSymbolScope(queryMetadata).signature }}</dd>
+            </template>
+          </template>
+        </template>
       </dl>
       <div v-if="searched && results.length === 0" class="semantic-search-empty">
         <ElEmpty description="未找到足够相关的内容" />
@@ -121,14 +156,9 @@ async function search(): Promise<void> {
         <article v-for="result in results" :key="result.chunk_id" class="search-result-card">
           <header class="search-result-header">
             <strong>{{ result.relative_path || result.document_name }} · V{{ result.version_number }}</strong>
-            <span v-if="mode === 'reranker'" class="search-result-score">
-              Reranker 原始分数 {{ result.score.toFixed(4) }}
-            </span>
-            <span v-else class="search-result-score">
-              {{ mode === 'hybrid' ? 'RRF 分数' : '余弦分数' }} {{ result.score.toFixed(4) }}
-            </span>
+            <span class="search-result-score">{{ resultScore(result) }}</span>
           </header>
-          <p v-if="mode === 'reranker'" class="search-result-ranking">
+          <p v-if="mode === 'reranker' && result.ranking_mode !== 'symbol_exact'" class="search-result-ranking">
             原 RRF 分数 {{ result.retrieval_score?.toFixed(4) ?? '—' }} · 原 RRF 排名
             {{ result.retrieval_rank ?? '—' }}
           </p>
