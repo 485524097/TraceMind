@@ -2,6 +2,18 @@
 
 本文件用于保留每次开发的决策与验证证据。按时间倒序新增记录；不要用提交信息替代本日志。
 
+## 2026-08-10 - UI Refresh 收尾基线
+
+- **目标**：把未提交的 UI Refresh 整理为可独立评审的基线，修复 Conversation 历史回答与 Evidence Inspector 的来源关联，补齐窄屏布局、设计 token 和关键交互回归测试。
+- **范围与约束**：只修改前端展示、Conversation 状态关联、前端测试和本记录；不开始后续知识沉淀功能，不新增数据模型或 migration，不修改 Retrieval、RAG service、Java Symbol、Evaluation dataset/corpus/expected/baseline。
+- **决策**：Evidence 选择使用 assistant message id 作为状态身份，每条回答继续使用自身 `sources`，citation 仍复用既有 `parseAnswerSegments` 产出的 `[Sx]` identity；Inspector DOM 定位使用 message id 与 source id 组合，避免不同回答都含 `[S1]` 时串联。加载或切换 Conversation 时默认选择该会话最后一条 assistant，streaming 时选择当前临时 assistant，并在服务端 message id 返回后同步更新。
+- **响应式与 token**：桌面保留 200px Conversation、弹性 Answer、360px Evidence 三栏；960px 以下改为 Conversation 左栏加 Answer/Evidence 上下布局，680px 以下三块纵向排列，Evidence 仍可访问。`--code-bg`、`--code-border` 映射到现有 surface/border token，旧 `--text-secondary` 使用改为 `--color-text-secondary`，未引入新颜色体系或 UI framework。
+- **旧实现处理**：全仓前端引用搜索确认 `RagAnswerPanel.vue` 只被其专属测试引用，当前 View/production code 均未使用，因此删除组件、专属测试及 `.rag-*` 废弃样式；同时删除已被 `.conv-*` 结构替代的旧 `.conversation-*` Conversation CSS。
+- **浏览器验收修复**：真实 Edge 验收发现 Knowledge Base 行把 Dropdown 嵌套在 `RouterLink` 中，点击 `···` 会直接导航；改为同一 resource row 内的主体链接和同级 Dropdown，保持行主体导航且让菜单独立可操作。另确认按需引入 Element Plus 时遗漏 Dropdown/Menu/Item 样式，导致菜单无背景和列表样式，补齐三个现有样式入口。两项均未改变 API、数据或页面信息架构。
+- **未采用方案**：不重写 ConversationView，不把 citation identity 改成全局编号，不隐藏窄屏 Evidence，不为 Element Plus Popper/Teleport 浏览器实现编写脆弱测试，也不扩大到服务层或检索逻辑。
+- **验证**：`npm run type-check` 通过；`npx eslint src/ --max-warnings 100` 通过；`npx vitest run --reporter=verbose` 为 15 files、83 tests 全部通过；`npm run build` 通过。真实 Edge 最终只读页面/响应式回归 52/52 通过，覆盖 Home、Knowledge Bases、Documents、Conversation、历史 `[S1]` 绑定、Conversation 切换及 1440/900/600px；独立真实 streaming 在 23 秒完成，观察到 23 个增量快照、retrieval Evidence、临时 id → 持久化 id 和最终 source identity，cancel 状态恢复通过。Console 无 Vue/Element Plus/runtime 错误，只有 Vite 缺失 `favicon.ico` 的 404 开发噪声。
+- **遗留项**：提交、推送、PR 和合并均等待人工确认；后续知识沉淀阶段保持未开始。
+
 ## 2026-08-05 - Stage 12A 最终自动化验收补充
 
 - **目标**：补齐 Stage 12A-3、Stage 12A-4 及 Hybrid 跨 generation 确定性 RRF 修复的最终自动化验收证据；本记录覆盖此前日志中“集成测试跳过”和“旧 24 条严格 baseline 未通过”的中间状态。

@@ -279,7 +279,7 @@ RAG修改：
 最低检查要求：
 
 - 后端：`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy app`、相关 `pytest` 测试。
-- 前端：`npm run lint`、`npm run test:unit -- --run`、`npm run build`。
+- 前端：`npx vue-tsc --noEmit`、`npx eslint src/ --max-warnings 100`、`npx vitest run`、`npx vite build`。
 - 涉及 migration、文件存储补偿、异步任务、索引同步或外部服务时，补充集成测试；若无法自动化，记录原因和替代验证证据。
 - RAG 修改需记录固定评测集上的召回质量、引用正确性、回答质量、延迟和成本，并与基线对比。
 
@@ -329,6 +329,15 @@ RAG修改：
 - test:
 - refactor:
 - chore:
+
+---
+
+# 前端设计规范
+
+前端视觉语言以 `docs/design/TraceMind-UI-Design.md` 为单一事实来源。
+修改前端表现层前必须先阅读该文档。
+
+核心原则：内容 > UI 装饰。证据 > 装饰。不用表格表示知识对象。不用卡片包裹一切。每页一个主操作。不重复信息。L3 调试默认折叠。
 
 ---
 

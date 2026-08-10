@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ElButton, ElEmpty, ElMessage, ElMessageBox } from 'element-plus'
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { ElButton, ElDropdown, ElDropdownItem, ElDropdownMenu, ElEmpty, ElMessage, ElMessageBox } from 'element-plus'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, type Ref } from 'vue'
+import { useRoute } from 'vue-router'
 
 import {
   createConversation,
@@ -24,6 +24,9 @@ import { symbolScopeLabel } from '@/utils/symbolScope'
 const route = useRoute()
 const knowledgeBaseId = String(route.params.knowledgeBaseId)
 const knowledgeBaseName = ref('')
+
+const shellKbName = inject<Ref<string>>('shellKbName', ref(''))
+watch(knowledgeBaseName, (name) => { shellKbName.value = name || '' })
 const conversations = ref<Conversation[]>([])
 const selectedId = ref('')
 const messages = ref<ConversationMessage[]>([])
@@ -33,595 +36,293 @@ const loadingList = ref(false)
 const loadingMessages = ref(false)
 const generating = ref(false)
 const pageError = ref('')
-type ProgressState =
-  | 'preparing'
-  | 'retrieved'
-  | 'generating'
-  | 'finalizing'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
+type ProgressState = 'preparing' | 'retrieved' | 'generating' | 'finalizing' | 'completed' | 'failed' | 'cancelled'
 const progressState = ref<ProgressState | null>(null)
 const elapsedSeconds = ref(0)
 const activeSourceCount = ref(0)
+const evidenceVisible = ref(true)
+const evidenceMessageId = ref<string | null>(null)
 const showRetrievalQuery = import.meta.env.DEV
 let controller: AbortController | null = null
 let streamVersion = 0
 let elapsedTimer: number | null = null
 let progressStartedAt = 0
 
-const selectedConversation = computed(() =>
-  conversations.value.find(({ id }) => id === selectedId.value),
-)
-
-const statusLabels: Record<ConversationMessageStatus, string> = {
-  completed: '已完成',
-  no_answer: '无答案',
-  failed: '生成失败',
-  cancelled: '已取消',
-}
+const selectedConversation = computed(() => conversations.value.find(({ id }) => id === selectedId.value))
+const evidenceMessage = computed(() => messages.value.find(({ id, role }) => role === 'assistant' && id === evidenceMessageId.value) ?? null)
+const evidenceSources = computed(() => evidenceMessage.value?.sources ?? [])
+const evidenceMetadata = computed(() => evidenceMessage.value?.generation_metadata ?? null)
+const isCodeSource = (source: RagSource) => !!(source.symbol_kind || source.symbol_qualified_name || source.symbol_signature)
 
 const progressMessage = computed(() => {
   switch (progressState.value) {
-    case 'preparing':
-      return '正在理解问题并检索知识库'
-    case 'retrieved':
-      return `已找到 ${activeSourceCount.value} 条来源，正在生成回答`
-    case 'generating':
-      return '正在生成回答'
-    case 'finalizing':
-      return '正在校验引用并保存'
-    case 'completed':
-      return '已完成'
-    case 'failed':
-      return '生成失败'
-    case 'cancelled':
-      return '已取消'
-    default:
-      return ''
+    case 'preparing': return 'Retrieving…'
+    case 'retrieved': return `Found ${activeSourceCount.value} sources`
+    case 'generating': return 'Generating answer…'
+    case 'finalizing': return 'Finalizing…'
+    case 'completed': return 'Done'
+    case 'failed': return 'Failed'
+    case 'cancelled': return 'Cancelled'
+    default: return ''
   }
 })
 
-function clearElapsedTimer(): void {
-  if (elapsedTimer !== null) {
-    window.clearInterval(elapsedTimer)
-    elapsedTimer = null
+function clearElapsedTimer() { if (elapsedTimer !== null) { window.clearInterval(elapsedTimer); elapsedTimer = null } }
+function startProgress() {
+  clearElapsedTimer(); progressState.value = 'preparing'; activeSourceCount.value = 0; elapsedSeconds.value = 0
+  progressStartedAt = Date.now(); elapsedTimer = window.setInterval(() => { elapsedSeconds.value = Math.floor((Date.now() - progressStartedAt) / 1000) }, 250)
+}
+function finishProgress(state: Extract<ProgressState, 'completed' | 'failed' | 'cancelled'>) { progressState.value = state; clearElapsedTimer() }
+function resetProgress() { progressState.value = null; activeSourceCount.value = 0; elapsedSeconds.value = 0; clearElapsedTimer() }
+
+function selectDefaultEvidenceMessage(): void {
+  evidenceMessageId.value = null
+  for (let i = messages.value.length - 1; i >= 0; i--) {
+    const candidate = messages.value[i]
+    if (candidate?.role === 'assistant') {
+      evidenceMessageId.value = candidate.id
+      return
+    }
   }
 }
 
-function startProgress(): void {
-  clearElapsedTimer()
-  progressState.value = 'preparing'
-  activeSourceCount.value = 0
-  elapsedSeconds.value = 0
-  progressStartedAt = Date.now()
-  elapsedTimer = window.setInterval(() => {
-    elapsedSeconds.value = Math.floor((Date.now() - progressStartedAt) / 1000)
-  }, 250)
+async function showEvidence(messageId: string, sourceId?: string): Promise<void> {
+  evidenceMessageId.value = messageId
+  evidenceVisible.value = true
+  if (!sourceId) return
+  await nextTick()
+  document.getElementById(`evidence-source-${messageId}-${sourceId}`)?.scrollIntoView({ block: 'nearest' })
 }
 
-function finishProgress(state: Extract<ProgressState, 'completed' | 'failed' | 'cancelled'>): void {
-  progressState.value = state
-  clearElapsedTimer()
-}
-
-function resetProgress(): void {
-  progressState.value = null
-  activeSourceCount.value = 0
-  elapsedSeconds.value = 0
-  clearElapsedTimer()
-}
-
-function temporaryMessage(
-  role: 'user' | 'assistant',
-  content: string,
-  status: ConversationMessageStatus = 'completed',
-): ConversationMessage {
-  return {
-    id: `temporary-${crypto.randomUUID()}`,
-    conversation_id: selectedId.value,
-    role,
-    status,
-    content,
-    trace_id: null,
-    sources: null,
-    generation_metadata: null,
-    created_at: new Date().toISOString(),
-  }
+function temporaryMessage(role: 'user' | 'assistant', content: string, status: ConversationMessageStatus = 'completed'): ConversationMessage {
+  return { id: `temporary-${crypto.randomUUID()}`, conversation_id: selectedId.value, role, status, content, trace_id: null, sources: null, generation_metadata: null, created_at: new Date().toISOString() }
 }
 
 async function loadList(preferredId?: string): Promise<void> {
-  loadingList.value = true
-  pageError.value = ''
+  loadingList.value = true; pageError.value = ''
   try {
-    const result = await listConversations(knowledgeBaseId)
-    conversations.value = result.items
-    const nextId =
-      preferredId && result.items.some(({ id }) => id === preferredId)
-        ? preferredId
-        : selectedId.value && result.items.some(({ id }) => id === selectedId.value)
-          ? selectedId.value
-          : result.items[0]?.id ?? ''
+    const result = await listConversations(knowledgeBaseId); conversations.value = result.items
+    const nextId = preferredId && result.items.some(({ id }) => id === preferredId) ? preferredId
+      : selectedId.value && result.items.some(({ id }) => id === selectedId.value) ? selectedId.value : result.items[0]?.id ?? ''
     if (nextId && nextId !== selectedId.value) await selectConversation(nextId)
     else if (nextId) await loadMessages(nextId)
-    else messages.value = []
-  } catch {
-    pageError.value = '会话列表加载失败，请稍后重试'
-  } finally {
-    loadingList.value = false
-  }
+    else { messages.value = []; evidenceMessageId.value = null }
+  } catch { pageError.value = '会话列表加载失败，请稍后重试' } finally { loadingList.value = false }
 }
 
 async function loadMessages(conversationId: string): Promise<void> {
-  const requestedVersion = streamVersion
-  loadingMessages.value = true
+  const rv = streamVersion; loadingMessages.value = true
   try {
-    const detail = await getConversation(knowledgeBaseId, conversationId)
-    if (selectedId.value === conversationId && requestedVersion === streamVersion) {
-      messages.value = detail.messages
+    const d = await getConversation(knowledgeBaseId, conversationId)
+    if (selectedId.value === conversationId && rv === streamVersion) {
+      messages.value = d.messages
+      selectDefaultEvidenceMessage()
     }
-  } catch {
-    if (selectedId.value === conversationId) pageError.value = '消息历史加载失败，请稍后重试'
-  } finally {
-    if (selectedId.value === conversationId) loadingMessages.value = false
   }
+  catch { if (selectedId.value === conversationId) pageError.value = '消息历史加载失败，请稍后重试' }
+  finally { if (selectedId.value === conversationId) loadingMessages.value = false }
 }
 
-async function selectConversation(conversationId: string): Promise<void> {
-  stopGeneration(false)
-  resetProgress()
-  generating.value = false
-  controller = null
-  streamVersion += 1
-  selectedId.value = conversationId
-  messages.value = []
-  await loadMessages(conversationId)
+async function selectConversation(cid: string): Promise<void> {
+  stopGeneration(false); resetProgress(); generating.value = false; controller = null; streamVersion += 1; selectedId.value = cid; messages.value = []; evidenceMessageId.value = null; evidenceVisible.value = true
+  await loadMessages(cid)
 }
 
 async function addConversation(): Promise<void> {
-  try {
-    const created = await createConversation(knowledgeBaseId)
-    conversations.value = [created, ...conversations.value]
-    await selectConversation(created.id)
-  } catch {
-    ElMessage.error('新建会话失败')
-  }
+  try { const c = await createConversation(knowledgeBaseId); conversations.value = [c, ...conversations.value]; await selectConversation(c.id) }
+  catch { ElMessage.error('新建会话失败') }
 }
 
 async function renameSelected(): Promise<void> {
-  const conversation = selectedConversation.value
-  if (!conversation) return
+  const c = selectedConversation.value; if (!c) return
   try {
-    const result = await ElMessageBox.prompt('输入新的会话标题', '重命名会话', {
-      inputValue: conversation.title,
-      inputPattern: /\S+/,
-      inputErrorMessage: '标题不能为空',
-    })
-    const updated = await renameConversation(knowledgeBaseId, conversation.id, result.value.trim())
-    conversations.value = conversations.value.map((item) =>
-      item.id === updated.id ? updated : item,
-    )
-  } catch {
-    // Cancelled prompts do not need an error message.
-  }
+    const r = await ElMessageBox.prompt('输入新的会话标题', '重命名会话', { inputValue: c.title, inputPattern: /\S+/, inputErrorMessage: '标题不能为空' })
+    const u = await renameConversation(knowledgeBaseId, c.id, r.value.trim()); conversations.value = conversations.value.map(i => i.id === u.id ? u : i)
+  } catch {}
 }
 
 async function removeSelected(): Promise<void> {
-  const conversation = selectedConversation.value
-  if (!conversation) return
-  try {
-    await ElMessageBox.confirm(`确定删除会话“${conversation.title}”吗？`, '删除会话', {
-      type: 'warning',
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-    })
-  } catch {
-    return
-  }
+  const c = selectedConversation.value; if (!c) return
+  try { await ElMessageBox.confirm(`确定删除会话"${c.title}"吗？`, '删除会话', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }) }
+  catch { return }
   stopGeneration()
-  try {
-    await deleteConversation(knowledgeBaseId, conversation.id)
-    selectedId.value = ''
-    await loadList()
-  } catch {
-    ElMessage.error('删除会话失败')
-  }
+  try { await deleteConversation(knowledgeBaseId, c.id); selectedId.value = ''; await loadList() }
+  catch { ElMessage.error('删除会话失败') }
 }
 
 async function generate(): Promise<void> {
-  const prompt = query.value.trim()
-  if (!prompt || generating.value) return
-  if (!selectedId.value) {
-    await addConversation()
-    if (!selectedId.value) return
-  }
-  const conversationId = selectedId.value
-  const currentVersion = ++streamVersion
-  let receivedDone = false
+  const prompt = query.value.trim(); if (!prompt || generating.value) return
+  if (!selectedId.value) { await addConversation(); if (!selectedId.value) return }
+  const cid = selectedId.value; const cv = ++streamVersion; let receivedDone = false
   const assistant = reactive(temporaryMessage('assistant', '', 'completed'))
-  messages.value.push(temporaryMessage('user', prompt), assistant)
-  query.value = ''
-  generating.value = true
-  startProgress()
-  controller = new AbortController()
+  messages.value.push(temporaryMessage('user', prompt), assistant); evidenceMessageId.value = assistant.id; evidenceVisible.value = true; query.value = ''
+  generating.value = true; startProgress(); controller = new AbortController()
   try {
-    await streamRagAnswer(
-      knowledgeBaseId,
-      {
-        query: prompt,
-        language: language.value.trim() || null,
-        conversation_id: conversationId,
-      },
-      {
-        onRetrieval(event) {
-          if (selectedId.value !== conversationId || currentVersion !== streamVersion) return
-          assistant.trace_id = event.trace_id
-          assistant.sources = event.sources
-          activeSourceCount.value = event.source_count
-          progressState.value = 'retrieved'
-          if (event.message_id) assistant.id = event.message_id
-        },
-        onToken(event) {
-          if (selectedId.value !== conversationId || currentVersion !== streamVersion) return
-          progressState.value = 'generating'
-          assistant.content += event.text
-        },
-        onNoAnswer(event) {
-          if (selectedId.value !== conversationId || currentVersion !== streamVersion) return
-          assistant.status = 'no_answer'
-          assistant.content = event.message
-        },
-        onDone(event) {
-          if (selectedId.value !== conversationId || currentVersion !== streamVersion) return
-          receivedDone = true
-          progressState.value = 'finalizing'
-          assistant.status = event.finish_reason === 'no_answer' ? 'no_answer' : 'completed'
-          assistant.generation_metadata = event
-        },
-        onError(event) {
-          if (selectedId.value !== conversationId || currentVersion !== streamVersion) return
-          assistant.status = 'failed'
-          assistant.content = event.message
-          finishProgress('failed')
-        },
-      },
-      controller.signal,
-    )
-    if (selectedId.value === conversationId && currentVersion === streamVersion) {
-      if (receivedDone) {
-        finishProgress('completed')
-      } else if (!['failed', 'cancelled'].includes(progressState.value ?? '')) {
-        assistant.status = 'failed'
-        assistant.content = '回答生成服务暂时不可用，请稍后重试。'
-        finishProgress('failed')
-      }
-      await loadMessages(conversationId)
-      await loadList(conversationId)
+    await streamRagAnswer(knowledgeBaseId, { query: prompt, language: language.value.trim() || null, conversation_id: cid }, {
+      onRetrieval(event) { if (selectedId.value !== cid || cv !== streamVersion) return; const previousMessageId = assistant.id; assistant.trace_id = event.trace_id; assistant.sources = event.sources; activeSourceCount.value = event.source_count; progressState.value = 'retrieved'; if (event.message_id) assistant.id = event.message_id; if (evidenceMessageId.value === previousMessageId) evidenceMessageId.value = assistant.id },
+      onToken(event) { if (selectedId.value !== cid || cv !== streamVersion) return; progressState.value = 'generating'; assistant.content += event.text },
+      onNoAnswer(event) { if (selectedId.value !== cid || cv !== streamVersion) return; assistant.status = 'no_answer'; assistant.content = event.message },
+      onDone(event) { if (selectedId.value !== cid || cv !== streamVersion) return; receivedDone = true; progressState.value = 'finalizing'; assistant.status = event.finish_reason === 'no_answer' ? 'no_answer' : 'completed'; assistant.generation_metadata = event },
+      onError(event) { if (selectedId.value !== cid || cv !== streamVersion) return; assistant.status = 'failed'; assistant.content = event.message; finishProgress('failed') },
+    }, controller.signal)
+    if (selectedId.value === cid && cv === streamVersion) {
+      if (receivedDone) finishProgress('completed')
+      else if (!['failed', 'cancelled'].includes(progressState.value ?? '')) { assistant.status = 'failed'; assistant.content = '回答生成服务暂时不可用，请稍后重试。'; finishProgress('failed') }
+      await loadMessages(cid); await loadList(cid)
     }
   } catch (error) {
-    if (selectedId.value === conversationId && currentVersion === streamVersion) {
-      if (error instanceof DOMException && error.name === 'AbortError') {
-        assistant.status = 'cancelled'
-        finishProgress('cancelled')
-      } else {
-        assistant.status = 'failed'
-        assistant.content = '回答生成服务暂时不可用，请稍后重试。'
-        finishProgress('failed')
-      }
+    if (selectedId.value === cid && cv === streamVersion) {
+      if (error instanceof DOMException && error.name === 'AbortError') { assistant.status = 'cancelled'; finishProgress('cancelled') }
+      else { assistant.status = 'failed'; assistant.content = '回答生成服务暂时不可用，请稍后重试。'; finishProgress('failed') }
     }
-  } finally {
-    if (currentVersion === streamVersion) {
-      generating.value = false
-      controller = null
-    }
-  }
+  } finally { if (cv === streamVersion) { generating.value = false; controller = null } }
 }
 
-function stopGeneration(showCancelled = true): void {
-  if (showCancelled && generating.value) finishProgress('cancelled')
-  controller?.abort()
-}
+function stopGeneration(sc = true) { if (sc && generating.value) finishProgress('cancelled'); controller?.abort() }
 
-function sourceLocation(source: RagSource): string {
-  if (source.page_number !== null) return `第 ${source.page_number} 页`
-  if (source.start_line !== null && source.end_line !== null) {
-    return `第 ${source.start_line}-${source.end_line} 行`
-  }
-  return `Chunk ${source.chunk_index}`
-}
+function answerSegments(message: ConversationMessage) { return parseAnswerSegments(message.content, new Set((message.sources ?? []).map(s => s.source_id))) }
+function doneMetadata(message: ConversationMessage): Partial<RagDoneEvent> | null { return message.generation_metadata }
+function formatLatency(v: number | undefined): string { return v === undefined ? '—' : `${v} ms` }
+function sourceLocation(s: RagSource): string { if (s.page_number !== null) return `Page ${s.page_number}`; if (s.start_line !== null && s.end_line !== null) return `L${s.start_line}–${s.end_line}`; return `Chunk ${s.chunk_index}` }
 
-function sourceIdentity(source: RagSource): string {
-  return (
-    source.symbol_signature ||
-    source.symbol_qualified_name ||
-    source.symbol_name ||
-    source.section_title ||
-    source.document_name
-  )
-}
-
-function answerSegments(message: ConversationMessage) {
-  return parseAnswerSegments(
-    message.content,
-    new Set((message.sources ?? []).map((source) => source.source_id)),
-  )
-}
-
-function focusSource(messageId: string, sourceId: string): void {
-  document.getElementById(`conversation-source-${messageId}-${sourceId}`)?.scrollIntoView({
-    behavior: 'smooth',
-    block: 'center',
-  })
-}
-
-function doneMetadata(message: ConversationMessage): Partial<RagDoneEvent> | null {
-  return message.generation_metadata
-}
-
-function rewriteLabel(message: ConversationMessage): string {
-  const metadata = doneMetadata(message)
-  if (metadata?.query_rewrite_mode === 'rewritten') {
-    return '已根据对话历史改写检索问题'
-  }
-  if (metadata?.query_rewrite_mode === 'fallback') {
-    return '查询改写失败，已使用原问题'
-  }
-  return ''
-}
-
-function rewriteDetailLabel(message: ConversationMessage): string {
-  switch (doneMetadata(message)?.query_rewrite_mode) {
-    case 'skipped':
-      return '独立问题，未改写'
-    case 'rewritten':
-      return '已根据对话历史改写检索问题'
-    case 'fallback':
-      return '查询改写失败，已使用原问题'
-    case 'not_applicable':
-      return '不适用'
-    default:
-      return ''
-  }
-}
-
-function hasExecutionDetails(message: ConversationMessage): boolean {
-  return message.role === 'assistant' && doneMetadata(message) !== null
-}
-
-function formatLatency(value: number | undefined): string {
-  return value === undefined ? '未记录' : `${value} ms`
-}
-
-onMounted(async () => {
-  try {
-    knowledgeBaseName.value = (await getKnowledgeBase(knowledgeBaseId)).name
-  } catch {
-    pageError.value = '知识库不存在或加载失败'
-  }
-  await loadList()
-})
-
-onBeforeUnmount(() => {
-  stopGeneration(false)
-  clearElapsedTimer()
-  streamVersion += 1
-})
+onMounted(async () => { try { knowledgeBaseName.value = (await getKnowledgeBase(knowledgeBaseId)).name } catch { pageError.value = '知识库不存在或加载失败' }; await loadList() })
+onBeforeUnmount(() => { stopGeneration(false); clearElapsedTimer(); streamVersion += 1 })
 </script>
 
 <template>
-  <main class="management-page conversation-page" data-layout="viewport-grid">
-    <header class="management-header">
-      <div>
-        <RouterLink :to="`/knowledge-bases/${knowledgeBaseId}/documents`" class="back-link">
-          ← 返回文档管理
-        </RouterLink>
-        <p class="eyebrow">CONVERSATION HISTORY</p>
-        <h1>{{ knowledgeBaseName || '知识库问答' }}</h1>
-        <p class="conversation-description">会话、回答与生成时引用会持久保存。</p>
-        <p v-if="pageError" class="form-error" role="alert">{{ pageError }}</p>
-      </div>
-    </header>
-
-    <section
-      class="conversation-layout"
-      data-layout="stretch-columns"
-      data-testid="conversation-layout"
-    >
-      <aside class="knowledge-panel conversation-sidebar" :aria-busy="loadingList">
-        <div class="conversation-sidebar-actions">
-          <ElButton
-            type="primary"
-            data-testid="new-conversation-sidebar"
-            @click="addConversation"
-          >
-            新建会话
-          </ElButton>
-          <ElButton :disabled="!selectedConversation" @click="renameSelected">重命名</ElButton>
-          <ElButton type="danger" plain :disabled="!selectedConversation" @click="removeSelected">
-            删除
-          </ElButton>
-        </div>
-        <div class="conversation-list-scroll">
-          <ElEmpty v-if="!loadingList && conversations.length === 0" description="暂无会话" />
-          <button
-            v-for="conversation in conversations"
-            :key="conversation.id"
-            type="button"
-            class="conversation-list-item"
-            :class="{ active: conversation.id === selectedId }"
-            @click="selectConversation(conversation.id)"
-          >
-            <strong>{{ conversation.title }}</strong>
-            <small>{{ new Date(conversation.updated_at).toLocaleString('zh-CN') }}</small>
+  <main class="conv-page">
+    <div v-if="pageError" class="conv-error" role="alert">{{ pageError }}</div>
+    <div class="conv-layout">
+      <!-- Sidebar -->
+      <aside class="conv-sidebar">
+        <div class="conv-sidebar-head">Conversations</div>
+        <div class="conv-sidebar-list">
+          <button v-for="c in conversations" :key="c.id" class="conv-sidebar-item" :class="{ on: c.id === selectedId }" :data-testid="`conversation-${c.id}`" @click="selectConversation(c.id)">
+            <span class="conv-sidebar-title">{{ c.title }}</span>
+            <span class="conv-sidebar-time">{{ new Date(c.updated_at).toLocaleDateString('zh-CN', { month:'short', day:'numeric' }) }}</span>
           </button>
+          <ElEmpty v-if="!loadingList && conversations.length === 0" description="No conversations" />
+        </div>
+        <div class="conv-sidebar-foot">
+          <button class="conv-sidebar-new" data-testid="new-conversation-sidebar" @click="addConversation">+ New</button>
+          <ElDropdown v-if="selectedConversation" trigger="click" :hide-on-click="true">
+            <button class="conv-sidebar-more" aria-label="Conversation actions">···</button>
+            <template #dropdown>
+              <ElDropdownMenu>
+                <ElDropdownItem @click="renameSelected">Rename</ElDropdownItem>
+                <ElDropdownItem divided style="color:var(--color-error)" @click="removeSelected">Delete</ElDropdownItem>
+              </ElDropdownMenu>
+            </template>
+          </ElDropdown>
         </div>
       </aside>
 
-      <section class="knowledge-panel conversation-main">
-        <div v-if="loadingMessages" class="loading-state">正在加载消息历史…</div>
-        <div v-else-if="!selectedId" class="conversation-empty-state">
-          <ElEmpty description="新建或选择一个会话后开始问答" />
-          <ElButton type="primary" data-testid="new-conversation-empty" @click="addConversation">
-            新建会话
-          </ElButton>
+      <!-- Thread -->
+      <div class="conv-thread" data-testid="conversation-thread">
+        <div v-if="loadingMessages" class="loading-state">Loading…</div>
+        <div v-else-if="!selectedId" class="conv-empty">
+          <ElEmpty description="Select or create a conversation" />
+          <ElButton type="primary" data-testid="new-conversation-empty" @click="addConversation">New Conversation</ElButton>
         </div>
-        <div
-          v-else
-          class="conversation-thread"
-          data-scroll-region="true"
-          data-testid="conversation-thread"
-          aria-label="消息历史"
-        >
-          <ElEmpty v-if="messages.length === 0" description="还没有消息，输入问题开始问答" />
-          <article
-            v-for="message in messages"
-            :key="message.id"
-            class="conversation-message"
-            :class="message.role"
-            :data-status="message.status"
-          >
-            <header>
-              <strong>{{ message.role === 'user' ? '你' : 'TraceMind' }}</strong>
-              <span v-if="message.role === 'assistant'">{{ statusLabels[message.status] }}</span>
-            </header>
-            <p class="rag-answer-text">
-              <template v-for="(segment, index) in answerSegments(message)" :key="index">
-                <button
-                  v-if="segment.type === 'citation'"
-                  type="button"
-                  class="rag-citation"
-                  @click="focusSource(message.id, segment.sourceId)"
-                >{{ segment.text }}</button>
-                <template v-else>{{ segment.text }}</template>
+        <template v-else>
+          <ElEmpty v-if="messages.length === 0" description="Ask a question to start" />
+
+          <div v-for="msg in messages" :key="msg.id" class="msg" :class="msg.role" :data-message-id="msg.id">
+            <div class="msg-who">{{ msg.role === 'user' ? 'You' : 'TraceMind' }}</div>
+            <div v-if="msg.role === 'user'" class="msg-body user-body">{{ msg.content }}</div>
+            <div v-else class="msg-body">
+              <template v-for="(seg, i) in answerSegments(msg)" :key="i">
+                <button v-if="seg.type === 'citation'" type="button" class="cite-btn" @click="showEvidence(msg.id, seg.sourceId)">{{ seg.text }}</button>
+                <template v-else>{{ seg.text }}</template>
               </template>
-            </p>
-            <p
-              v-if="
-                message.role === 'assistant' &&
-                message.status === 'completed' &&
-                doneMetadata(message) &&
-                !doneMetadata(message)?.grounded
-              "
-              class="rag-grounding-warning"
-            >
-              该回答未包含有效引用，请结合原始来源核对。
-            </p>
-            <small v-if="rewriteLabel(message)" class="query-rewrite-label">
-              {{ rewriteLabel(message) }}
-            </small>
-            <details
-              v-if="hasExecutionDetails(message)"
-              class="conversation-execution-details"
-            >
-              <summary>处理详情</summary>
-              <dl>
-                <template v-if="rewriteDetailLabel(message)">
-                  <dt>查询改写</dt>
-                  <dd>{{ rewriteDetailLabel(message) }}</dd>
+              <div v-if="msg.status === 'no_answer' && !msg.content" style="color:var(--color-text-secondary)">No sufficiently relevant information found in the knowledge base.</div>
+            </div>
+
+            <!-- Provenance row -->
+            <div v-if="msg.role === 'assistant' && msg.sources?.length" class="msg-prov">
+              <span>Cited from <strong>{{ msg.sources.length }}</strong> source{{ msg.sources.length > 1 ? 's' : '' }}</span>
+              <button v-if="!evidenceVisible || evidenceMessageId !== msg.id" class="msg-prov-link" @click="showEvidence(msg.id)">View evidence →</button>
+            </div>
+            <div v-else-if="msg.role === 'assistant' && msg.status === 'completed' && !msg.sources?.length && doneMetadata(msg) && !doneMetadata(msg)?.grounded" class="msg-ungrounded">
+              This answer contains no verified citations. Verify against original sources.
+            </div>
+
+            <!-- Execution -->
+            <details v-if="msg.role === 'assistant' && doneMetadata(msg)" class="exec-details">
+              <summary>Execution details</summary>
+              <dl class="exec-grid">
+                <dt>Rewrite</dt><dd>{{ doneMetadata(msg)?.query_rewrite_mode ?? '—' }} · {{ formatLatency(doneMetadata(msg)?.query_rewrite_latency_ms) }}</dd>
+                <dt>Retrieval</dt><dd>{{ doneMetadata(msg)?.retrieval_mode ?? '—' }} · {{ formatLatency(doneMetadata(msg)?.retrieval_latency_ms) }}</dd>
+                <dt>Reranker</dt><dd>{{ doneMetadata(msg)?.reranker_fallback ? 'fallback' : 'no fallback' }} · {{ formatLatency(doneMetadata(msg)?.rerank_latency_ms) }}</dd>
+                <dt>LLM</dt><dd>{{ formatLatency(doneMetadata(msg)?.llm_latency_ms) }} · {{ doneMetadata(msg)?.llm_first_token_latency_ms ? doneMetadata(msg)?.llm_first_token_latency_ms + 'ms TTFT' : '—' }}</dd>
+                <template v-if="doneMetadata(msg)?.path_scope_mode === 'exact'">
+                  <dt>Path scope</dt><dd>{{ doneMetadata(msg)?.scoped_relative_path }}</dd>
                 </template>
-                <dt>历史轮数</dt>
-                <dd>{{ doneMetadata(message)?.history_turn_count ?? 0 }}</dd>
-                <template v-if="showRetrievalQuery && doneMetadata(message)?.retrieval_query">
-                  <dt>检索问题</dt>
-                  <dd>{{ doneMetadata(message)?.retrieval_query }}</dd>
+                <template v-if="symbolScopeLabel(doneMetadata(msg))">
+                  <dt>Symbol scope</dt><dd>{{ symbolScopeLabel(doneMetadata(msg)) }}</dd>
                 </template>
-                <dt>检索模式</dt>
-                <dd>{{ doneMetadata(message)?.retrieval_mode ?? '未记录' }}</dd>
-                <dt>Reranker 降级</dt>
-                <dd>{{ doneMetadata(message)?.reranker_fallback ? '是' : '否' }}</dd>
-                <dt>来源数量</dt>
-                <dd>{{ doneMetadata(message)?.source_count ?? message.sources?.length ?? 0 }}</dd>
-                <template v-if="doneMetadata(message)?.path_scope_mode === 'exact'">
-                  <dt>路径限定</dt>
-                  <dd>{{ doneMetadata(message)?.scoped_relative_path }}</dd>
+                <template v-if="showRetrievalQuery && doneMetadata(msg)?.retrieval_query">
+                  <dt>Retrieval query</dt><dd>{{ doneMetadata(msg)?.retrieval_query }}</dd>
                 </template>
-                <template v-if="symbolScopeLabel(doneMetadata(message))">
-                  <dt>符号限定</dt>
-                  <dd>{{ symbolScopeLabel(doneMetadata(message)) }}</dd>
-                </template>
-                <dt>查询改写耗时</dt>
-                <dd>{{ formatLatency(doneMetadata(message)?.query_rewrite_latency_ms) }}</dd>
-                <dt>检索耗时</dt>
-                <dd>{{ formatLatency(doneMetadata(message)?.retrieval_latency_ms) }}</dd>
-                <dt>重排耗时</dt>
-                <dd>{{ formatLatency(doneMetadata(message)?.rerank_latency_ms) }}</dd>
-                <dt>首 Token 延迟</dt>
-                <dd>{{ formatLatency(doneMetadata(message)?.llm_first_token_latency_ms) }}</dd>
-                <dt>LLM 耗时</dt>
-                <dd>{{ formatLatency(doneMetadata(message)?.llm_latency_ms) }}</dd>
-                <dt>总耗时</dt>
-                <dd>{{ formatLatency(doneMetadata(message)?.total_latency_ms) }}</dd>
               </dl>
             </details>
-            <details
-              v-if="message.sources?.length"
-              class="conversation-sources"
-              :data-message-id="message.id"
-              data-testid="conversation-sources"
-            >
-              <summary>引用来源（{{ message.sources.length }}）</summary>
-              <article
-                v-for="source in message.sources"
-                :id="`conversation-source-${message.id}-${source.source_id}`"
-                :key="source.source_id"
-                class="rag-source-card"
-              >
-                <strong>[{{ source.source_id }}] {{ source.relative_path || source.document_name }}</strong>
-                <small v-if="source.ranking_mode === 'symbol_exact'">精确符号命中</small>
-                <p :title="source.symbol_signature || undefined">
-                  {{ sourceIdentity(source) }} · {{ sourceLocation(source) }}
-                </p>
-                <pre class="rag-source-content">{{ source.content }}</pre>
-              </article>
-            </details>
-          </article>
-        </div>
+          </div>
 
-        <div
-          v-if="selectedId && progressState"
-          class="conversation-progress"
-          :data-state="progressState"
-          data-testid="conversation-progress"
-          role="status"
-          aria-live="polite"
-        >
-          <strong>{{ progressMessage }}</strong>
-          <span>已用时 {{ elapsedSeconds }} 秒</span>
-        </div>
+          <!-- Progress -->
+          <div v-if="selectedId && progressState" class="conv-progress" :data-state="progressState" role="status" aria-live="polite">
+            <strong>{{ progressMessage }}</strong><span>{{ elapsedSeconds }}s</span>
+          </div>
 
-        <form
-          v-if="selectedId"
-          class="conversation-composer"
-          data-position="panel-bottom"
-          data-testid="conversation-composer"
-          @submit.prevent="generate"
-        >
-          <input
-            v-model="query"
-            maxlength="2000"
-            aria-label="知识库问题"
-            placeholder="输入你的问题"
-          />
-          <input
-            v-model="language"
-            maxlength="32"
-            aria-label="问答语言过滤"
-            placeholder="语言（可选）"
-          />
-          <ElButton native-type="submit" type="primary" :disabled="!query.trim() || generating">
-            发送
-          </ElButton>
-          <ElButton
-            v-if="generating"
-            type="danger"
-            plain
-            data-testid="stop-generation"
-            @click="stopGeneration()"
-          >
-            停止生成
-          </ElButton>
-        </form>
-      </section>
-    </section>
+          <!-- Composer -->
+          <form v-if="selectedId" class="conv-composer" data-testid="conversation-composer" @submit.prevent="generate">
+            <input v-model="query" maxlength="2000" aria-label="Your question" placeholder="Ask a question…" />
+            <ElButton native-type="submit" type="primary" :disabled="!query.trim() || generating">Send</ElButton>
+            <ElButton v-if="generating" type="danger" plain data-testid="stop-generation" @click="stopGeneration()">Stop</ElButton>
+          </form>
+        </template>
+      </div>
+
+      <!-- Evidence Inspector -->
+      <aside class="conv-evidence" :class="{ off: !evidenceVisible }">
+        <div class="ev-head">
+          <span>Evidence</span>
+          <button @click="evidenceVisible = false" aria-label="Close evidence">×</button>
+        </div>
+        <div class="ev-body">
+          <template v-if="evidenceSources.length">
+            <div v-for="src in evidenceSources" :id="`evidence-source-${evidenceMessage?.id}-${src.source_id}`" :key="src.source_id" class="ev-src" :class="{ code: isCodeSource(src) }" :data-testid="`evidence-source-${evidenceMessage?.id}-${src.source_id}`">
+              <span class="ev-type" :class="{ 'ev-type-code': isCodeSource(src) }">{{ isCodeSource(src) ? 'Code' : 'Document' }}</span>
+              <div class="ev-src-id-row">
+                <span class="ev-src-id">{{ src.source_id }}</span>
+                <span class="ev-src-path">{{ src.relative_path || src.document_name }}</span>
+              </div>
+              <div class="ev-src-loc">{{ src.section_title || src.document_name }} · {{ sourceLocation(src) }}</div>
+              <div v-if="src.symbol_signature" class="ev-src-sig-line">
+                <span class="ev-src-sig">{{ src.symbol_signature }}</span>
+              </div>
+              <div class="ev-src-excerpt">{{ src.content }}</div>
+            </div>
+          </template>
+          <div v-else style="font-size:var(--font-size-sm);color:var(--color-text-tertiary);padding:var(--space-xl) 0;text-align:center">
+            No sources available
+          </div>
+
+          <hr v-if="evidenceMetadata" class="ev-divider">
+          <div v-if="evidenceMetadata" class="ev-sec-title">Execution</div>
+          <dl v-if="evidenceMetadata" class="ev-exec-grid">
+            <dt>Rewrite</dt><dd>{{ evidenceMetadata.query_rewrite_mode ?? '—' }} · {{ formatLatency(evidenceMetadata.query_rewrite_latency_ms) }}</dd>
+            <dt>Retrieval</dt><dd>{{ evidenceMetadata.retrieval_mode ?? '—' }} · {{ formatLatency(evidenceMetadata.retrieval_latency_ms) }}</dd>
+            <dt>Reranker</dt><dd>{{ evidenceMetadata.reranker_fallback ? 'fallback' : 'no fallback' }}</dd>
+            <dt>LLM</dt><dd>{{ formatLatency(evidenceMetadata.llm_latency_ms) }}</dd>
+            <template v-if="evidenceMetadata.path_scope_mode === 'exact'">
+              <dt>Path scope</dt><dd>{{ evidenceMetadata.scoped_relative_path }}</dd>
+            </template>
+            <template v-if="symbolScopeLabel(evidenceMetadata)">
+              <dt>Symbol scope</dt><dd>{{ symbolScopeLabel(evidenceMetadata) }}</dd>
+            </template>
+          </dl>
+        </div>
+      </aside>
+    </div>
   </main>
 </template>

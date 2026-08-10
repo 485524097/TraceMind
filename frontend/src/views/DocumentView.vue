@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ElAlert, ElButton, ElEmpty, ElMessage, ElMessageBox } from 'element-plus'
-import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { ElAlert, ElButton, ElDropdown, ElDropdownItem, ElDropdownMenu, ElEmpty, ElMessage, ElMessageBox } from 'element-plus'
+import { inject, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
+import { useRoute } from 'vue-router'
 
 import DocumentUploadPanel from '@/components/DocumentUploadPanel.vue'
 import DocumentChunkDialog from '@/components/DocumentChunkDialog.vue'
@@ -21,6 +21,11 @@ import type { DocumentItem } from '@/types/document'
 const route = useRoute()
 const knowledgeBaseId = String(route.params.knowledgeBaseId)
 const knowledgeBaseName = ref('')
+
+const shellKbName = inject<Ref<string>>('shellKbName', ref(''))
+watch(knowledgeBaseName, (name) => {
+  shellKbName.value = name || ''
+})
 const items = ref<DocumentItem[]>([])
 const query = ref('')
 const loading = ref(false)
@@ -31,6 +36,8 @@ const selectedDocument = ref<DocumentItem | null>(null)
 const chunkDialogVisible = ref(false)
 const parsingId = ref<string | null>(null)
 const indexingId = ref<string | null>(null)
+const showUpload = ref(false)
+const showRetrievalDebug = ref(false)
 let pollingTimer: ReturnType<typeof setInterval> | undefined
 
 const parseLabels = {
@@ -166,7 +173,7 @@ function showVersions(document: DocumentItem): void {
 async function confirmDelete(document: DocumentItem): Promise<void> {
   try {
     await ElMessageBox.confirm(
-      `确定删除文档“${document.name}”及全部历史版本吗？此操作无法撤销。`,
+      `确定删除文档"${document.name}"及全部历史版本吗？此操作无法撤销。`,
       '删除确认',
       { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' },
     )
@@ -186,6 +193,30 @@ async function confirmDelete(document: DocumentItem): Promise<void> {
   }
 }
 
+function statusPillClass(status: string): string {
+  if (status === 'succeeded') return 'st-pill st-pill-ok'
+  if (status === 'failed') return 'st-pill st-pill-err'
+  return 'st-pill st-pill-warn'
+}
+
+function fileNameOnly(document: DocumentItem): string {
+  const name = document.relative_path || document.name
+  const lastSlash = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'))
+  return lastSlash >= 0 ? name.slice(lastSlash + 1) : name
+}
+
+function fileExtension(document: DocumentItem): string {
+  const name = document.relative_path || document.name
+  const dot = name.lastIndexOf('.')
+  return dot >= 0 ? name.slice(dot) : ''
+}
+
+function baseNameWithoutExt(document: DocumentItem): string {
+  const full = fileNameOnly(document)
+  const dot = full.lastIndexOf('.')
+  return dot >= 0 ? full.slice(0, dot) : full
+}
+
 onMounted(loadPage)
 onBeforeUnmount(() => {
   if (pollingTimer !== undefined) clearInterval(pollingTimer)
@@ -194,89 +225,127 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="management-page document-page">
+    <!-- Page Header -->
     <header class="management-header">
       <div>
-        <RouterLink to="/knowledge-bases" class="back-link">← 返回知识库列表</RouterLink>
-        <p class="eyebrow">DOCUMENT INGESTION</p>
-        <h1>{{ knowledgeBaseName || '文档管理' }}</h1>
-        <p>管理原始文件、解析状态与历史版本；解析完成仍不代表已建立检索索引。</p>
+        <h1>Documents</h1>
+        <p>Documents and code available for search, answers, and traceable citations</p>
       </div>
       <div class="header-actions">
-        <RouterLink :to="`/knowledge-bases/${knowledgeBaseId}/chat`">
-          <ElButton type="primary">进入知识库问答</ElButton>
-        </RouterLink>
-        <ElButton :loading="loading" @click="loadDocuments">刷新</ElButton>
+        <ElButton type="primary" @click="showUpload = !showUpload">
+          {{ showUpload ? 'Close' : 'Import' }}
+        </ElButton>
       </div>
     </header>
 
-    <DocumentUploadPanel :knowledge-base-id="knowledgeBaseId" @completed="loadDocuments" />
-    <p class="panel-section-label">Dense 检索调试</p>
-    <SemanticSearchPanel :knowledge-base-id="knowledgeBaseId" />
+    <!-- Upload Panel (collapsible) -->
+    <DocumentUploadPanel
+      v-if="showUpload"
+      :knowledge-base-id="knowledgeBaseId"
+      @completed="loadDocuments(); showUpload = false"
+    />
 
-    <section class="document-toolbar">
-      <form @submit.prevent="loadDocuments">
-        <input v-model="query" aria-label="文档名称或路径搜索" placeholder="按名称或路径搜索文档" />
-        <ElButton native-type="submit" :loading="loading">搜索</ElButton>
-      </form>
-    </section>
+    <!-- Search -->
+    <div class="doc-search-bar">
+      <input
+        v-model="query"
+        aria-label="Filter documents by name or path"
+        placeholder="Filter by name or path…"
+        @keyup.enter="loadDocuments"
+      />
+      <ElButton :loading="loading" @click="loadDocuments" size="small">Search</ElButton>
+    </div>
 
-    <ElAlert v-if="errorMessage" :title="errorMessage" type="error" show-icon :closable="false" />
+    <ElAlert v-if="errorMessage" :title="errorMessage" type="error" show-icon :closable="false" style="max-width:1200px;margin:0 auto var(--space-lg)" />
 
-    <section class="knowledge-panel" :aria-busy="loading">
-      <div v-if="loading && items.length === 0" class="loading-state">正在加载文档…</div>
-      <ElEmpty v-else-if="items.length === 0 && !errorMessage" description="暂无文档" />
-      <div v-else class="table-wrap">
-        <table>
-          <thead>
-            <tr><th>文件名</th><th>版本</th><th>大小</th><th>解析状态</th><th>索引状态</th><th>Chunk</th><th>最近解析</th><th></th></tr>
-          </thead>
-          <tbody>
-            <tr v-for="document in items" :key="document.id">
-              <td class="name-cell">{{ document.relative_path || document.name }}</td>
-              <td>{{ document.latest_version.extension }} · V{{ document.latest_version.version_number }}</td>
-              <td>{{ formatSize(document.latest_version.file_size) }}</td>
-              <td>
-                <span :data-status="document.latest_version.parse_status">{{ parseLabels[document.latest_version.parse_status] }}</span>
-                <small v-if="document.latest_version.parse_error_message" class="parse-error-summary">{{ parseErrorSummary(document) }}</small>
-              </td>
-              <td>
-                <span :data-index-status="document.latest_version.index_status">{{ indexLabels[document.latest_version.index_status] }}</span>
-                <small v-if="document.latest_version.index_error_message" class="parse-error-summary">{{ document.latest_version.index_error_message }}</small>
-              </td>
-              <td>{{ document.latest_version.chunk_count }}</td>
-              <td>{{ document.latest_version.parsed_at ? formatDate(document.latest_version.parsed_at) : '—' }}</td>
-              <td class="row-actions document-actions">
-                <ElButton size="small" :disabled="document.latest_version.chunk_count === 0" @click="showChunks(document)">Chunk</ElButton>
-                <ElButton
-                  size="small"
-                  :loading="parsingId === document.id"
+    <!-- Document List -->
+    <section :aria-busy="loading">
+      <div v-if="loading && items.length === 0" class="loading-state">Loading documents…</div>
+      <ElEmpty v-else-if="items.length === 0 && !errorMessage" description="No documents yet" />
+
+      <div v-else class="doc-list">
+        <div
+          v-for="document in items"
+          :key="document.id"
+          class="doc-item"
+        >
+          <div class="doc-main">
+            <div class="doc-name-row">
+              <span class="doc-name">{{ baseNameWithoutExt(document) }}</span>
+              <span class="doc-ext">{{ fileExtension(document) }}</span>
+            </div>
+            <div class="doc-path">{{ document.relative_path || document.name }}</div>
+            <div class="doc-meta-row">
+              <span class="doc-meta">V{{ document.latest_version.version_number }}</span>
+              <span class="doc-meta-sep">·</span>
+              <span class="doc-meta">{{ formatSize(document.latest_version.file_size) }}</span>
+              <span class="doc-meta-sep">·</span>
+              <span class="doc-meta">{{ document.latest_version.chunk_count }} chunks</span>
+              <span class="doc-meta-sep">·</span>
+              <span class="doc-meta">{{ document.latest_version.parsed_at ? formatDate(document.latest_version.parsed_at) : '—' }}</span>
+              <span class="doc-statuses">
+                <span :class="statusPillClass(document.latest_version.parse_status)">
+                  {{ parseLabels[document.latest_version.parse_status] }}
+                </span>
+                <span :class="statusPillClass(document.latest_version.index_status)">
+                  {{ indexLabels[document.latest_version.index_status] }}
+                </span>
+              </span>
+              <small
+                v-if="document.latest_version.parse_error_message"
+                class="parse-error-summary"
+              >{{ parseErrorSummary(document) }}</small>
+            </div>
+          </div>
+
+          <!-- Overflow actions -->
+          <ElDropdown trigger="click" :hide-on-click="true">
+            <button class="doc-more" aria-label="Document actions">···</button>
+            <template #dropdown>
+              <ElDropdownMenu>
+                <ElDropdownItem
+                  :disabled="document.latest_version.chunk_count === 0"
+                  @click="showChunks(document)"
+                >Chunks</ElDropdownItem>
+                <ElDropdownItem
                   :disabled="parsingId !== null || document.latest_version.parse_status === 'processing'"
                   @click="requestParse(document, document.latest_version.parse_status === 'succeeded')"
-                >{{ document.latest_version.parse_status === 'succeeded' ? '重新解析' : '重试解析' }}</ElButton>
-                <ElButton
-                  size="small"
-                  :loading="indexingId === document.id"
+                >{{ document.latest_version.parse_status === 'succeeded' ? 'Re-parse' : 'Retry parse' }}</ElDropdownItem>
+                <ElDropdownItem
                   :disabled="indexingId !== null || document.latest_version.parse_status !== 'succeeded' || document.latest_version.index_status === 'processing'"
                   @click="requestIndex(document, document.latest_version.index_status === 'succeeded')"
-                >{{ document.latest_version.index_status === 'succeeded' ? '重新索引' : '索引' }}</ElButton>
-                <ElButton size="small" @click="downloadCurrentDocument(knowledgeBaseId, document.id)">下载</ElButton>
-                <ElButton size="small" @click="showVersions(document)">版本</ElButton>
-                <ElButton
+                >{{ document.latest_version.index_status === 'succeeded' ? 'Re-index' : 'Index' }}</ElDropdownItem>
+                <ElDropdownItem @click="downloadCurrentDocument(knowledgeBaseId, document.id)">Download</ElDropdownItem>
+                <ElDropdownItem @click="showVersions(document)">Versions</ElDropdownItem>
+                <ElDropdownItem
                   :data-testid="`delete-document-${document.id}`"
-                  size="small"
-                  type="danger"
-                  plain
-                  :loading="deletingId === document.id"
-                  :disabled="deletingId !== null"
+                  divided
+                  style="color:var(--color-error)"
                   @click="confirmDelete(document)"
-                >删除</ElButton>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+                >Delete</ElDropdownItem>
+              </ElDropdownMenu>
+            </template>
+          </ElDropdown>
+        </div>
       </div>
     </section>
 
+    <!-- Retrieval Tools -->
+    <div style="max-width:1200px;margin:var(--space-2xl) auto 0;padding-top:var(--space-lg);border-top:1px solid var(--color-border-light)">
+      <ElButton
+        size="small"
+        text
+        @click="showRetrievalDebug = !showRetrievalDebug"
+      >
+        {{ showRetrievalDebug ? '▾' : '▸' }} Retrieval tools
+      </ElButton>
+      <SemanticSearchPanel
+        v-if="showRetrievalDebug"
+        :knowledge-base-id="knowledgeBaseId"
+      />
+    </div>
+
+    <!-- Dialogs -->
     <DocumentVersionDialog
       v-model="versionDialogVisible"
       :knowledge-base-id="knowledgeBaseId"

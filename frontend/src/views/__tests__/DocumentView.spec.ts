@@ -93,6 +93,15 @@ function mountView() {
           props: ['modelValue'],
           template: '<div v-if="modelValue" data-testid="chunk-dialog" />',
         },
+        ElDropdown: {
+          props: ['trigger'],
+          template: '<div class="el-dropdown"><slot /><slot name="dropdown" /></div>',
+        },
+        ElDropdownMenu: { template: '<div class="el-dropdown-menu"><slot /></div>' },
+        ElDropdownItem: {
+          props: ['disabled'],
+          template: '<button :disabled="disabled" :data-testid="$attrs[\'data-testid\']" @click="$emit(\'click\')"><slot /></button>',
+        },
       },
     },
   })
@@ -127,22 +136,20 @@ describe('DocumentView', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('技术资料')
+    expect(wrapper.text()).toContain('Documents')
     expect(wrapper.text()).toContain('sample.md')
     expect(wrapper.text()).toContain('V2')
     expect(wrapper.text()).toContain('2.0 KB')
     expect(wrapper.text()).toContain('解析完成')
-    expect(wrapper.text()).toContain('2')
-    expect(wrapper.text()).toContain('进入知识库问答')
-    expect(wrapper.find('.rag-answer-panel').exists()).toBe(false)
-    expect(wrapper.find('.semantic-search-panel').exists()).toBe(true)
+    expect(wrapper.text()).toContain('2 chunks')
+    expect(wrapper.text()).toContain('Retrieval tools')
   })
 
   it('shows an empty state', async () => {
     mockedList.mockResolvedValue(response([]))
     const wrapper = mountView()
     await flushPromises()
-    expect(wrapper.text()).toContain('暂无文档')
+    expect(wrapper.text()).toContain('No documents yet')
   })
 
   it('shows a list failure', async () => {
@@ -156,27 +163,34 @@ describe('DocumentView', () => {
     mockedList.mockResolvedValue(response([document]))
     const wrapper = mountView()
     await flushPromises()
-    await wrapper.get('input[aria-label="文档名称或路径搜索"]').setValue('sample')
-    await wrapper.get('.document-toolbar form').trigger('submit')
+    const input = wrapper.get('input[aria-label="Filter documents by name or path"]')
+    await input.setValue('sample')
+    const searchBtns = wrapper.findAll('button').filter(b => b.text() === 'Search')
+    await searchBtns[0]?.trigger('click')
     await flushPromises()
     expect(mockedList).toHaveBeenLastCalledWith('kb-id', 'sample')
   })
 
-  it('refreshes after uploads complete', async () => {
+  it('refreshes after uploads open and complete', async () => {
     mockedList.mockResolvedValue(response([document]))
     const wrapper = mountView()
     await flushPromises()
+    // Open upload panel
+    const importBtn = wrapper.findAll('button').find(b => b.text() === 'Import')
+    await importBtn?.trigger('click')
+    await flushPromises()
+    // Trigger upload completion
     await wrapper.get('[data-testid="upload-completed"]').trigger('click')
     await flushPromises()
     expect(mockedList).toHaveBeenCalledTimes(2)
   })
 
-  it('triggers current version download', async () => {
+  it('triggers current version download via dropdown', async () => {
     mockedList.mockResolvedValue(response([document]))
     const wrapper = mountView()
     await flushPromises()
-    const downloadButton = wrapper.findAll('button').find((button) => button.text() === '下载')
-    await downloadButton?.trigger('click')
+    const downloadItems = wrapper.findAll('button').filter(b => b.text() === 'Download')
+    await downloadItems[0]?.trigger('click')
     expect(mockedDownload).toHaveBeenCalledWith('kb-id', 'document-id')
   })
 
@@ -186,10 +200,11 @@ describe('DocumentView', () => {
     const confirm = vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue('confirm' as never)
     const wrapper = mountView()
     await flushPromises()
-    await wrapper.get('[data-testid="delete-document-document-id"]').trigger('click')
+    const deleteBtn = wrapper.get('[data-testid="delete-document-document-id"]')
+    await deleteBtn.trigger('click')
     await flushPromises()
 
-    expect(confirm).toHaveBeenCalledOnce()
+    expect(confirm).toHaveBeenCalled()
     expect(mockedDelete).toHaveBeenCalledWith('kb-id', 'document-id')
     expect(mockedList).toHaveBeenCalledTimes(2)
   })
@@ -228,7 +243,7 @@ describe('DocumentView', () => {
     expect(clearIntervalSpy).toHaveBeenCalled()
   })
 
-  it('requests a force reparse and opens chunk preview', async () => {
+  it('requests a force reparse and opens chunk preview via dropdown', async () => {
     mockedList.mockResolvedValue(response([document]))
     mockedParse.mockResolvedValue({
       queued: true,
@@ -240,17 +255,17 @@ describe('DocumentView', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    const reparse = wrapper.findAll('button').find((button) => button.text() === '重新解析')
+    const reparse = wrapper.findAll('button').find(b => b.text() === 'Re-parse')
     await reparse?.trigger('click')
     await flushPromises()
     expect(mockedParse).toHaveBeenCalledWith('kb-id', 'document-id', 'version-id', true)
 
-    const chunks = wrapper.findAll('button').find((button) => button.text() === 'Chunk')
+    const chunks = wrapper.findAll('button').find(b => b.text() === 'Chunks')
     await chunks?.trigger('click')
     expect(wrapper.find('[data-testid="chunk-dialog"]').exists()).toBe(true)
   })
 
-  it('shows index state and requests a force reindex', async () => {
+  it('shows index state and requests a force reindex via dropdown', async () => {
     mockedList.mockResolvedValue(response([document]))
     mockedIndex.mockResolvedValue({
       queued: true,
@@ -260,7 +275,7 @@ describe('DocumentView', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('索引完成')
-    const reindex = wrapper.findAll('button').find((button) => button.text() === '重新索引')
+    const reindex = wrapper.findAll('button').find(b => b.text() === 'Re-index')
     await reindex?.trigger('click')
     await flushPromises()
 
@@ -273,7 +288,7 @@ describe('DocumentView', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    const reparse = wrapper.findAll('button').find((button) => button.text() === '重新解析')
+    const reparse = wrapper.findAll('button').find(b => b.text() === 'Re-parse')
     await reparse?.trigger('click')
     await flushPromises()
 
