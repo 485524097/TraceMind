@@ -15,6 +15,7 @@
     "format": "prettier --write --experimental-cli src/"
   },
   "dependencies": {
+    "cytoscape": "^3.34.0",
     "element-plus": "^2.14.3",
     "eventsource-parser": "3.1.0",
     "pinia": "^3.0.4",

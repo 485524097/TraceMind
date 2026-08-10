@@ -51,3 +51,20 @@ list and shared Evidence renderer.
 - Tags are normalized with Unicode `casefold()` and stored in lowercase-like canonical form.
 - Search is SQL substring matching rather than a ranked full-text index.
 - Knowledge entries are created only from persisted completed answers.
+
+## Stage 14 — Derived Knowledge Map
+
+The Knowledge Map is a read-only projection, not a retrieval or storage subsystem. The scoped map
+endpoint loads the current Knowledge Base, live Documents and KnowledgeEntries, then derives four
+node types and four transparent edge types at request time.
+
+- `contains`: the Knowledge Base contains each live Document and KnowledgeEntry.
+- `cites`: a KnowledgeEntry snapshot names a Document that still exists in the same Knowledge Base.
+- `tagged`: a KnowledgeEntry contains a normalized tag value; `tag:{value}` is its stable node ID.
+- `related`: two entries share a tag or a live cited Document. One stable undirected edge aggregates
+  all matching tag and document reasons.
+
+Deleted-document snapshots remain visible in Knowledge detail but intentionally produce no live
+Document node, cite edge or document-based related reason. The map adds no model, table, migration,
+cache, graph database, entity extraction or GraphRAG path. Its current in-memory derivation is an
+MVP trade-off for local knowledge-base sizes; large-graph pagination or clustering is deferred.

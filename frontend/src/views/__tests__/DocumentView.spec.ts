@@ -14,8 +14,13 @@ import type { DocumentItem, DocumentListResponse } from '@/types/document'
 import DocumentView from '@/views/DocumentView.vue'
 import { ApiError } from '@/services/api'
 
+const routeState = {
+  params: { knowledgeBaseId: 'kb-id' },
+  query: {} as Record<string, string>,
+}
+
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: { knowledgeBaseId: 'kb-id' } }),
+  useRoute: () => routeState,
   RouterLink: { template: '<a><slot /></a>' },
 }))
 vi.mock('@/services/documents', () => ({
@@ -109,6 +114,7 @@ function mountView() {
 
 describe('DocumentView', () => {
   beforeEach(() => {
+    routeState.query = {}
     vi.restoreAllMocks()
     mockedList.mockReset()
     mockedDelete.mockReset()
@@ -169,6 +175,16 @@ describe('DocumentView', () => {
     await searchBtns[0]?.trigger('click')
     await flushPromises()
     expect(mockedList).toHaveBeenLastCalledWith('kb-id', 'sample')
+  })
+
+  it('focuses a document requested by the Knowledge Map', async () => {
+    routeState.query = { query: 'src/sample.md', focusDocument: 'document-id' }
+    mockedList.mockResolvedValue(response([document]))
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(mockedList).toHaveBeenCalledWith('kb-id', 'src/sample.md')
+    expect(wrapper.get('#document-document-id').classes()).toContain('doc-item-focused')
   })
 
   it('refreshes after uploads open and complete', async () => {

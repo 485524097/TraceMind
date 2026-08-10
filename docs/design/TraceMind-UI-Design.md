@@ -321,6 +321,18 @@ For every new frontend feature:
 
 ---
 
+## Knowledge Map
+
+- The graph and selected-item inspector are both L1. The inspector moves below the graph on narrow
+  screens and is never hidden by default.
+- Node color communicates type: Knowledge Base, KnowledgeEntry, Document and derived Tag. Related
+  edges are dashed and expose their shared tag/document reasons in the inspector.
+- Cytoscape core owns zoom, pan, drag, selection and the built-in layout. TraceMind owns the data
+  contract, filters, navigation and visual tokens; no wrapper or graph-layout plugin is used.
+- Filters operate locally and hide edges whose endpoint is hidden. KnowledgeEntry and Document
+  nodes provide direct navigation back to their existing detail/list locations.
+- The map is a visualization of current knowledge assets, not a retrieval surface or GraphRAG UI.
+
 ## Review Checklist
 
 Before completing any frontend UI work:

@@ -32,5 +32,10 @@ export default createRouter({
       name: 'knowledge-detail',
       component: KnowledgeDetailView,
     },
+    {
+      path: '/knowledge-bases/:knowledgeBaseId/map',
+      name: 'knowledge-map',
+      component: () => import('@/views/KnowledgeMapView.vue'),
+    },
   ],
 })

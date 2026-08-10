@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ElAlert, ElButton, ElDropdown, ElDropdownItem, ElDropdownMenu, ElEmpty, ElMessage, ElMessageBox } from 'element-plus'
-import { inject, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
+import { inject, nextTick, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 import DocumentUploadPanel from '@/components/DocumentUploadPanel.vue'
@@ -28,6 +28,7 @@ watch(knowledgeBaseName, (name) => {
 })
 const items = ref<DocumentItem[]>([])
 const query = ref('')
+const focusedDocumentId = ref('')
 const loading = ref(false)
 const errorMessage = ref('')
 const deletingId = ref<string | null>(null)
@@ -74,11 +75,20 @@ async function loadDocuments(): Promise<void> {
     const response = await listDocuments(knowledgeBaseId, query.value)
     items.value = response.items
     updatePolling()
+    await focusRequestedDocument()
   } catch {
     errorMessage.value = '文档列表加载失败，请检查知识库或后端服务后重试'
   } finally {
     loading.value = false
   }
+}
+
+async function focusRequestedDocument(): Promise<void> {
+  if (!focusedDocumentId.value) return
+  await nextTick()
+  document.getElementById(`document-${focusedDocumentId.value}`)?.scrollIntoView?.({
+    block: 'center',
+  })
 }
 
 function updatePolling(): void {
@@ -157,6 +167,9 @@ async function requestParse(document: DocumentItem, force: boolean): Promise<voi
 }
 
 async function loadPage(): Promise<void> {
+  query.value = typeof route.query?.query === 'string' ? route.query.query : ''
+  focusedDocumentId.value =
+    typeof route.query?.focusDocument === 'string' ? route.query.focusDocument : ''
   try {
     knowledgeBaseName.value = (await getKnowledgeBase(knowledgeBaseId)).name
   } catch {
@@ -267,7 +280,9 @@ onBeforeUnmount(() => {
         <div
           v-for="document in items"
           :key="document.id"
+          :id="`document-${document.id}`"
           class="doc-item"
+          :class="{ 'doc-item-focused': document.id === focusedDocumentId }"
         >
           <div class="doc-main">
             <div class="doc-name-row">

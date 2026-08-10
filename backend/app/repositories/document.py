@@ -118,6 +118,14 @@ class DocumentRepository:
     async def count_by_knowledge_base(self, knowledge_base_id: UUID) -> int:
         return await self.count_documents(knowledge_base_id, query=None)
 
+    async def list_all(self, knowledge_base_id: UUID) -> list[Document]:
+        result = await self.session.execute(
+            select(Document)
+            .where(Document.knowledge_base_id == knowledge_base_id)
+            .order_by(Document.created_at, Document.id)
+        )
+        return list(result.scalars().all())
+
     async def get_latest_version(
         self, knowledge_base_id: UUID, document_id: UUID
     ) -> DocumentVersion | None:

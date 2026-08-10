@@ -37,5 +37,6 @@ describe('AppShell', () => {
     expect(wrapper.get('.kb-name').text()).toBe('Project KB')
     expect(wrapper.get('.kb-tab[data-to="/knowledge-bases/kb-1/documents"]').text()).toBe('Documents')
     expect(wrapper.get('.kb-tab[data-to="/knowledge-bases/kb-1/chat"]').text()).toBe('Ask')
+    expect(wrapper.get('.kb-tab[data-to="/knowledge-bases/kb-1/map"]').text()).toBe('Map')
   })
 })

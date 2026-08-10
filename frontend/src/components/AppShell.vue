@@ -39,6 +39,9 @@ watch(kbId, () => {
         <RouterLink :to="`/knowledge-bases/${kbId}/knowledge`" class="kb-tab" active-class="active"
           >Knowledge</RouterLink
         >
+        <RouterLink :to="`/knowledge-bases/${kbId}/map`" class="kb-tab" active-class="active"
+          >Map</RouterLink
+        >
       </nav>
     </div>
 

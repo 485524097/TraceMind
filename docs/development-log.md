@@ -235,3 +235,46 @@ rejected as unnecessary for the MVP. Retrieval and Qdrant were not changed.
 
 Substring search and canonical lowercase-like tags are intentional MVP limits. Snapshots preserve
 deleted-document evidence, but later Knowledge Map relationships only include live documents.
+
+# 2026-08-11 — Stage 14 Derived Knowledge Map
+
+## Problem and constraints
+
+TraceMind needed a way to understand relationships among its own saved knowledge without turning
+the final MVP stage into a graph database or GraphRAG project. The map must remain read-only,
+KB-scoped and transparent about why entries are related.
+
+## Adopted design
+
+- Added one runtime-derived endpoint over the existing Knowledge Base, Document and KnowledgeEntry
+  repositories. There is no graph model, migration, persistence, cache or retrieval dependency.
+- Live citation edges are the intersection of snapshot document IDs and current same-KB Documents.
+  Related entry pairs aggregate shared normalized tags and shared live Documents.
+- Added Cytoscape core only, using its built-in `cose` layout and interaction APIs. The UI provides
+  type filters, Fit Graph, selection inspection and navigation to Knowledge/Document locations.
+- Added Document query/focus handling so a map node can highlight the existing resource row.
+
+## Alternatives not adopted
+
+Graph databases, graph persistence, entity/LLM relation extraction, graph retrieval, layout
+plugins, Vue wrappers and new browser-test infrastructure were rejected as outside the display-only
+scope.
+
+## Validation and result
+
+- Backend Ruff check/format and mypy (98 source files) passed; the full suite completed with
+  479 passed and 24 skipped.
+- Frontend type-check, lint and build passed; Vitest completed with 20 files and 93 tests passed.
+  Lazy-loading the Map route keeps the main production chunk at 412.14 kB and isolates the
+  Cytoscape view in a 441.23 kB chunk, with no Vite chunk-size warning.
+- Headless Chrome rendered a 7-node/10-edge live map at desktop and 500 px widths. Zoom/pan/drag
+  are delegated to Cytoscape core; Fit/filter/selection/navigation lifecycle is covered by Vitest.
+  Knowledge and Evidence remained accessible, the narrow inspector moved below the graph, and a
+  Document node target filtered, scrolled to and highlighted its existing resource row without a
+  console/runtime error.
+
+## Current limits
+
+The endpoint derives relationships in memory and intentionally has no large-graph pagination,
+clustering or cache. These optimizations should be justified by real local data sizes before being
+added.
