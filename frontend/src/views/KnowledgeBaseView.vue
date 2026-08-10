@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ElAlert, ElButton, ElEmpty, ElMessage, ElMessageBox } from 'element-plus'
+import { ElAlert, ElButton, ElDropdown, ElDropdownItem, ElDropdownMenu, ElEmpty, ElMessage, ElMessageBox } from 'element-plus'
 import { onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 
@@ -16,10 +16,7 @@ const editingKnowledgeBase = ref<KnowledgeBase | null>(null)
 const deletingId = ref<string | null>(null)
 
 function formatDate(value: string): string {
-  return new Intl.DateTimeFormat('zh-CN', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date(value))
+  return new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value))
 }
 
 async function loadKnowledgeBases(): Promise<void> {
@@ -53,14 +50,11 @@ async function handleSaved(): Promise<void> {
 async function confirmDelete(knowledgeBase: KnowledgeBase): Promise<void> {
   try {
     await ElMessageBox.confirm(
-      `确定删除知识库“${knowledgeBase.name}”吗？此操作无法撤销。`,
+      `确定删除知识库"${knowledgeBase.name}"吗？此操作无法撤销。`,
       '删除确认',
       { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' },
     )
-  } catch {
-    return
-  }
-
+  } catch { return }
   if (deletingId.value) return
   deletingId.value = knowledgeBase.id
   try {
@@ -68,14 +62,8 @@ async function confirmDelete(knowledgeBase: KnowledgeBase): Promise<void> {
     ElMessage.success('知识库删除成功')
     await loadKnowledgeBases()
   } catch (error) {
-    ElMessage.error(
-      error instanceof ApiError && error.status === 409
-        ? '知识库中仍有文档，请先删除文档'
-        : '知识库删除失败，请稍后重试',
-    )
-  } finally {
-    deletingId.value = null
-  }
+    ElMessage.error(error instanceof ApiError && error.status === 409 ? '知识库中仍有文档，请先删除文档' : '知识库删除失败，请稍后重试')
+  } finally { deletingId.value = null }
 }
 
 onMounted(loadKnowledgeBases)
@@ -85,66 +73,52 @@ onMounted(loadKnowledgeBases)
   <main class="management-page">
     <header class="management-header">
       <div>
-        <RouterLink to="/" class="back-link">← 返回首页</RouterLink>
-        <p class="eyebrow">KNOWLEDGE BASES</p>
-        <h1>知识库管理</h1>
-        <p>建立资料边界，为后续文档导入和可追溯问答做好准备。</p>
+        <h1>Knowledge Bases</h1>
+        <p>Your local knowledge spaces for documents, search, and traceable answers.</p>
       </div>
       <div class="header-actions">
-        <ElButton :loading="loading" @click="loadKnowledgeBases">刷新</ElButton>
-        <ElButton type="primary" @click="openCreateDialog">创建知识库</ElButton>
+        <ElButton v-if="errorMessage" :loading="loading" size="small" text @click="loadKnowledgeBases">Retry</ElButton>
+        <ElButton type="primary" @click="openCreateDialog">New</ElButton>
       </div>
     </header>
 
-    <ElAlert v-if="errorMessage" :title="errorMessage" type="error" show-icon :closable="false" />
+    <ElAlert v-if="errorMessage" :title="errorMessage" type="error" show-icon :closable="false" style="max-width:1200px;margin:0 auto var(--space-lg)" />
 
-    <section class="knowledge-panel" :aria-busy="loading">
-      <div v-if="loading && items.length === 0" class="loading-state">正在加载知识库…</div>
-      <ElEmpty v-else-if="items.length === 0 && !errorMessage" description="暂无知识库" />
-      <div v-else class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>名称</th>
-              <th>描述</th>
-              <th>创建时间</th>
-              <th>更新时间</th>
-              <th><span class="sr-only">操作</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="knowledgeBase in items" :key="knowledgeBase.id">
-              <td class="name-cell">{{ knowledgeBase.name }}</td>
-              <td>{{ knowledgeBase.description || '暂无描述' }}</td>
-              <td>{{ formatDate(knowledgeBase.created_at) }}</td>
-              <td>{{ formatDate(knowledgeBase.updated_at) }}</td>
-              <td class="row-actions">
-                <RouterLink :to="`/knowledge-bases/${knowledgeBase.id}/documents`">
-                  <ElButton size="small">文档</ElButton>
-                </RouterLink>
-                <ElButton size="small" @click="openEditDialog(knowledgeBase)">编辑</ElButton>
-                <ElButton
-                  :data-testid="`delete-${knowledgeBase.id}`"
-                  size="small"
-                  type="danger"
-                  plain
-                  :loading="deletingId === knowledgeBase.id"
-                  :disabled="deletingId !== null"
-                  @click="confirmDelete(knowledgeBase)"
-                >
-                  删除
-                </ElButton>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+    <section :aria-busy="loading">
+      <div v-if="loading && items.length === 0" class="loading-state">Loading…</div>
+      <ElEmpty v-else-if="items.length === 0 && !errorMessage" description="No knowledge bases yet" />
+
+      <div v-else class="doc-list" style="max-width:1200px;margin:0 auto">
+        <div
+          v-for="kb in items"
+          :key="kb.id"
+          class="doc-item kb-item"
+        >
+          <RouterLink
+            :to="`/knowledge-bases/${kb.id}/documents`"
+            class="doc-main kb-item-link"
+          >
+            <div class="doc-name-row">
+              <span class="doc-name">{{ kb.name }}</span>
+            </div>
+            <div v-if="kb.description" class="doc-path" style="font-family:var(--font-sans);font-size:var(--font-size-base);color:var(--color-text-secondary)">{{ kb.description }}</div>
+            <div class="doc-meta-row">
+              <span class="doc-meta">Updated {{ formatDate(kb.updated_at) }}</span>
+            </div>
+          </RouterLink>
+          <ElDropdown trigger="click" :hide-on-click="true">
+            <button class="doc-more" aria-label="Actions">···</button>
+            <template #dropdown>
+              <ElDropdownMenu>
+                <ElDropdownItem @click="openEditDialog(kb)">Edit</ElDropdownItem>
+                <ElDropdownItem :data-testid="`delete-${kb.id}`" divided style="color:var(--color-error)" @click="confirmDelete(kb)">Delete</ElDropdownItem>
+              </ElDropdownMenu>
+            </template>
+          </ElDropdown>
+        </div>
       </div>
     </section>
 
-    <KnowledgeBaseFormDialog
-      v-model="dialogVisible"
-      :knowledge-base="editingKnowledgeBase"
-      @saved="handleSaved"
-    />
+    <KnowledgeBaseFormDialog v-model="dialogVisible" :knowledge-base="editingKnowledgeBase" @saved="handleSaved" />
   </main>
 </template>

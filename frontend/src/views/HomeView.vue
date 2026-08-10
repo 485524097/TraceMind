@@ -1,22 +1,24 @@
 <script setup lang="ts">
-import { ElButton } from 'element-plus'
 import { onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import { fetchHealth } from '@/services/health'
+import { listKnowledgeBases } from '@/services/knowledgeBases'
+import type { KnowledgeBase } from '@/types/knowledgeBase'
 
 type ServiceStatus = 'checking' | 'available' | 'unavailable'
-
 const serviceStatus = ref<ServiceStatus>('checking')
 const backendVersion = ref('')
+const recentKbs = ref<KnowledgeBase[]>([])
 
 async function checkBackend(): Promise<void> {
   serviceStatus.value = 'checking'
-  backendVersion.value = ''
   try {
     const health = await fetchHealth()
     serviceStatus.value = 'available'
     backendVersion.value = health.version
+    const kbs = await listKnowledgeBases()
+    recentKbs.value = kbs.items.slice(0, 3)
   } catch {
     serviceStatus.value = 'unavailable'
   }
@@ -26,27 +28,23 @@ onMounted(checkBackend)
 </script>
 
 <template>
-  <main class="page-shell">
-    <section class="hero-card">
-      <p class="eyebrow">LOCAL-FIRST · TRACEABLE</p>
+  <main class="home-view">
+    <div class="home-center">
       <h1>TraceMind</h1>
-      <p class="description">面向中文开发者的、本地优先、答案可追溯的 AI 个人知识库。</p>
-      <p class="phase">当前状态：知识库管理功能已可用</p>
-      <RouterLink to="/knowledge-bases" class="management-link">进入知识库管理 →</RouterLink>
-
-      <div class="service-panel" aria-live="polite">
-        <div>
-          <span class="label">后端服务</span>
-          <p v-if="serviceStatus === 'checking'" class="status checking">检查中</p>
-          <p v-else-if="serviceStatus === 'available'" class="status available">
-            服务正常<span v-if="backendVersion"> · v{{ backendVersion }}</span>
-          </p>
-          <p v-else class="status unavailable">服务不可用，请稍后重试</p>
-        </div>
-        <ElButton :loading="serviceStatus === 'checking'" type="primary" @click="checkBackend">
-          重新检查
-        </ElButton>
+      <p class="home-desc">Your local knowledge workspace.<br>Documents. Code. Answers with evidence.</p>
+      <RouterLink to="/knowledge-bases" class="home-cta">Open Knowledge Bases →</RouterLink>
+      <div v-if="recentKbs.length" class="home-recent">
+        <div class="home-recent-label">Recent</div>
+        <RouterLink
+          v-for="kb in recentKbs"
+          :key="kb.id"
+          :to="`/knowledge-bases/${kb.id}/documents`"
+          class="home-recent-item"
+        >{{ kb.name }}<span>{{ new Date(kb.updated_at).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' }) }}</span></RouterLink>
       </div>
-    </section>
+      <div v-if="serviceStatus === 'unavailable'" class="home-status">
+        Backend unavailable — <button class="home-retry" @click="checkBackend">retry</button>
+      </div>
+    </div>
   </main>
 </template>

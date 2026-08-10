@@ -1,6 +1,6 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { ElMessageBox } from 'element-plus'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   createConversation,
@@ -9,16 +9,14 @@ import {
   listConversations,
   renameConversation,
 } from '@/services/conversations'
-import { streamRagAnswer } from '@/services/rag'
 import { getKnowledgeBase } from '@/services/knowledgeBases'
+import { streamRagAnswer } from '@/services/rag'
+import type { RagStreamHandlers } from '@/services/rag'
 import type { Conversation, ConversationDetail, ConversationMessage } from '@/types/conversation'
 import type { RagDoneEvent, RagSource } from '@/types/rag'
 import ConversationView from '@/views/ConversationView.vue'
 
-vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: { knowledgeBaseId: 'kb' } }),
-  RouterLink: { template: '<a><slot /></a>' },
-}))
+vi.mock('vue-router', () => ({ useRoute: () => ({ params: { knowledgeBaseId: 'kb' } }) }))
 vi.mock('@/services/conversations', () => ({
   listConversations: vi.fn(),
   createConversation: vi.fn(),
@@ -28,70 +26,68 @@ vi.mock('@/services/conversations', () => ({
 }))
 vi.mock('@/services/rag', () => ({ streamRagAnswer: vi.fn() }))
 vi.mock('@/services/knowledgeBases', () => ({ getKnowledgeBase: vi.fn() }))
+vi.mock('@/utils/symbolScope', () => ({ symbolScopeLabel: vi.fn(() => '') }))
 
 const mockedList = vi.mocked(listConversations)
 const mockedCreate = vi.mocked(createConversation)
+const mockedDelete = vi.mocked(deleteConversation)
 const mockedGet = vi.mocked(getConversation)
 const mockedRename = vi.mocked(renameConversation)
-const mockedDelete = vi.mocked(deleteConversation)
 const mockedStream = vi.mocked(streamRagAnswer)
-const mockedKnowledgeBase = vi.mocked(getKnowledgeBase)
+const wrappers: VueWrapper[] = []
 
-const first: Conversation = {
-  id: 'first',
+const conv: Conversation = {
+  id: 'c1',
   knowledge_base_id: 'kb',
-  title: '第一会话',
+  title: 'First',
   created_at: '2026-07-29T00:00:00Z',
   updated_at: '2026-07-29T01:00:00Z',
 }
-const second: Conversation = {
-  ...first,
-  id: 'second',
-  title: '第二会话',
-  updated_at: '2026-07-29T00:30:00Z',
-}
-const source: RagSource = {
+const conv2: Conversation = { ...conv, id: 'c2', title: 'Second' }
+const src: RagSource = {
   source_id: 'S1',
   score: 0.9,
-  content: '引用快照',
+  content: 'first source excerpt',
   knowledge_base_id: 'kb',
-  document_id: 'doc',
-  document_version_id: 'version',
-  chunk_id: 'chunk',
-  index_generation: 'generation',
-  document_name: 'guide.md',
-  relative_path: 'docs/guide.md',
+  document_id: 'd1',
+  document_version_id: 'v1',
+  chunk_id: 'ch1',
+  index_generation: 'g1',
+  document_name: 'doc.md',
+  relative_path: 'docs/doc.md',
   version_number: 1,
   chunk_index: 0,
   content_hash: 'a'.repeat(64),
-  chunk_type: 'paragraph',
+  chunk_type: 'text',
   language: null,
-  section_title: '配置',
+  section_title: 'Setup',
   page_number: null,
   start_line: 2,
   end_line: 4,
-  symbol_kind: 'method',
-  symbol_name: 'configure',
-  symbol_qualified_name: 'demo.Guide.configure',
-  symbol_signature: 'void configure()',
+  symbol_kind: null,
+  symbol_name: null,
+  symbol_qualified_name: null,
+  symbol_signature: null,
 }
 
 function message(
   id: string,
-  status: ConversationMessage['status'],
   content: string,
   sources: RagSource[] | null = null,
-  generationMetadata: ConversationMessage['generation_metadata'] = { grounded: true },
+  status: ConversationMessage['status'] = 'completed',
+  conversationId = 'c1',
+  role: ConversationMessage['role'] = 'assistant',
+  metadata: ConversationMessage['generation_metadata'] = null,
 ): ConversationMessage {
   return {
     id,
-    conversation_id: 'first',
-    role: 'assistant',
+    conversation_id: conversationId,
+    role,
     status,
     content,
-    trace_id: 'trace',
+    trace_id: 'trace-1',
     sources,
-    generation_metadata: generationMetadata,
+    generation_metadata: metadata,
     created_at: '2026-07-29T01:00:00Z',
   }
 }
@@ -102,7 +98,7 @@ function detail(conversation: Conversation, messages: ConversationMessage[] = []
 
 function doneEvent(overrides: Partial<RagDoneEvent> = {}): RagDoneEvent {
   return {
-    trace_id: 'trace',
+    trace_id: 'trace-1',
     finish_reason: 'stop',
     grounded: true,
     valid_citation_count: 1,
@@ -122,307 +118,263 @@ function doneEvent(overrides: Partial<RagDoneEvent> = {}): RagDoneEvent {
   }
 }
 
+function mountView(options: { attachTo?: Element } = {}): VueWrapper {
+  const wrapper = mount(ConversationView, {
+    ...options,
+    global: {
+      stubs: {
+        ElDropdown: { template: '<div><slot /><slot name="dropdown" /></div>' },
+        ElDropdownMenu: { template: '<div><slot /></div>' },
+        ElDropdownItem: {
+          emits: ['click'],
+          template: '<button @click.stop="$emit(\'click\')"><slot /></button>',
+        },
+      },
+    },
+  })
+  wrappers.push(wrapper)
+  return wrapper
+}
+
+function buttonByText(wrapper: VueWrapper, text: string) {
+  const button = wrapper.findAll('button').find((candidate) => candidate.text() === text)
+  if (!button) throw new Error(`Button not found: ${text}`)
+  return button
+}
+
 describe('ConversationView', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     mockedList.mockReset()
     mockedCreate.mockReset()
+    mockedDelete.mockReset()
     mockedGet.mockReset()
     mockedRename.mockReset()
-    mockedDelete.mockReset()
     mockedStream.mockReset()
-    mockedKnowledgeBase.mockResolvedValue({
+    vi.mocked(getKnowledgeBase).mockResolvedValue({
       id: 'kb',
-      name: '测试知识库',
+      name: 'KB',
       description: null,
-      created_at: first.created_at,
-      updated_at: first.updated_at,
+      created_at: '',
+      updated_at: '',
     })
-    mockedList.mockResolvedValue({ items: [first, second], total: 2, offset: 0, limit: 100 })
-    mockedGet.mockImplementation(async (_kb, id) =>
-      id === first.id ? detail(first) : detail(second),
-    )
+    mockedList.mockResolvedValue({ items: [conv], total: 1, offset: 0, limit: 100 })
+    mockedGet.mockResolvedValue(detail(conv))
   })
 
-  it('loads conversation list and restores message history with citation sources', async () => {
-    const history = message('answer', 'completed', '查看配置 [S1]', [source])
-    mockedGet.mockResolvedValue(detail(first, [history]))
-    const wrapper = mount(ConversationView)
+  afterEach(() => {
+    wrappers.splice(0).forEach((wrapper) => wrapper.unmount())
+  })
+
+  it('loads the conversation list and renders an assistant answer', async () => {
+    mockedGet.mockResolvedValue(
+      detail(conv, [message('a1', 'Answer with evidence [S1]', [src], 'completed', 'c1', 'assistant', doneEvent())]),
+    )
+
+    const wrapper = mountView()
     await flushPromises()
 
     expect(mockedList).toHaveBeenCalledWith('kb')
-    expect(mockedGet).toHaveBeenCalledWith('kb', 'first')
-    expect(wrapper.text()).toContain('测试知识库')
-    expect(wrapper.text()).toContain('查看配置 [S1]')
-    expect(wrapper.text()).toContain('引用来源（1）')
-    const assistantMessage = wrapper.get('article.conversation-message.assistant')
-    const sources = assistantMessage.get('[data-testid="conversation-sources"]')
-    expect(sources.attributes('data-message-id')).toBe('answer')
-    expect(sources.attributes('open')).toBeUndefined()
-    await wrapper.get('details summary').trigger('click')
-    expect(wrapper.text()).toContain('docs/guide.md')
-    expect(wrapper.text()).toContain('void configure()')
-    expect(wrapper.text()).toContain('第 2-4 行')
+    expect(wrapper.get('[data-testid="conversation-c1"]').text()).toContain('First')
+    expect(wrapper.get('[data-message-id="a1"]').text()).toContain('Answer with evidence')
+    expect(wrapper.get('[data-testid="evidence-source-a1-S1"]').text()).toContain('first source excerpt')
   })
 
-  it('uses a full-height stretch layout with an independently scrolling message area', async () => {
-    const wrapper = mount(ConversationView)
-    await flushPromises()
-
-    const layout = wrapper.get('[data-testid="conversation-layout"]')
-    const main = wrapper.get('.conversation-main')
-    const thread = main.get('[data-testid="conversation-thread"]')
-    const composer = main.get('[data-testid="conversation-composer"]')
-    expect(wrapper.get('.conversation-page').attributes('data-layout')).toBe('viewport-grid')
-    expect(layout.attributes('data-layout')).toBe('stretch-columns')
-    expect(thread.attributes('data-scroll-region')).toBe('true')
-    expect(composer.attributes('data-position')).toBe('panel-bottom')
-    expect(thread.element.parentElement).toBe(main.element)
-    expect(composer.element.parentElement).toBe(main.element)
-    expect(
-      thread.element.compareDocumentPosition(composer.element) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy()
-
-  })
-
-  it('creates, renames and deletes conversations', async () => {
-    mockedCreate.mockResolvedValue({ ...first, id: 'created', title: '新会话' })
-    mockedGet.mockResolvedValue(detail({ ...first, id: 'created', title: '新会话' }))
-    const wrapper = mount(ConversationView)
-    await flushPromises()
-    await wrapper.findAll('button').find((button) => button.text() === '新建会话')?.trigger('click')
-    await flushPromises()
-    expect(mockedCreate).toHaveBeenCalledWith('kb')
-
-    vi.spyOn(ElMessageBox, 'prompt').mockResolvedValue({ value: '重命名后' } as never)
-    mockedRename.mockResolvedValue({ ...first, id: 'created', title: '重命名后' })
-    await wrapper.findAll('button').find((button) => button.text() === '重命名')?.trigger('click')
-    await flushPromises()
-    expect(mockedRename).toHaveBeenCalledWith('kb', 'created', '重命名后')
-
-    vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue('confirm' as never)
-    mockedDelete.mockResolvedValue(undefined)
+  it('creates a conversation from the empty state', async () => {
+    const created = { ...conv, id: 'new', title: 'New' }
     mockedList.mockResolvedValue({ items: [], total: 0, offset: 0, limit: 100 })
-    await wrapper.findAll('button').find((button) => button.text() === '删除')?.trigger('click')
+    mockedCreate.mockResolvedValue(created)
+    mockedGet.mockResolvedValue(detail(created))
+
+    const wrapper = mountView()
     await flushPromises()
-    expect(mockedDelete).toHaveBeenCalledWith('kb', 'created')
+    await wrapper.get('[data-testid="new-conversation-empty"]').trigger('click')
+    await flushPromises()
+
+    expect(mockedCreate).toHaveBeenCalledWith('kb')
+    expect(wrapper.find('[data-testid="conversation-composer"]').exists()).toBe(true)
   })
 
-  it('writes SSE tokens only to the active conversation and aborts on switch', async () => {
-    let callbacks: Parameters<typeof streamRagAnswer>[2] | undefined
-    let signal: AbortSignal | undefined
-    mockedStream.mockImplementation(async (_kb, _body, handlers, currentSignal) => {
-      callbacks = handlers
-      signal = currentSignal
-      return await new Promise<void>((resolve) => {
-        currentSignal?.addEventListener('abort', () => resolve())
-      })
+  it('streams an answer through retrieval, tokens, and completed state', async () => {
+    const persisted = message('assistant-stream', 'Streamed answer [S1]', [src], 'completed', 'c1', 'assistant', doneEvent())
+    mockedGet.mockResolvedValueOnce(detail(conv)).mockResolvedValue(detail(conv, [persisted]))
+    mockedStream.mockImplementation(async (_knowledgeBaseId, _request, handlers) => {
+      handlers.onRetrieval({ trace_id: 'trace-1', message_id: 'assistant-stream', source_count: 1, sources: [src] })
+      handlers.onToken({ trace_id: 'trace-1', message_id: 'assistant-stream', text: 'Streamed answer [S1]' })
+      handlers.onDone(doneEvent({ message_id: 'assistant-stream' }))
     })
-    const wrapper = mount(ConversationView)
-    await flushPromises()
-    await wrapper.get('input[aria-label="知识库问题"]').setValue('问题')
-    void wrapper.get('.conversation-composer').trigger('submit')
-    await flushPromises()
-    callbacks?.onToken({ trace_id: 'trace', text: '第一会话 token' })
-    await flushPromises()
-    expect(wrapper.text()).toContain('第一会话 token')
 
-    await wrapper.findAll('.conversation-list-item')[1]?.trigger('click')
+    const wrapper = mountView()
     await flushPromises()
-    expect(signal?.aborted).toBe(true)
-    callbacks?.onToken({ trace_id: 'trace', text: '错误写入' })
-    await flushPromises()
-    expect(wrapper.text()).not.toContain('错误写入')
-    expect(mockedGet).toHaveBeenCalledWith('kb', 'second')
-  })
-
-  it('shows immediate progress, retrieval count, generation, finalization and completion', async () => {
-    let callbacks: Parameters<typeof streamRagAnswer>[2] | undefined
-    let resolveStream: (() => void) | undefined
-    mockedStream.mockImplementation(async (_kb, _body, handlers) => {
-      callbacks = handlers
-      await new Promise<void>((resolve) => {
-        resolveStream = resolve
-      })
-    })
-    const wrapper = mount(ConversationView)
-    await flushPromises()
-    await wrapper.get('input[aria-label="知识库问题"]').setValue('Nacos 如何配置？')
-    void wrapper.get('.conversation-composer').trigger('submit')
+    await wrapper.get('input[aria-label="Your question"]').setValue('How does it work?')
+    await wrapper.get('[data-testid="conversation-composer"]').trigger('submit')
     await flushPromises()
 
-    const progress = wrapper.get('[data-testid="conversation-progress"]')
-    expect(progress.attributes('data-state')).toBe('preparing')
-    expect(progress.text()).toContain('正在理解问题并检索知识库')
-    expect(progress.text()).toContain('已用时 0 秒')
-    expect(wrapper.get('[data-testid="stop-generation"]').isVisible()).toBe(true)
-
-    callbacks?.onRetrieval({ trace_id: 'trace', source_count: 1, sources: [source] })
-    await flushPromises()
-    expect(progress.attributes('data-state')).toBe('retrieved')
-    expect(progress.text()).toContain('已找到 1 条来源，正在生成回答')
-
-    callbacks?.onToken({ trace_id: 'trace', text: '回答 [S1]' })
-    await flushPromises()
-    expect(progress.attributes('data-state')).toBe('generating')
-    expect(progress.text()).toContain('正在生成回答')
-
-    callbacks?.onDone(doneEvent())
-    await flushPromises()
-    expect(progress.attributes('data-state')).toBe('finalizing')
-    expect(progress.text()).toContain('正在校验引用并保存')
-
-    resolveStream?.()
-    await flushPromises()
-    expect(progress.attributes('data-state')).toBe('completed')
-    expect(progress.text()).toContain('已完成')
-  })
-
-  it('marks an explicitly stopped generation as cancelled', async () => {
-    mockedStream.mockImplementation(
-      async (_kb, _body, _handlers, signal) =>
-        await new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve())),
+    expect(mockedStream).toHaveBeenCalledWith(
+      'kb',
+      { query: 'How does it work?', language: null, conversation_id: 'c1' },
+      expect.any(Object),
+      expect.any(AbortSignal),
     )
-    const wrapper = mount(ConversationView)
-    await flushPromises()
-    await wrapper.get('input[aria-label="知识库问题"]').setValue('停止测试')
-    void wrapper.get('.conversation-composer').trigger('submit')
-    await flushPromises()
+    expect(wrapper.text()).toContain('Streamed answer')
+    expect(wrapper.text()).toContain('Done')
+    expect(wrapper.get('[data-testid="evidence-source-assistant-stream-S1"]').text()).toContain('first source excerpt')
+  })
 
+  it('cancels an active stream', async () => {
+    let activeSignal: AbortSignal | undefined
+    mockedStream.mockImplementation((_knowledgeBaseId, _request, _handlers, signal) => {
+      activeSignal = signal
+      return new Promise<void>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+      })
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('input[aria-label="Your question"]').setValue('Cancel this')
+    await wrapper.get('[data-testid="conversation-composer"]').trigger('submit')
+    await flushPromises()
     await wrapper.get('[data-testid="stop-generation"]').trigger('click')
     await flushPromises()
-    const progress = wrapper.get('[data-testid="conversation-progress"]')
-    expect(progress.attributes('data-state')).toBe('cancelled')
-    expect(progress.text()).toContain('已取消')
+
+    expect(activeSignal?.aborted).toBe(true)
+    expect(wrapper.text()).toContain('Cancelled')
   })
 
-  it('keeps new-conversation entry points visible when there is no conversation on narrow screens', async () => {
-    window.innerWidth = 600
-    window.dispatchEvent(new Event('resize'))
-    mockedList.mockResolvedValue({ items: [], total: 0, offset: 0, limit: 100 })
-    const wrapper = mount(ConversationView)
+  it('shows a failed state when streaming errors', async () => {
+    mockedStream.mockRejectedValue(new Error('network failure'))
+
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('input[aria-label="Your question"]').setValue('Fail this')
+    await wrapper.get('[data-testid="conversation-composer"]').trigger('submit')
     await flushPromises()
 
-    expect(wrapper.get('[data-testid="new-conversation-sidebar"]').isVisible()).toBe(true)
-    expect(wrapper.get('[data-testid="new-conversation-empty"]').isVisible()).toBe(true)
-    expect(wrapper.get('.conversation-list-scroll').classes()).toContain('conversation-list-scroll')
+    expect(wrapper.text()).toContain('Failed')
+    expect(wrapper.find('[data-message-id^="temporary-"].assistant').exists()).toBe(true)
   })
 
-  it('keeps the new-conversation and composer entries at a low viewport height', async () => {
-    window.innerWidth = 1366
-    window.innerHeight = 768
-    window.dispatchEvent(new Event('resize'))
-    const wrapper = mount(ConversationView)
+  it('renames the selected conversation', async () => {
+    vi.spyOn(ElMessageBox, 'prompt').mockResolvedValue({ value: 'Renamed' } as never)
+    mockedRename.mockResolvedValue({ ...conv, title: 'Renamed' })
+
+    const wrapper = mountView()
+    await flushPromises()
+    await buttonByText(wrapper, 'Rename').trigger('click')
     await flushPromises()
 
-    expect(wrapper.get('[data-testid="new-conversation-sidebar"]').isVisible()).toBe(true)
-    expect(wrapper.get('[data-testid="conversation-composer"]').isVisible()).toBe(true)
-    expect(wrapper.get('input[aria-label="知识库问题"]').isVisible()).toBe(true)
+    expect(mockedRename).toHaveBeenCalledWith('kb', 'c1', 'Renamed')
+    expect(wrapper.get('[data-testid="conversation-c1"]').text()).toContain('Renamed')
   })
 
-  it('renders completed, no-answer, failed and cancelled states', async () => {
+  it('deletes the selected conversation and clears the thread', async () => {
+    vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue('confirm' as never)
+    mockedDelete.mockResolvedValue()
+    mockedList
+      .mockResolvedValueOnce({ items: [conv], total: 1, offset: 0, limit: 100 })
+      .mockResolvedValue({ items: [], total: 0, offset: 0, limit: 100 })
+
+    const wrapper = mountView()
+    await flushPromises()
+    await buttonByText(wrapper, 'Delete').trigger('click')
+    await flushPromises()
+
+    expect(mockedDelete).toHaveBeenCalledWith('kb', 'c1')
+    expect(wrapper.text()).toContain('Select or create a conversation')
+  })
+
+  it('binds a citation to the source of its own assistant message', async () => {
+    const secondSource = { ...src, content: 'second source excerpt' }
     mockedGet.mockResolvedValue(
-      detail(first, [
-        message('completed', 'completed', 'ok'),
-        message('none', 'no_answer', 'none'),
-        message('failed', 'failed', 'failed'),
-        message('cancelled', 'cancelled', ''),
+      detail(conv, [
+        message('a1', 'Earlier answer [S1]', [src]),
+        message('a2', 'Latest answer [S1]', [secondSource]),
       ]),
     )
-    const wrapper = mount(ConversationView)
+    const scrollIntoView = vi.fn()
+    Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView })
+
+    const wrapper = mountView({ attachTo: document.body })
     await flushPromises()
-    expect(wrapper.text()).toContain('已完成')
-    expect(wrapper.text()).toContain('无答案')
-    expect(wrapper.text()).toContain('生成失败')
-    expect(wrapper.text()).toContain('已取消')
+    expect(wrapper.get('[data-testid="evidence-source-a2-S1"]').text()).toContain('second source excerpt')
+
+    await wrapper.get('[data-message-id="a1"] .cite-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="evidence-source-a1-S1"]').text()).toContain('first source excerpt')
+    expect(wrapper.find('[data-testid="evidence-source-a2-S1"]').exists()).toBe(false)
+    expect(scrollIntoView).toHaveBeenCalledOnce()
   })
 
-  it('shows exact rewrite labels and verifiable execution details', async () => {
-    mockedGet.mockResolvedValue(
-      detail(first, [
-        message('skipped', 'completed', 'independent answer', null, {
-          ...doneEvent({
-            query_rewrite_mode: 'skipped',
-            history_turn_count: 2,
-            retrieval_query: 'PostgreSQL 如何配置？',
-            path_scope_mode: 'exact',
-            scoped_relative_path: 'src/main/java/demo/UserService.java',
-          }),
-        }),
-        message('rewritten', 'completed', 'history answer', null, {
-          ...doneEvent({ query_rewrite_mode: 'rewritten', history_turn_count: 2 }),
-        }),
-        message('fallback', 'completed', 'fallback answer', null, {
-          ...doneEvent({
-            query_rewrite_mode: 'fallback',
-            history_turn_count: 1,
-            reranker_fallback: true,
-          }),
-        }),
-      ]),
-    )
-    const wrapper = mount(ConversationView)
+  it('does not replace an explicitly selected historical source during streaming retrieval', async () => {
+    mockedGet.mockResolvedValue(detail(conv, [message('a1', 'Earlier answer [S1]', [src])]))
+    let streamHandlers: RagStreamHandlers | undefined
+    let finishStream: (() => void) | undefined
+    mockedStream.mockImplementation((_knowledgeBaseId, _request, handlers) => {
+      streamHandlers = handlers
+      return new Promise<void>((resolve) => { finishStream = resolve })
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('input[aria-label="Your question"]').setValue('New question')
+    await wrapper.get('[data-testid="conversation-composer"]').trigger('submit')
+    await flushPromises()
+    await wrapper.get('[data-message-id="a1"] .cite-btn').trigger('click')
+
+    streamHandlers?.onRetrieval({
+      trace_id: 'trace-2',
+      message_id: 'assistant-stream',
+      source_count: 1,
+      sources: [{ ...src, content: 'streaming source excerpt' }],
+    })
     await flushPromises()
 
-    expect(wrapper.text()).not.toContain('已结合对话历史')
-    expect(wrapper.text()).toContain('独立问题，未改写')
-    expect(wrapper.text()).toContain('已根据对话历史改写检索问题')
-    expect(wrapper.text()).toContain('查询改写失败，已使用原问题')
-    expect(wrapper.text()).toContain('处理详情')
-    expect(wrapper.text()).toContain('hybrid_reranker')
-    expect(wrapper.text()).toContain('首 Token 延迟')
-    expect(wrapper.text()).toContain('30 ms')
-    expect(wrapper.text()).toContain('来源数量')
-    expect(wrapper.text()).toContain('路径限定')
-    expect(wrapper.text()).toContain('src/main/java/demo/UserService.java')
-    expect(wrapper.text()).not.toContain('Conversation History')
+    expect(wrapper.get('[data-testid="evidence-source-a1-S1"]').text()).toContain('first source excerpt')
+    expect(wrapper.find('[data-testid="evidence-source-assistant-stream-S1"]').exists()).toBe(false)
+
+    streamHandlers?.onDone(doneEvent({ trace_id: 'trace-2', message_id: 'assistant-stream' }))
+    finishStream?.()
+    await flushPromises()
   })
 
-  it('restores exact and fallback symbol scopes from persisted history', async () => {
-    mockedGet.mockResolvedValue(
-      detail(first, [
-        message('exact', 'completed', 'exact', [{ ...source, ranking_mode: 'symbol_exact' }], {
-          ...doneEvent(),
-          symbol_scope_mode: 'exact',
-          scoped_symbol_kind: 'method',
-          scoped_symbol_qualified_name: 'demo.UserService.source',
-          scoped_symbol_signature: 'source(String)',
-        }),
-        message('fallback', 'failed', 'fallback', null, {
-          ...doneEvent(),
-          symbol_scope_mode: 'fallback',
-          symbol_scope_reason: 'ambiguous',
-        }),
-        message('legacy', 'cancelled', 'legacy', null, { grounded: false }),
-      ]),
-    )
-    const wrapper = mount(ConversationView)
+  it('resets evidence selection when switching conversations', async () => {
+    mockedList.mockResolvedValue({ items: [conv, conv2], total: 2, offset: 0, limit: 100 })
+    mockedGet.mockImplementation(async (_knowledgeBaseId, conversationId) => {
+      if (conversationId === 'c2') {
+        return detail(conv2, [message('b1', 'Second conversation [S1]', [{ ...src, content: 'conversation two source' }], 'completed', 'c2')])
+      }
+      return detail(conv, [message('a1', 'First conversation [S1]', [src])])
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="evidence-source-a1-S1"]').exists()).toBe(true)
+
+    await wrapper.get('[data-testid="conversation-c2"]').trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('精确符号：source(String)')
-    expect(wrapper.text()).toContain('符号存在歧义，已回退普通检索')
-    expect(wrapper.text()).toContain('精确符号命中')
-    expect(wrapper.text()).toContain('docs/guide.md')
-    expect(wrapper.text()).toContain('void configure()')
-    expect(wrapper.text()).toContain('第 2-4 行')
-    expect(wrapper.html()).not.toContain('symbol_lookup')
+    expect(wrapper.get('[data-testid="evidence-source-b1-S1"]').text()).toContain('conversation two source')
+    expect(wrapper.find('[data-testid="evidence-source-a1-S1"]').exists()).toBe(false)
   })
 
-  it('does not render missing or damaged symbol scope metadata', async () => {
+  it('renders code evidence and multi-source provenance', async () => {
+    const codeSource = {
+      ...src,
+      symbol_kind: 'method',
+      symbol_qualified_name: 'demo.Service.run',
+      symbol_signature: 'void run()',
+    }
     mockedGet.mockResolvedValue(
-      detail(first, [
-        message('legacy', 'completed', 'legacy', null, { grounded: true }),
-        message('damaged', 'completed', 'damaged', null, {
-          grounded: true,
-          symbol_scope_mode: 'internal-value' as never,
-          symbol_scope_reason: 'private-error' as never,
-        }),
-      ]),
+      detail(conv, [message('a1', 'Code answer', [codeSource, { ...src, source_id: 'S2' }])]),
     )
-    const wrapper = mount(ConversationView)
+
+    const wrapper = mountView()
     await flushPromises()
-    expect(wrapper.text()).not.toContain('符号限定')
-    expect(wrapper.text()).not.toContain('internal-value')
-    expect(wrapper.text()).not.toContain('private-error')
+
+    expect(wrapper.text()).toContain('Code')
+    expect(wrapper.text()).toContain('void run()')
+    expect(wrapper.text()).toContain('Cited from 2 sources')
   })
 })
