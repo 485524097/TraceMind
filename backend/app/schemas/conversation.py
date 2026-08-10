@@ -62,6 +62,7 @@ class ConversationMessageResponse(BaseModel):
     sources: list[dict[str, Any]] | None
     generation_metadata: dict[str, Any] | None
     created_at: datetime
+    knowledge_entry_id: UUID | None = None
 
     @field_validator("generation_metadata", mode="before")
     @classmethod

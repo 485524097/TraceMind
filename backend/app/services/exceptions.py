@@ -113,6 +113,30 @@ class ConversationNotFoundError(ConversationError):
         self.conversation_id = conversation_id
 
 
+class KnowledgeEntryError(Exception):
+    """Base exception for structured problem and solution knowledge."""
+
+
+class KnowledgeEntryNotFoundError(KnowledgeEntryError):
+    def __init__(self, entry_id: UUID) -> None:
+        super().__init__(f"Knowledge entry {entry_id} was not found")
+        self.entry_id = entry_id
+
+
+class KnowledgeEntrySourceNotFoundError(KnowledgeEntryError):
+    pass
+
+
+class InvalidKnowledgeEntrySourceError(KnowledgeEntryError):
+    pass
+
+
+class KnowledgeEntryAlreadyExistsError(KnowledgeEntryError):
+    def __init__(self, source_message_id: UUID) -> None:
+        super().__init__(f"Knowledge entry already exists for answer {source_message_id}")
+        self.source_message_id = source_message_id
+
+
 __all__ = [
     "DocumentAlreadyParsedError",
     "DocumentAlreadyProcessingError",

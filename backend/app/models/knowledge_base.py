@@ -10,6 +10,7 @@ from app.models.base import Base
 if TYPE_CHECKING:
     from app.models.conversation import Conversation
     from app.models.document import Document
+    from app.models.knowledge_entry import KnowledgeEntry
 
 
 class KnowledgeBase(Base):
@@ -38,6 +39,10 @@ class KnowledgeBase(Base):
     conversations: Mapped[list["Conversation"]] = relationship(
         back_populates="knowledge_base",
         cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="raise",
+    )
+    knowledge_entries: Mapped[list["KnowledgeEntry"]] = relationship(
         passive_deletes=True,
         lazy="raise",
     )

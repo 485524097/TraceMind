@@ -236,6 +236,18 @@ code excerpt…
 - Source TYPE distinguished in Evidence Inspector via labels, not citation color
 - Clicking a citation opens/focuses the Evidence Inspector
 
+## Problem & Solution Knowledge
+
+Knowledge entries are durable engineering records saved from completed answers.
+
+- The Knowledge list uses editorial resource rows, not a CRUD table or card grid.
+- Search, validation status and tag filters remain compact and secondary to the entries.
+- A detail page gives the solution primary reading space and keeps Evidence visible as L1 content.
+- Background, root cause and failed attempts appear only when present.
+- The original conversation is linked when it still exists; immutable question, answer and source
+  snapshots remain visible after it is deleted.
+- Editing changes the maintained knowledge fields, never the provenance snapshots.
+
 ---
 
 ## Visual Language

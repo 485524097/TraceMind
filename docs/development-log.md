@@ -195,3 +195,43 @@
 - **未采用方案**：未单独引入 ADR 工具或第三方知识库，避免 MVP 阶段增加维护系统和访问依赖。
 - **验证**：确认目录和文件已创建；未执行代码测试，因为没有修改业务代码。
 - **遗留项**：首个检索/RAG 功能开发时，应补充首份架构决策和评测基线。
+# 2026-08-11 — Stage 13 Problem & Solution Knowledge
+
+## 问题与约束
+
+Conversation answers lacked a durable structured knowledge lifecycle. The implementation had to
+preserve traceable evidence while staying independent from Retrieval and avoiding Tag/Source
+subsystems.
+
+## 采用方案
+
+- Added one `knowledge_entries` table with editable fields, normalized tag values, nullable source
+  foreign keys and immutable server-derived snapshots.
+- Enforced one entry per completed assistant answer and same-KB provenance.
+- Added Knowledge list/detail/edit/delete UI and a shared Evidence source renderer.
+- Kept mutations within Service-layer transactions and protected non-empty knowledge bases.
+
+## 未采用方案
+
+Tag tables, source association tables, manual entries and new full-text infrastructure were
+rejected as unnecessary for the MVP. Retrieval and Qdrant were not changed.
+
+## 验证与结果
+
+- Backend gates: Ruff check/format and mypy (95 source files) passed; pytest completed with
+  475 passed and 24 skipped.
+- Disposable PostgreSQL 18 migration/constraint/`SET NULL` integration completed with 4 passed;
+  the test database used temporary credentials and no persistent volume.
+- Frontend type-check, lint and production build passed; Vitest completed with 18 files and
+  87 tests passed. The repository-wide Prettier check still reports 21 baseline files (including
+  the already non-Prettier `main.css`); all new Stage 13 Vue/TypeScript files pass targeted
+  Prettier validation. Unrelated baseline files were intentionally not reformatted.
+- Headless Chrome walkthrough covered Knowledge list, detail, Evidence and a 500 px narrow
+  viewport. The content and Evidence remain accessible without horizontal page overflow or
+  console/runtime errors. Save/edit/delete state transitions are covered by Vitest and API tests
+  against the same public contracts.
+
+## 遗留风险
+
+Substring search and canonical lowercase-like tags are intentional MVP limits. Snapshots preserve
+deleted-document evidence, but later Knowledge Map relationships only include live documents.

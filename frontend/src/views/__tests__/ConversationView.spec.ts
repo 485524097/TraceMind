@@ -10,13 +10,18 @@ import {
   renameConversation,
 } from '@/services/conversations'
 import { getKnowledgeBase } from '@/services/knowledgeBases'
+import { createKnowledgeEntry } from '@/services/knowledgeEntries'
 import { streamRagAnswer } from '@/services/rag'
 import type { RagStreamHandlers } from '@/services/rag'
 import type { Conversation, ConversationDetail, ConversationMessage } from '@/types/conversation'
 import type { RagDoneEvent, RagSource } from '@/types/rag'
 import ConversationView from '@/views/ConversationView.vue'
 
-vi.mock('vue-router', () => ({ useRoute: () => ({ params: { knowledgeBaseId: 'kb' } }) }))
+const routerPush = vi.fn()
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ params: { knowledgeBaseId: 'kb' } }),
+  useRouter: () => ({ push: routerPush }),
+}))
 vi.mock('@/services/conversations', () => ({
   listConversations: vi.fn(),
   createConversation: vi.fn(),
@@ -26,6 +31,7 @@ vi.mock('@/services/conversations', () => ({
 }))
 vi.mock('@/services/rag', () => ({ streamRagAnswer: vi.fn() }))
 vi.mock('@/services/knowledgeBases', () => ({ getKnowledgeBase: vi.fn() }))
+vi.mock('@/services/knowledgeEntries', () => ({ createKnowledgeEntry: vi.fn() }))
 vi.mock('@/utils/symbolScope', () => ({ symbolScopeLabel: vi.fn(() => '') }))
 
 const mockedList = vi.mocked(listConversations)
@@ -34,6 +40,7 @@ const mockedDelete = vi.mocked(deleteConversation)
 const mockedGet = vi.mocked(getConversation)
 const mockedRename = vi.mocked(renameConversation)
 const mockedStream = vi.mocked(streamRagAnswer)
+const mockedCreateKnowledge = vi.mocked(createKnowledgeEntry)
 const wrappers: VueWrapper[] = []
 
 const conv: Conversation = {
@@ -92,7 +99,10 @@ function message(
   }
 }
 
-function detail(conversation: Conversation, messages: ConversationMessage[] = []): ConversationDetail {
+function detail(
+  conversation: Conversation,
+  messages: ConversationMessage[] = [],
+): ConversationDetail {
   return { ...conversation, messages }
 }
 
@@ -129,6 +139,12 @@ function mountView(options: { attachTo?: Element } = {}): VueWrapper {
           emits: ['click'],
           template: '<button @click.stop="$emit(\'click\')"><slot /></button>',
         },
+        KnowledgeEntryFormDialog: {
+          props: ['modelValue'],
+          emits: ['submit'],
+          template:
+            "<button v-if=\"modelValue\" data-testid=\"submit-knowledge\" @click=\"$emit('submit', { question: 'Question', background: null, root_cause: null, solution: 'Answer', failed_attempts: [], validation_status: 'unverified', tags: [] })\">Submit knowledge</button>",
+        },
       },
     },
   })
@@ -151,6 +167,7 @@ describe('ConversationView', () => {
     mockedGet.mockReset()
     mockedRename.mockReset()
     mockedStream.mockReset()
+    mockedCreateKnowledge.mockReset()
     vi.mocked(getKnowledgeBase).mockResolvedValue({
       id: 'kb',
       name: 'KB',
@@ -168,7 +185,17 @@ describe('ConversationView', () => {
 
   it('loads the conversation list and renders an assistant answer', async () => {
     mockedGet.mockResolvedValue(
-      detail(conv, [message('a1', 'Answer with evidence [S1]', [src], 'completed', 'c1', 'assistant', doneEvent())]),
+      detail(conv, [
+        message(
+          'a1',
+          'Answer with evidence [S1]',
+          [src],
+          'completed',
+          'c1',
+          'assistant',
+          doneEvent(),
+        ),
+      ]),
     )
 
     const wrapper = mountView()
@@ -177,7 +204,9 @@ describe('ConversationView', () => {
     expect(mockedList).toHaveBeenCalledWith('kb')
     expect(wrapper.get('[data-testid="conversation-c1"]').text()).toContain('First')
     expect(wrapper.get('[data-message-id="a1"]').text()).toContain('Answer with evidence')
-    expect(wrapper.get('[data-testid="evidence-source-a1-S1"]').text()).toContain('first source excerpt')
+    expect(wrapper.get('[data-testid="evidence-source-a1-S1"]').text()).toContain(
+      'first source excerpt',
+    )
   })
 
   it('creates a conversation from the empty state', async () => {
@@ -196,11 +225,28 @@ describe('ConversationView', () => {
   })
 
   it('streams an answer through retrieval, tokens, and completed state', async () => {
-    const persisted = message('assistant-stream', 'Streamed answer [S1]', [src], 'completed', 'c1', 'assistant', doneEvent())
+    const persisted = message(
+      'assistant-stream',
+      'Streamed answer [S1]',
+      [src],
+      'completed',
+      'c1',
+      'assistant',
+      doneEvent(),
+    )
     mockedGet.mockResolvedValueOnce(detail(conv)).mockResolvedValue(detail(conv, [persisted]))
     mockedStream.mockImplementation(async (_knowledgeBaseId, _request, handlers) => {
-      handlers.onRetrieval({ trace_id: 'trace-1', message_id: 'assistant-stream', source_count: 1, sources: [src] })
-      handlers.onToken({ trace_id: 'trace-1', message_id: 'assistant-stream', text: 'Streamed answer [S1]' })
+      handlers.onRetrieval({
+        trace_id: 'trace-1',
+        message_id: 'assistant-stream',
+        source_count: 1,
+        sources: [src],
+      })
+      handlers.onToken({
+        trace_id: 'trace-1',
+        message_id: 'assistant-stream',
+        text: 'Streamed answer [S1]',
+      })
       handlers.onDone(doneEvent({ message_id: 'assistant-stream' }))
     })
 
@@ -218,7 +264,9 @@ describe('ConversationView', () => {
     )
     expect(wrapper.text()).toContain('Streamed answer')
     expect(wrapper.text()).toContain('Done')
-    expect(wrapper.get('[data-testid="evidence-source-assistant-stream-S1"]').text()).toContain('first source excerpt')
+    expect(wrapper.get('[data-testid="evidence-source-assistant-stream-S1"]').text()).toContain(
+      'first source excerpt',
+    )
   })
 
   it('cancels an active stream', async () => {
@@ -293,16 +341,23 @@ describe('ConversationView', () => {
       ]),
     )
     const scrollIntoView = vi.fn()
-    Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView })
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    })
 
     const wrapper = mountView({ attachTo: document.body })
     await flushPromises()
-    expect(wrapper.get('[data-testid="evidence-source-a2-S1"]').text()).toContain('second source excerpt')
+    expect(wrapper.get('[data-testid="evidence-source-a2-S1"]').text()).toContain(
+      'second source excerpt',
+    )
 
     await wrapper.get('[data-message-id="a1"] .cite-btn').trigger('click')
     await flushPromises()
 
-    expect(wrapper.get('[data-testid="evidence-source-a1-S1"]').text()).toContain('first source excerpt')
+    expect(wrapper.get('[data-testid="evidence-source-a1-S1"]').text()).toContain(
+      'first source excerpt',
+    )
     expect(wrapper.find('[data-testid="evidence-source-a2-S1"]').exists()).toBe(false)
     expect(scrollIntoView).toHaveBeenCalledOnce()
   })
@@ -313,7 +368,9 @@ describe('ConversationView', () => {
     let finishStream: (() => void) | undefined
     mockedStream.mockImplementation((_knowledgeBaseId, _request, handlers) => {
       streamHandlers = handlers
-      return new Promise<void>((resolve) => { finishStream = resolve })
+      return new Promise<void>((resolve) => {
+        finishStream = resolve
+      })
     })
 
     const wrapper = mountView()
@@ -331,7 +388,9 @@ describe('ConversationView', () => {
     })
     await flushPromises()
 
-    expect(wrapper.get('[data-testid="evidence-source-a1-S1"]').text()).toContain('first source excerpt')
+    expect(wrapper.get('[data-testid="evidence-source-a1-S1"]').text()).toContain(
+      'first source excerpt',
+    )
     expect(wrapper.find('[data-testid="evidence-source-assistant-stream-S1"]').exists()).toBe(false)
 
     streamHandlers?.onDone(doneEvent({ trace_id: 'trace-2', message_id: 'assistant-stream' }))
@@ -343,7 +402,15 @@ describe('ConversationView', () => {
     mockedList.mockResolvedValue({ items: [conv, conv2], total: 2, offset: 0, limit: 100 })
     mockedGet.mockImplementation(async (_knowledgeBaseId, conversationId) => {
       if (conversationId === 'c2') {
-        return detail(conv2, [message('b1', 'Second conversation [S1]', [{ ...src, content: 'conversation two source' }], 'completed', 'c2')])
+        return detail(conv2, [
+          message(
+            'b1',
+            'Second conversation [S1]',
+            [{ ...src, content: 'conversation two source' }],
+            'completed',
+            'c2',
+          ),
+        ])
       }
       return detail(conv, [message('a1', 'First conversation [S1]', [src])])
     })
@@ -355,7 +422,9 @@ describe('ConversationView', () => {
     await wrapper.get('[data-testid="conversation-c2"]').trigger('click')
     await flushPromises()
 
-    expect(wrapper.get('[data-testid="evidence-source-b1-S1"]').text()).toContain('conversation two source')
+    expect(wrapper.get('[data-testid="evidence-source-b1-S1"]').text()).toContain(
+      'conversation two source',
+    )
     expect(wrapper.find('[data-testid="evidence-source-a1-S1"]').exists()).toBe(false)
   })
 
@@ -376,5 +445,44 @@ describe('ConversationView', () => {
     expect(wrapper.text()).toContain('Code')
     expect(wrapper.text()).toContain('void run()')
     expect(wrapper.text()).toContain('Cited from 2 sources')
+  })
+
+  it('saves only a persisted completed assistant answer as knowledge', async () => {
+    const savedMessage = message('a1', 'Answer [S1]', [src])
+    mockedGet.mockResolvedValue(
+      detail(conv, [message('u1', 'Question', null, 'completed', 'c1', 'user'), savedMessage]),
+    )
+    mockedCreateKnowledge.mockResolvedValue({
+      id: 'k1',
+      knowledge_base_id: 'kb',
+      question: 'Question',
+      background: null,
+      root_cause: null,
+      solution: 'Answer',
+      failed_attempts: [],
+      validation_status: 'unverified',
+      tags: [],
+      source_conversation_id: 'c1',
+      source_user_message_id: 'u1',
+      source_assistant_message_id: 'a1',
+      question_snapshot: 'Question',
+      answer_snapshot: 'Answer [S1]',
+      sources_snapshot: [src],
+      generation_metadata_snapshot: null,
+      created_at: '',
+      updated_at: '',
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+    await buttonByText(wrapper, 'Save as knowledge').trigger('click')
+    await wrapper.get('[data-testid="submit-knowledge"]').trigger('click')
+    await flushPromises()
+
+    expect(mockedCreateKnowledge).toHaveBeenCalledWith(
+      'kb',
+      expect.objectContaining({ source_assistant_message_id: 'a1', question: 'Question' }),
+    )
+    expect(wrapper.text()).toContain('View knowledge')
   })
 })

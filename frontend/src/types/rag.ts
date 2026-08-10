@@ -1,3 +1,5 @@
+import type { EvidenceSource } from '@/types/evidence'
+
 export interface RagStreamRequest {
   query: string
   language?: string | null
@@ -18,30 +20,10 @@ export interface SymbolScopeEventFields {
   scoped_symbol_signature?: string | null
 }
 
-export interface RagSource {
-  source_id: string
+export interface RagSource extends EvidenceSource {
   score: number
-  content: string
   knowledge_base_id: string
-  document_id: string
-  document_version_id: string
-  chunk_id: string
   index_generation: string
-  document_name: string
-  relative_path?: string
-  version_number: number
-  chunk_index: number
-  content_hash: string
-  chunk_type: string
-  language: string | null
-  section_title: string | null
-  page_number: number | null
-  start_line: number | null
-  end_line: number | null
-  symbol_kind?: string | null
-  symbol_name?: string | null
-  symbol_qualified_name?: string | null
-  symbol_signature?: string | null
   ranking_mode?: string | null
   retrieval_score?: number | null
   rerank_score?: number | null

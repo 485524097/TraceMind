@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.conversation import Conversation, ConversationMessage
 from app.repositories.conversation import ConversationRepository
 from app.repositories.knowledge_base import KnowledgeBaseRepository
+from app.repositories.knowledge_entry import KnowledgeEntryRepository
 from app.schemas.conversation import (
     DEFAULT_CONVERSATION_TITLE,
     ConversationCreate,
@@ -41,10 +42,12 @@ class ConversationService:
         session: AsyncSession,
         repository: ConversationRepository | None = None,
         knowledge_bases: KnowledgeBaseRepository | None = None,
+        knowledge_entries: KnowledgeEntryRepository | None = None,
     ) -> None:
         self.session = session
         self.repository = repository or ConversationRepository(session)
         self.knowledge_bases = knowledge_bases or KnowledgeBaseRepository(session)
+        self.knowledge_entries = knowledge_entries or KnowledgeEntryRepository(session)
 
     async def _require_knowledge_base(self, knowledge_base_id: UUID) -> None:
         if await self.knowledge_bases.get_by_id(knowledge_base_id) is None:
@@ -74,6 +77,16 @@ class ConversationService:
         conversation = await self.get(knowledge_base_id, conversation_id)
         messages = await self.repository.list_messages(conversation.id)
         return conversation, messages
+
+    async def get_detail_with_knowledge(
+        self, knowledge_base_id: UUID, conversation_id: UUID
+    ) -> tuple[Conversation, list[ConversationMessage], dict[UUID, UUID]]:
+        conversation, messages = await self.get_detail(knowledge_base_id, conversation_id)
+        entry_ids = await self.knowledge_entries.knowledge_entry_ids_by_messages(
+            knowledge_base_id,
+            (message.id for message in messages if message.role == "assistant"),
+        )
+        return conversation, messages, entry_ids
 
     async def list(
         self, knowledge_base_id: UUID, *, offset: int, limit: int

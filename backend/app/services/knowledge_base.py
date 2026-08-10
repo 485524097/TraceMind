@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.knowledge_base import KnowledgeBase
 from app.repositories.document import DocumentRepository
 from app.repositories.knowledge_base import KnowledgeBaseRepository
+from app.repositories.knowledge_entry import KnowledgeEntryRepository
 from app.schemas.knowledge_base import KnowledgeBaseCreate, KnowledgeBaseUpdate
 from app.services.exceptions import (
     KnowledgeBaseNameConflictError,
@@ -20,10 +21,12 @@ class KnowledgeBaseService:
         session: AsyncSession,
         repository: KnowledgeBaseRepository | None = None,
         document_repository: DocumentRepository | None = None,
+        knowledge_entry_repository: KnowledgeEntryRepository | None = None,
     ) -> None:
         self.session = session
         self.repository = repository or KnowledgeBaseRepository(session)
         self.documents = document_repository or DocumentRepository(session)
+        self.knowledge_entries = knowledge_entry_repository or KnowledgeEntryRepository(session)
 
     async def create(self, payload: KnowledgeBaseCreate) -> KnowledgeBase:
         if await self.repository.get_by_name(payload.name) is not None:
@@ -87,6 +90,8 @@ class KnowledgeBaseService:
     async def delete(self, knowledge_base_id: UUID) -> None:
         knowledge_base = await self.get(knowledge_base_id)
         if await self.documents.count_by_knowledge_base(knowledge_base_id) > 0:
+            raise KnowledgeBaseNotEmptyError(knowledge_base_id)
+        if await self.knowledge_entries.count(knowledge_base_id) > 0:
             raise KnowledgeBaseNotEmptyError(knowledge_base_id)
         try:
             await self.repository.delete(knowledge_base)

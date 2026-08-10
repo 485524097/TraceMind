@@ -88,12 +88,22 @@ async def get_conversation(
     service: ConversationServiceDependency,
 ) -> ConversationDetailResponse:
     try:
-        conversation, messages = await service.get_detail(knowledge_base_id, conversation_id)
+        conversation, messages, entry_ids = await service.get_detail_with_knowledge(
+            knowledge_base_id, conversation_id
+        )
     except (ConversationNotFoundError, SQLAlchemyError) as exc:
         raise_http_error(exc)
     return ConversationDetailResponse(
         **ConversationResponse.model_validate(conversation).model_dump(),
-        messages=[ConversationMessageResponse.model_validate(item) for item in messages],
+        messages=[
+            ConversationMessageResponse(
+                **ConversationMessageResponse.model_validate(item).model_dump(
+                    exclude={"knowledge_entry_id"}
+                ),
+                knowledge_entry_id=entry_ids.get(item.id),
+            )
+            for item in messages
+        ],
     )
 
 

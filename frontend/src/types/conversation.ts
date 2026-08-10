@@ -20,6 +20,7 @@ export interface ConversationMessage {
   sources: RagSource[] | null
   generation_metadata: Partial<RagDoneEvent> | null
   created_at: string
+  knowledge_entry_id?: string | null
 }
 
 export interface ConversationDetail extends Conversation {
