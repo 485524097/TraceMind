@@ -21,10 +21,6 @@ const source: EvidenceSource = {
   page_number: null,
   start_line: 10,
   end_line: 12,
-  symbol_kind: 'method',
-  symbol_name: 'run',
-  symbol_qualified_name: 'Service.run',
-  symbol_signature: 'void run()',
 }
 
 describe('EvidenceSourceList', () => {
@@ -33,8 +29,8 @@ describe('EvidenceSourceList', () => {
       props: { sources: [source], identityPrefix: 'answer' },
     })
     const item = wrapper.get('[data-testid="evidence-source-answer-S1"]')
-    expect(item.text()).toContain('Code')
-    expect(item.text()).toContain('L10–12')
+    expect(item.text()).toContain('代码')
+    expect(item.text()).toContain('第 10–12 行')
     expect(item.text()).toContain('void run()')
   })
 })

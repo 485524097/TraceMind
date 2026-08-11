@@ -32,6 +32,10 @@ class SentenceTransformerEmbeddingProvider:
     def dimension(self) -> int:
         return self._dimension
 
+    def warmup(self) -> None:
+        """Load the shared model without running a synthetic embedding request."""
+        self._model()
+
     def _model(self) -> Any:
         key = (self.model_name, self.device)
         with _MODEL_LOCK:

@@ -36,6 +36,34 @@ def provider_without_loading() -> QwenCrossEncoderProvider:
     return provider
 
 
+def test_cuda_preflight_fails_before_model_load(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cross_encoder = Mock()
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr("app.reranker.cross_encoder.CrossEncoder", cross_encoder)
+
+    with pytest.raises(RerankerUnavailableError) as caught:
+        QwenCrossEncoderProvider(
+            model_name="Qwen/Qwen3-Reranker-0.6B",
+            device="cuda",
+            dtype="float16",
+            max_length=1024,
+            batch_size=2,
+            max_candidates=20,
+            max_concurrency=1,
+            local_files_only=True,
+            cache_folder=None,
+            instruction="instruction",
+            queue_timeout_seconds=12,
+        )
+
+    assert caught.value.reason == "cuda_unavailable"
+    assert "torch=" in str(caught.value)
+    assert "torch_cuda=" in str(caught.value)
+    cross_encoder.assert_not_called()
+
+
 def test_request_validation_rejects_duplicates_and_invalid_limit() -> None:
     with pytest.raises(InvalidRerankerInputError):
         validate_rerank_request(

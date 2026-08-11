@@ -65,22 +65,6 @@ async function selectFiles(wrapper: ReturnType<typeof mountPanel>, files: File[]
   await input.trigger('change')
 }
 
-async function selectDirectory(
-  wrapper: ReturnType<typeof mountPanel>,
-  files: File[],
-): Promise<void> {
-  const input = wrapper.get('[data-testid="document-directory"]')
-  Object.defineProperty(input.element, 'files', { configurable: true, value: files })
-  await input.trigger('change')
-}
-
-function directoryFile(path: string): File {
-  const parts = path.split('/')
-  const file = new File(['content'], parts[parts.length - 1] ?? 'file.txt')
-  Object.defineProperty(file, 'webkitRelativePath', { value: path })
-  return file
-}
-
 describe('DocumentUploadPanel', () => {
   beforeEach(() => {
     mockedUpload.mockReset()
@@ -103,24 +87,7 @@ describe('DocumentUploadPanel', () => {
     expect(wrapper.emitted('completed')).toHaveLength(1)
   })
 
-  it('shows a directory preview with ready, ignored and unsupported totals', async () => {
-    const wrapper = mountPanel()
-    await selectDirectory(wrapper, [
-      directoryFile('project/src/main.py'),
-      directoryFile('project/node_modules/pkg/index.js'),
-      directoryFile('project/assets/logo.png'),
-    ])
-
-    expect(wrapper.get('[data-testid="document-directory"]').attributes()).toHaveProperty(
-      'webkitdirectory',
-    )
-    expect(wrapper.text()).toContain('src/main.py')
-    expect(wrapper.text()).toContain('准备 1')
-    expect(wrapper.text()).toContain('忽略 1')
-    expect(wrapper.text()).toContain('不支持 1')
-  })
-
-  it('uploads directory files with no more than three concurrent requests', async () => {
+  it('uploads selected files with no more than three concurrent requests', async () => {
     let active = 0
     let maximum = 0
     mockedUpload.mockImplementation(async () => {
@@ -131,9 +98,9 @@ describe('DocumentUploadPanel', () => {
       return response('created')
     })
     const wrapper = mountPanel()
-    await selectDirectory(
+    await selectFiles(
       wrapper,
-      Array.from({ length: 7 }, (_, index) => directoryFile(`project/src/file${index}.py`)),
+      Array.from({ length: 7 }, (_, index) => new File(['content'], `file${index}.py`)),
     )
 
     await wrapper.get('[data-testid="upload-documents"]').trigger('click')
@@ -144,10 +111,28 @@ describe('DocumentUploadPanel', () => {
     })
 
     expect(maximum).toBe(3)
-    expect(mockedUpload.mock.calls[0]?.[2]).toBe('src/file0.py')
+    expect(mockedUpload.mock.calls[0]?.[2]).toBeUndefined()
   })
 
-  it('cancels active and not-yet-started directory uploads', async () => {
+  it('shows progress from actual transferred bytes', async () => {
+    let resolveUpload: ((value: DocumentImportResponse) => void) | undefined
+    mockedUpload.mockImplementation(
+      (_knowledgeBaseId, _file, _relativePath, _signal, onProgress) =>
+        new Promise((resolve) => {
+          resolveUpload = resolve
+          onProgress?.(42, 100)
+        }),
+    )
+    const wrapper = mountPanel()
+    await selectFiles(wrapper, [new File(['content'], 'sample.md')])
+
+    void wrapper.get('[data-testid="upload-documents"]').trigger('click')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('上传中 42%'))
+    resolveUpload?.(response('created'))
+    await flushPromises()
+  })
+
+  it('cancels active and not-yet-started uploads', async () => {
     mockedUpload.mockImplementation(
       async (_knowledgeBaseId, _file, _relativePath, signal) =>
         await new Promise((_resolve, reject) => {
@@ -157,9 +142,9 @@ describe('DocumentUploadPanel', () => {
         }),
     )
     const wrapper = mountPanel()
-    await selectDirectory(
+    await selectFiles(
       wrapper,
-      Array.from({ length: 5 }, (_, index) => directoryFile(`project/src/file${index}.py`)),
+      Array.from({ length: 5 }, (_, index) => new File(['content'], `file${index}.py`)),
     )
     void wrapper.get('[data-testid="upload-documents"]').trigger('click')
     await vi.waitFor(() => expect(mockedUpload).toHaveBeenCalledTimes(3))
@@ -216,9 +201,7 @@ describe('DocumentUploadPanel', () => {
 
   it('prevents duplicate submission while uploading', async () => {
     let resolveUpload: ((value: DocumentImportResponse) => void) | undefined
-    mockedUpload.mockImplementation(
-      () => new Promise((resolve) => (resolveUpload = resolve)),
-    )
+    mockedUpload.mockImplementation(() => new Promise((resolve) => (resolveUpload = resolve)))
     const wrapper = mountPanel()
     await selectFiles(wrapper, [new File(['content'], 'sample.md')])
     const button = wrapper.get('[data-testid="upload-documents"]')
@@ -240,6 +223,6 @@ describe('DocumentUploadPanel', () => {
     await selectFiles(wrapper, [new File(['content'], 'sample.md')])
     await wrapper.get('[data-testid="upload-documents"]').trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('等待手动解析')
+    expect(wrapper.text()).toContain('等待手动处理')
   })
 })

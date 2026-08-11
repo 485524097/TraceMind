@@ -7,7 +7,6 @@ from app.parsing.exceptions import (
     NoExtractableTextError,
     ParseLimitExceededError,
 )
-from app.symbols.java import normalize_symbol_lookup_keys
 
 BlockType = Literal["paragraph", "heading", "code", "table", "page_text"]
 
@@ -27,18 +26,8 @@ class ParsedBlock:
     end_line: int | None = None
     section_title: str | None = None
     language: str | None = None
-    symbol_kind: str | None = None
-    symbol_name: str | None = None
-    symbol_qualified_name: str | None = None
-    symbol_signature: str | None = None
-    symbol_lookup_keys: list[str] | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "symbol_lookup_keys",
-            normalize_symbol_lookup_keys(self.symbol_lookup_keys),
-        )
         if not self.text.strip():
             raise ValueError("Parsed block text must not be blank")
         if self.page_number is not None and self.page_number < 1:

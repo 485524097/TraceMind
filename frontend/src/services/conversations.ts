@@ -17,10 +17,7 @@ export function listConversations(
   return apiRequest(`${basePath(knowledgeBaseId)}?offset=${offset}&limit=${limit}`)
 }
 
-export function createConversation(
-  knowledgeBaseId: string,
-  title?: string,
-): Promise<Conversation> {
+export function createConversation(knowledgeBaseId: string, title?: string): Promise<Conversation> {
   return apiRequest(basePath(knowledgeBaseId), {
     method: 'POST',
     body: JSON.stringify(title ? { title } : {}),
@@ -45,9 +42,6 @@ export function renameConversation(
   })
 }
 
-export function deleteConversation(
-  knowledgeBaseId: string,
-  conversationId: string,
-): Promise<void> {
+export function deleteConversation(knowledgeBaseId: string, conversationId: string): Promise<void> {
   return apiRequest(`${basePath(knowledgeBaseId)}/${conversationId}`, { method: 'DELETE' })
 }

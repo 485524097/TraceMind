@@ -43,10 +43,6 @@ class RagSource(BaseModel):
     page_number: int | None
     start_line: int | None
     end_line: int | None
-    symbol_kind: str | None = None
-    symbol_name: str | None = None
-    symbol_qualified_name: str | None = None
-    symbol_signature: str | None = None
     ranking_mode: str | None = None
     retrieval_score: float | None = None
     rerank_score: float | None = None

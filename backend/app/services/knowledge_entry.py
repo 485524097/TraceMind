@@ -37,10 +37,6 @@ _SOURCE_SNAPSHOT_FIELDS = (
     "page_number",
     "start_line",
     "end_line",
-    "symbol_kind",
-    "symbol_name",
-    "symbol_qualified_name",
-    "symbol_signature",
 )
 _GENERATION_METADATA_FIELDS = {
     "finish_reason",
@@ -48,10 +44,17 @@ _GENERATION_METADATA_FIELDS = {
     "valid_citation_count",
     "invalid_citation_count",
     "source_count",
+    "route_mode",
+    "routing_latency_ms",
     "retrieval_mode",
     "retrieval_latency_ms",
     "query_rewrite_mode",
     "query_rewrite_latency_ms",
+    "embedding_latency_ms",
+    "qdrant_latency_ms",
+    "fusion_latency_ms",
+    "dense_candidate_count",
+    "sparse_candidate_count",
     "rerank_latency_ms",
     "reranker_fallback",
     "llm_first_token_latency_ms",
@@ -60,11 +63,6 @@ _GENERATION_METADATA_FIELDS = {
     "history_turn_count",
     "path_scope_mode",
     "scoped_relative_path",
-    "symbol_scope_mode",
-    "symbol_scope_reason",
-    "scoped_symbol_kind",
-    "scoped_symbol_qualified_name",
-    "scoped_symbol_signature",
 }
 
 

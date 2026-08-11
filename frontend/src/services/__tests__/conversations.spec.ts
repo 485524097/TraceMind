@@ -16,9 +16,7 @@ describe('conversation service', () => {
     fetchMock
       .mockResolvedValueOnce(new Response(JSON.stringify({ items: [], total: 0 })))
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'conversation' })))
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ id: 'conversation', messages: [] })),
-      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'conversation', messages: [] })))
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'conversation' })))
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
 

@@ -101,24 +101,20 @@ watch(
           <span>{{ citation(chunk) }}</span>
           <span>{{ chunk.char_count }} 字符 · {{ chunk.language ?? chunk.chunk_type }}</span>
         </header>
-        <p
-          v-if="chunk.symbol_kind || chunk.symbol_qualified_name || chunk.symbol_signature"
-          class="chunk-symbol"
-        >
-          <strong v-if="chunk.symbol_kind">{{ chunk.symbol_kind }}</strong>
-          <span v-if="chunk.symbol_qualified_name">{{ chunk.symbol_qualified_name }}</span>
-          <code v-if="chunk.symbol_signature" :title="chunk.symbol_signature">
-            {{ chunk.symbol_signature }}
-          </code>
-        </p>
         <pre>{{ chunk.content }}</pre>
       </li>
     </ol>
     <footer class="chunk-pagination">
       <span>共 {{ total }} 个 Chunk</span>
       <div>
-        <ElButton :disabled="!canPrevious || loading" @click="loadChunks(Math.max(0, offset - limit))">上一页</ElButton>
-        <ElButton :disabled="!canNext || loading" @click="loadChunks(offset + limit)">下一页</ElButton>
+        <ElButton
+          :disabled="!canPrevious || loading"
+          @click="loadChunks(Math.max(0, offset - limit))"
+          >上一页</ElButton
+        >
+        <ElButton :disabled="!canNext || loading" @click="loadChunks(offset + limit)"
+          >下一页</ElButton
+        >
       </div>
     </footer>
   </ElDialog>

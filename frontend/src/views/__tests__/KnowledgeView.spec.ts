@@ -60,7 +60,7 @@ describe('KnowledgeView', () => {
     await flushPromises()
     const row = wrapper.get('[data-testid="knowledge-entry-entry"]')
     expect(row.text()).toContain('Why did the transaction fail?')
-    expect(row.text()).toContain('verified')
+    expect(row.text()).toContain('已验证')
     await row.trigger('click')
     expect(push).toHaveBeenCalledWith('/knowledge-bases/kb/knowledge/entry')
   })

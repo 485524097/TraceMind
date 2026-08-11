@@ -71,44 +71,44 @@ function submit(): void {
   >
     <form class="knowledge-form" @submit.prevent="submit">
       <label>
-        <span>Question</span>
+        <span>问题</span>
         <ElInput v-model="form.question" maxlength="4000" show-word-limit />
       </label>
       <label>
-        <span>Background</span>
+        <span>背景</span>
         <ElInput v-model="form.background" type="textarea" :rows="3" maxlength="20000" />
       </label>
       <label>
-        <span>Root cause</span>
+        <span>根因</span>
         <ElInput v-model="form.rootCause" type="textarea" :rows="3" maxlength="20000" />
       </label>
       <label>
-        <span>Solution</span>
+        <span>解决方案</span>
         <ElInput v-model="form.solution" type="textarea" :rows="7" maxlength="50000" />
       </label>
       <label>
-        <span>Failed attempts (one per line)</span>
+        <span>失败尝试（每行一项）</span>
         <ElInput v-model="form.failedAttempts" type="textarea" :rows="3" />
       </label>
       <div class="knowledge-form-row">
         <label>
-          <span>Validation</span>
+          <span>验证状态</span>
           <ElSelect v-model="form.validationStatus">
-            <ElOption label="Unverified" value="unverified" />
-            <ElOption label="Verified" value="verified" />
-            <ElOption label="Outdated" value="outdated" />
+            <ElOption label="未验证" value="unverified" />
+            <ElOption label="已验证" value="verified" />
+            <ElOption label="已过期" value="outdated" />
           </ElSelect>
         </label>
         <label>
-          <span>Tags (comma separated)</span>
-          <ElInput v-model="form.tags" placeholder="java, postgres" />
+          <span>标签（逗号分隔）</span>
+          <ElInput v-model="form.tags" placeholder="例如：java, postgres" />
         </label>
       </div>
     </form>
     <template #footer>
-      <ElButton @click="emit('update:modelValue', false)">Cancel</ElButton>
+      <ElButton @click="emit('update:modelValue', false)">取消</ElButton>
       <ElButton type="primary" :disabled="!valid" :loading="submitting" @click="submit">
-        Save knowledge
+        保存知识
       </ElButton>
     </template>
   </ElDialog>

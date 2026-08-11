@@ -1,4 +1,4 @@
-import { apiRequest, apiUrl } from './api'
+import { apiRequest, apiUrl, ApiError } from './api'
 import type {
   DocumentChunkListResponse,
   DocumentImportResponse,
@@ -25,10 +25,7 @@ export function listDocuments(
   return apiRequest(`${basePath(knowledgeBaseId)}?${params}`)
 }
 
-export function getDocument(
-  knowledgeBaseId: string,
-  documentId: string,
-): Promise<DocumentItem> {
+export function getDocument(knowledgeBaseId: string, documentId: string): Promise<DocumentItem> {
   return apiRequest(`${basePath(knowledgeBaseId)}/${documentId}`)
 }
 
@@ -37,11 +34,61 @@ export function uploadDocument(
   file: File,
   relativePath?: string,
   signal?: AbortSignal,
+  onProgress?: (transferred: number, total: number) => void,
 ): Promise<DocumentImportResponse> {
   const body = new FormData()
   body.append('file', file)
   if (relativePath) body.append('relative_path', relativePath)
-  return apiRequest(basePath(knowledgeBaseId), { method: 'POST', body, signal })
+  if (!onProgress) {
+    return apiRequest(basePath(knowledgeBaseId), { method: 'POST', body, signal })
+  }
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest()
+    const abort = () => request.abort()
+    request.open('POST', apiUrl(basePath(knowledgeBaseId)))
+    request.setRequestHeader('Accept', 'application/json')
+    request.upload.addEventListener('progress', (event) => {
+      if (event.lengthComputable && event.total > 0) onProgress?.(event.loaded, event.total)
+    })
+    request.addEventListener('load', () => {
+      signal?.removeEventListener('abort', abort)
+      let payload: { detail?: string } | DocumentImportResponse | null = null
+      try {
+        payload = JSON.parse(request.responseText) as
+          | { detail?: string }
+          | DocumentImportResponse
+          | null
+      } catch {
+        payload = null
+      }
+      if (request.status < 200 || request.status >= 300) {
+        reject(
+          new ApiError(
+            request.status,
+            payload && 'detail' in payload
+              ? (payload.detail ?? '请求失败，请稍后重试')
+              : '请求失败，请稍后重试',
+          ),
+        )
+        return
+      }
+      resolve(payload as DocumentImportResponse)
+    })
+    request.addEventListener('error', () => {
+      signal?.removeEventListener('abort', abort)
+      reject(new ApiError(0, '网络连接失败'))
+    })
+    request.addEventListener('abort', () => {
+      signal?.removeEventListener('abort', abort)
+      reject(new DOMException('Upload cancelled', 'AbortError'))
+    })
+    if (signal?.aborted) {
+      reject(new DOMException('Upload cancelled', 'AbortError'))
+      return
+    }
+    signal?.addEventListener('abort', abort, { once: true })
+    request.send(body)
+  })
 }
 
 export function listDocumentVersions(

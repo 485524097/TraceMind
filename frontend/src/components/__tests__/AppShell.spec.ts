@@ -23,7 +23,7 @@ describe('AppShell', () => {
     const wrapper = mount(AppShell, { slots: { default: '<p>Page content</p>' } })
 
     expect(wrapper.text()).toContain('TraceMind')
-    expect(wrapper.text()).toContain('Knowledge Bases')
+    expect(wrapper.text()).toContain('知识库')
     expect(wrapper.text()).toContain('Page content')
     expect(wrapper.find('.kb-bar').exists()).toBe(false)
   })
@@ -35,8 +35,8 @@ describe('AppShell', () => {
     })
 
     expect(wrapper.get('.kb-name').text()).toBe('Project KB')
-    expect(wrapper.get('.kb-tab[data-to="/knowledge-bases/kb-1/documents"]').text()).toBe('Documents')
-    expect(wrapper.get('.kb-tab[data-to="/knowledge-bases/kb-1/chat"]').text()).toBe('Ask')
-    expect(wrapper.get('.kb-tab[data-to="/knowledge-bases/kb-1/map"]').text()).toBe('Map')
+    expect(wrapper.get('.kb-tab[data-to="/knowledge-bases/kb-1/documents"]').text()).toBe('文档')
+    expect(wrapper.get('.kb-tab[data-to="/knowledge-bases/kb-1/chat"]').text()).toBe('问答')
+    expect(wrapper.get('.kb-tab[data-to="/knowledge-bases/kb-1/map"]').text()).toBe('知识图谱')
   })
 })

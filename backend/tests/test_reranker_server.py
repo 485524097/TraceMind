@@ -1,3 +1,6 @@
+import logging
+
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings
@@ -55,7 +58,9 @@ def test_reranker_server_live_ready_rerank_and_close() -> None:
     assert provider.closed
 
 
-def test_reranker_server_not_ready_when_model_load_fails() -> None:
+def test_reranker_server_not_ready_when_model_load_fails(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     def fail(settings: Settings) -> FakeServerProvider:
         raise RuntimeError("private cache path")
 
@@ -63,21 +68,30 @@ def test_reranker_server_not_ready_when_model_load_fails() -> None:
         Settings(_env_file=None, app_env="test"),
         provider_factory=fail,
     )
-    with TestClient(app, raise_server_exceptions=False) as client:
-        assert client.get("/health/live").status_code == 200
-        ready = client.get("/health/ready")
-        assert ready.status_code == 503
-        assert ready.json() == {"ready": False}
-        response = client.post(
-            "/rerank",
-            json={
-                "query": "query",
-                "limit": 1,
-                "candidates": [{"candidate_id": "c1", "text": "text"}],
-            },
-        )
-        assert response.status_code == 503
-        assert "private" not in response.text
+    with caplog.at_level(logging.ERROR, logger="app.reranker_server"):
+        with TestClient(app, raise_server_exceptions=False) as client:
+            assert client.get("/health/live").status_code == 200
+            ready = client.get("/health/ready")
+            assert ready.status_code == 503
+            assert ready.json() == {"ready": False}
+            response = client.post(
+                "/rerank",
+                json={
+                    "query": "query",
+                    "limit": 1,
+                    "candidates": [{"candidate_id": "c1", "text": "text"}],
+                },
+            )
+            assert response.status_code == 503
+            assert "private" not in response.text
+
+    assert "model=Qwen/Qwen3-Reranker-0.6B" in caplog.text
+    assert "requested_device=cuda" in caplog.text
+    assert "torch_version=" in caplog.text
+    assert "torch_cuda_version=" in caplog.text
+    assert "cuda_available=" in caplog.text
+    assert "RuntimeError: private cache path" in caplog.text
+    assert any(record.exc_info is not None for record in caplog.records)
 
 
 def test_reranker_server_validates_candidate_limits_and_duplicates() -> None:

@@ -4,6 +4,7 @@ from app.parsing.base import ParseContext, ParsedBlock, ParsedDocument, read_utf
 from app.parsing.exceptions import UnsupportedParserError
 
 LANGUAGES = {
+    ".java": "java",
     ".jsp": "jsp",
     ".js": "javascript",
     ".ts": "typescript",

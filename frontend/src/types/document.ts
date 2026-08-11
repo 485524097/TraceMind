@@ -86,10 +86,6 @@ export interface DocumentChunk {
   section_title: string | null
   chunk_type: string
   language: string | null
-  symbol_kind?: string | null
-  symbol_name?: string | null
-  symbol_qualified_name?: string | null
-  symbol_signature?: string | null
   created_at: string
 }
 
@@ -139,10 +135,6 @@ export interface SemanticSearchResult {
   page_number: number | null
   start_line: number | null
   end_line: number | null
-  symbol_kind?: string | null
-  symbol_name?: string | null
-  symbol_qualified_name?: string | null
-  symbol_signature?: string | null
   ranking_mode?: string | null
   retrieval_score?: number | null
   rerank_score?: number | null
@@ -154,9 +146,4 @@ export interface SemanticSearchResponse {
   path_scope_mode?: 'none' | 'exact'
   scoped_relative_path?: string | null
   semantic_query?: string | null
-  symbol_scope_mode?: 'none' | 'exact' | 'fallback'
-  symbol_scope_reason?: 'not_found' | 'ambiguous' | 'unsupported' | null
-  scoped_symbol_kind?: string | null
-  scoped_symbol_qualified_name?: string | null
-  scoped_symbol_signature?: string | null
 }

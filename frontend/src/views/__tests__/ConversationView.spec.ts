@@ -32,7 +32,6 @@ vi.mock('@/services/conversations', () => ({
 vi.mock('@/services/rag', () => ({ streamRagAnswer: vi.fn() }))
 vi.mock('@/services/knowledgeBases', () => ({ getKnowledgeBase: vi.fn() }))
 vi.mock('@/services/knowledgeEntries', () => ({ createKnowledgeEntry: vi.fn() }))
-vi.mock('@/utils/symbolScope', () => ({ symbolScopeLabel: vi.fn(() => '') }))
 
 const mockedList = vi.mocked(listConversations)
 const mockedCreate = vi.mocked(createConversation)
@@ -71,10 +70,6 @@ const src: RagSource = {
   page_number: null,
   start_line: 2,
   end_line: 4,
-  symbol_kind: null,
-  symbol_name: null,
-  symbol_qualified_name: null,
-  symbol_signature: null,
 }
 
 function message(
@@ -252,7 +247,7 @@ describe('ConversationView', () => {
 
     const wrapper = mountView()
     await flushPromises()
-    await wrapper.get('input[aria-label="Your question"]').setValue('How does it work?')
+    await wrapper.get('input[aria-label="你的问题"]').setValue('How does it work?')
     await wrapper.get('[data-testid="conversation-composer"]').trigger('submit')
     await flushPromises()
 
@@ -263,7 +258,7 @@ describe('ConversationView', () => {
       expect.any(AbortSignal),
     )
     expect(wrapper.text()).toContain('Streamed answer')
-    expect(wrapper.text()).toContain('Done')
+    expect(wrapper.text()).toContain('已完成')
     expect(wrapper.get('[data-testid="evidence-source-assistant-stream-S1"]').text()).toContain(
       'first source excerpt',
     )
@@ -280,14 +275,14 @@ describe('ConversationView', () => {
 
     const wrapper = mountView()
     await flushPromises()
-    await wrapper.get('input[aria-label="Your question"]').setValue('Cancel this')
+    await wrapper.get('input[aria-label="你的问题"]').setValue('Cancel this')
     await wrapper.get('[data-testid="conversation-composer"]').trigger('submit')
     await flushPromises()
     await wrapper.get('[data-testid="stop-generation"]').trigger('click')
     await flushPromises()
 
     expect(activeSignal?.aborted).toBe(true)
-    expect(wrapper.text()).toContain('Cancelled')
+    expect(wrapper.text()).toContain('已取消')
   })
 
   it('shows a failed state when streaming errors', async () => {
@@ -295,11 +290,11 @@ describe('ConversationView', () => {
 
     const wrapper = mountView()
     await flushPromises()
-    await wrapper.get('input[aria-label="Your question"]').setValue('Fail this')
+    await wrapper.get('input[aria-label="你的问题"]').setValue('Fail this')
     await wrapper.get('[data-testid="conversation-composer"]').trigger('submit')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Failed')
+    expect(wrapper.text()).toContain('生成失败')
     expect(wrapper.find('[data-message-id^="temporary-"].assistant').exists()).toBe(true)
   })
 
@@ -309,7 +304,7 @@ describe('ConversationView', () => {
 
     const wrapper = mountView()
     await flushPromises()
-    await buttonByText(wrapper, 'Rename').trigger('click')
+    await buttonByText(wrapper, '重命名').trigger('click')
     await flushPromises()
 
     expect(mockedRename).toHaveBeenCalledWith('kb', 'c1', 'Renamed')
@@ -325,11 +320,11 @@ describe('ConversationView', () => {
 
     const wrapper = mountView()
     await flushPromises()
-    await buttonByText(wrapper, 'Delete').trigger('click')
+    await buttonByText(wrapper, '删除').trigger('click')
     await flushPromises()
 
     expect(mockedDelete).toHaveBeenCalledWith('kb', 'c1')
-    expect(wrapper.text()).toContain('Select or create a conversation')
+    expect(wrapper.text()).toContain('请选择或新建会话')
   })
 
   it('binds a citation to the source of its own assistant message', async () => {
@@ -375,7 +370,7 @@ describe('ConversationView', () => {
 
     const wrapper = mountView()
     await flushPromises()
-    await wrapper.get('input[aria-label="Your question"]').setValue('New question')
+    await wrapper.get('input[aria-label="你的问题"]').setValue('New question')
     await wrapper.get('[data-testid="conversation-composer"]').trigger('submit')
     await flushPromises()
     await wrapper.get('[data-message-id="a1"] .cite-btn').trigger('click')
@@ -431,9 +426,9 @@ describe('ConversationView', () => {
   it('renders code evidence and multi-source provenance', async () => {
     const codeSource = {
       ...src,
-      symbol_kind: 'method',
-      symbol_qualified_name: 'demo.Service.run',
-      symbol_signature: 'void run()',
+      content: 'void run()',
+      chunk_type: 'code',
+      language: 'java',
     }
     mockedGet.mockResolvedValue(
       detail(conv, [message('a1', 'Code answer', [codeSource, { ...src, source_id: 'S2' }])]),
@@ -444,7 +439,7 @@ describe('ConversationView', () => {
 
     expect(wrapper.text()).toContain('Code')
     expect(wrapper.text()).toContain('void run()')
-    expect(wrapper.text()).toContain('Cited from 2 sources')
+    expect(wrapper.text()).toContain('引用了 2 条来源')
   })
 
   it('saves only a persisted completed assistant answer as knowledge', async () => {
@@ -475,7 +470,7 @@ describe('ConversationView', () => {
 
     const wrapper = mountView()
     await flushPromises()
-    await buttonByText(wrapper, 'Save as knowledge').trigger('click')
+    await buttonByText(wrapper, '保存为知识').trigger('click')
     await wrapper.get('[data-testid="submit-knowledge"]').trigger('click')
     await flushPromises()
 
@@ -483,6 +478,6 @@ describe('ConversationView', () => {
       'kb',
       expect.objectContaining({ source_assistant_message_id: 'a1', question: 'Question' }),
     )
-    expect(wrapper.text()).toContain('View knowledge')
+    expect(wrapper.text()).toContain('查看知识')
   })
 })

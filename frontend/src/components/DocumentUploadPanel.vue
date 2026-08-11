@@ -3,11 +3,9 @@ import { ElButton } from 'element-plus'
 import { computed, ref } from 'vue'
 
 import { ApiError } from '@/services/api'
-import {
-  DIRECTORY_IMPORT_CONCURRENCY,
-  planDirectoryImport,
-} from '@/services/directoryImport'
 import { uploadDocument } from '@/services/documents'
+
+const MULTI_FILE_UPLOAD_CONCURRENCY = 3
 
 type UploadState =
   | 'waiting'
@@ -15,17 +13,15 @@ type UploadState =
   | 'created'
   | 'version_created'
   | 'unchanged'
-  | 'ignored'
-  | 'unsupported'
   | 'cancelled'
   | 'failed'
 
 interface UploadEntry {
   key: string
   file: File
-  relativePath?: string
   state: UploadState
   message: string
+  progress: number | null
 }
 
 const props = defineProps<{ knowledgeBaseId: string }>()
@@ -43,11 +39,9 @@ const stats = computed(() => {
     completed: count(['created', 'version_created', 'unchanged', 'failed', 'cancelled']),
     success: count(['created']),
     updated: count(['version_created']),
-    skipped: count(['unchanged', 'ignored', 'unsupported', 'cancelled']),
+    skipped: count(['unchanged', 'cancelled']),
     failed: count(['failed']),
     ready: count(['waiting']),
-    ignored: count(['ignored']),
-    unsupported: count(['unsupported']),
   }
 })
 
@@ -57,8 +51,6 @@ const labels: Record<UploadState, string> = {
   created: '新建成功',
   version_created: '新版本成功',
   unchanged: '内容未变化',
-  ignored: '已忽略',
-  unsupported: '不支持',
   cancelled: '已取消',
   failed: '上传失败',
 }
@@ -67,27 +59,13 @@ function selectFiles(event: Event): void {
   const input = event.target as HTMLInputElement
   for (const file of Array.from(input.files ?? [])) {
     const key = `${file.name}:${file.size}:${file.lastModified}`
-    if (!entries.value.some((entry) => entry.key === key && ['waiting', 'uploading'].includes(entry.state))) {
-      entries.value.push({ key, file, state: 'waiting', message: '' })
+    if (
+      !entries.value.some(
+        (entry) => entry.key === key && ['waiting', 'uploading'].includes(entry.state),
+      )
+    ) {
+      entries.value.push({ key, file, state: 'waiting', message: '', progress: null })
     }
-  }
-  input.value = ''
-}
-
-function selectDirectory(event: Event): void {
-  const input = event.target as HTMLInputElement
-  const planned = planDirectoryImport(Array.from(input.files ?? []))
-  for (const item of planned) {
-    const state: UploadState =
-      item.disposition === 'ready' ? 'waiting' : item.disposition
-    const key = `${item.relativePath}:${item.file.size}:${item.file.lastModified}`
-    entries.value.push({
-      key,
-      file: item.file,
-      relativePath: item.relativePath,
-      state,
-      message: state === 'waiting' ? '准备导入' : labels[state],
-    })
   }
   input.value = ''
 }
@@ -117,19 +95,27 @@ async function uploadAll(): Promise<void> {
         if (!entry) return
         attempted = true
         entry.state = 'uploading'
+        entry.progress = 0
+        entry.message = '上传中 0%'
         const controller = new AbortController()
         controllers.add(controller)
         try {
           const result = await uploadDocument(
             props.knowledgeBaseId,
             entry.file,
-            entry.relativePath,
+            undefined,
             controller.signal,
+            (transferred, total) => {
+              const progress = Math.min(100, Math.round((transferred / total) * 100))
+              entry.progress = progress
+              entry.message = `上传中 ${progress}%`
+            },
           )
           entry.state = result.import_action
+          entry.progress = 100
           entry.message = result.parsing_queued
-            ? `${labels[result.import_action]}，已进入解析队列`
-            : `${labels[result.import_action]}，等待手动解析`
+            ? `${labels[result.import_action]} · 已上传，等待处理`
+            : `${labels[result.import_action]} · 已上传，等待手动处理`
         } catch (error) {
           if (controller.signal.aborted) {
             entry.state = 'cancelled'
@@ -144,10 +130,7 @@ async function uploadAll(): Promise<void> {
       }
     }
     await Promise.all(
-      Array.from(
-        { length: Math.min(DIRECTORY_IMPORT_CONCURRENCY, queue.length) },
-        () => worker(),
-      ),
+      Array.from({ length: Math.min(MULTI_FILE_UPLOAD_CONCURRENCY, queue.length) }, () => worker()),
     )
     if (cancelled.value) {
       for (const entry of entries.value) {
@@ -186,17 +169,6 @@ function cancelUpload(): void {
         @change="selectFiles"
       />
     </label>
-    <label class="file-picker">
-      导入代码目录
-      <input
-        data-testid="document-directory"
-        type="file"
-        multiple
-        webkitdirectory
-        :disabled="uploading"
-        @change="selectDirectory"
-      />
-    </label>
     <ElButton
       data-testid="upload-documents"
       type="primary"
@@ -215,16 +187,14 @@ function cancelUpload(): void {
     >
       取消导入
     </ElButton>
-    <p v-if="entries.length" class="upload-summary" data-testid="directory-import-summary">
-      总数 {{ stats.total }} · 完成 {{ stats.completed }} · 成功 {{ stats.success }} ·
-      更新 {{ stats.updated }} · 跳过 {{ stats.skipped }} · 失败 {{ stats.failed }}
-      <template v-if="stats.ready || stats.ignored || stats.unsupported">
-        · 准备 {{ stats.ready }} · 忽略 {{ stats.ignored }} · 不支持 {{ stats.unsupported }}
-      </template>
+    <p v-if="entries.length" class="upload-summary" data-testid="upload-summary">
+      总数 {{ stats.total }} · 完成 {{ stats.completed }} · 成功 {{ stats.success }} · 更新
+      {{ stats.updated }} · 跳过 {{ stats.skipped }} · 失败 {{ stats.failed }}
+      <template v-if="stats.ready"> · 准备 {{ stats.ready }} </template>
     </p>
     <ul v-if="entries.length" class="upload-list">
       <li v-for="entry in entries" :key="entry.key">
-        <span>{{ entry.relativePath || entry.file.name }}</span>
+        <span>{{ entry.file.name }}</span>
         <span :data-state="entry.state">{{ entry.message || labels[entry.state] }}</span>
       </li>
     </ul>

@@ -40,7 +40,6 @@ Core principle: Minimal clarity + Developer precision + Inspectable evidence
 - File path
 - Section / Page / Chunk
 - Version
-- Method signature
 - Line range
 - Status tags
 
@@ -49,7 +48,7 @@ Core principle: Minimal clarity + Developer precision + Inspectable evidence
 - Retrieval mode (hybrid, reranker)
 - Reranker fallback
 - Latency
-- Symbol scope / Path scope
+- Path scope
 - Trace metadata
 
 **Rules:**
@@ -65,18 +64,18 @@ Two semantic layers. No global sidebar.
 
 ### Global Bar (44px)
 ```
-TraceMind                              Knowledge Bases
+TraceMind                              知识库
 ```
 - Brand wordmark on left. No decorative logo.
-- Knowledge Bases link on right. Active state = bottom border accent.
+- 知识库 link on right. Active state = bottom border accent.
 - `1px solid` bottom border. No shadow. No gradient.
 
 ### KB Context Bar (38–40px, only when inside a KB)
 ```
-Current KB Name                       Documents    Ask
+当前知识库名称                         文档    问答    知识    知识图谱
 ```
 - KB name from page data (existing `knowledgeBaseName` ref).
-- Documents / Ask as text tabs. Active state = bottom border accent.
+- 文档 / 问答 / 知识 / 知识图谱 as text tabs. Active state = bottom border accent.
 - No global KB selector dropdown at current stage.
 - No duplicated Documents/Ask controls.
 
@@ -216,7 +215,7 @@ code excerpt…
 
 - Source type distinguished by `# DOCUMENT` / `<> CODE` labels + composition
 - Not color alone
-- Code evidence: method signature + line range + code block with left accent border
+- Code evidence: relative path + line range + code block with left accent border
 
 **Anti-patterns to avoid:**
 - ChatGPT-style chat bubbles

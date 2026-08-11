@@ -5,7 +5,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db_session
-from app.embedding import SentenceTransformerEmbeddingProvider
 from app.indexing import QdrantGateway
 from app.models.document import DocumentVersion
 from app.reranker import InvalidRerankerInputError, RerankerUnavailableError
@@ -37,12 +36,7 @@ def get_document_indexing_service(
     request: Request, session: SessionDependency
 ) -> DocumentIndexingService:
     settings = request.app.state.settings
-    provider = SentenceTransformerEmbeddingProvider(
-        settings.embedding_model_name,
-        settings.embedding_dimension,
-        settings.embedding_batch_size,
-        settings.resolved_query_embedding_device,
-    )
+    provider = request.app.state.embedding_provider
     gateway = QdrantGateway(
         request.app.state.qdrant_client.client,
         collection_name=settings.qdrant_collection_name,
@@ -127,16 +121,7 @@ def search_response(
         items=[SemanticSearchResultResponse.model_validate(result.__dict__) for result in results],
         path_scope_mode=prepared.path_scope_mode,
         scoped_relative_path=prepared.explicit_relative_path,
-        semantic_query=(
-            prepared.semantic_query
-            if prepared.path_scope_mode == "exact" or prepared.symbol_scope_mode != "none"
-            else None
-        ),
-        symbol_scope_mode=prepared.symbol_scope_mode,
-        symbol_scope_reason=prepared.symbol_scope_reason,
-        scoped_symbol_kind=prepared.scoped_symbol_kind,
-        scoped_symbol_qualified_name=prepared.scoped_symbol_qualified_name,
-        scoped_symbol_signature=prepared.scoped_symbol_signature,
+        semantic_query=prepared.semantic_query if prepared.path_scope_mode == "exact" else None,
     )
 
 
@@ -199,7 +184,6 @@ async def semantic_search(
             knowledge_base_id,
             body.query,
             document_id=body.document_id,
-            language=body.language,
         )
         results = await service.search(
             knowledge_base_id,
@@ -231,7 +215,6 @@ async def hybrid_search(
             knowledge_base_id,
             body.query,
             document_id=body.document_id,
-            language=body.language,
         )
         results = await service.hybrid_search(
             knowledge_base_id,
@@ -271,7 +254,6 @@ async def reranked_search(
             knowledge_base_id,
             body.query,
             document_id=body.document_id,
-            language=body.language,
         )
         candidates = await indexing_service.hybrid_search(
             knowledge_base_id,

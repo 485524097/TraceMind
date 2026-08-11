@@ -54,10 +54,7 @@ const relatedReasons = computed(() => {
   const documents = Array.isArray(selectedEdge.value.metadata.shared_document_ids)
     ? selectedEdge.value.metadata.shared_document_ids.map(String)
     : []
-  return [
-    ...tags.map((tag) => `Shared tag: ${tag}`),
-    ...documents.map((id) => `Shared document: ${id}`),
-  ]
+  return [...tags.map((tag) => `共享标签：${tag}`), ...documents.map((id) => `共享文档：${id}`)]
 })
 
 function elements(): ElementDefinition[] {
@@ -101,6 +98,7 @@ function applyFilters(): void {
 
 function initializeGraph(): void {
   if (!graphElement.value) return
+  const compactLabels = window.innerWidth <= 680
   graph?.destroy()
   graph = cytoscape({
     container: graphElement.value,
@@ -113,8 +111,8 @@ function initializeGraph(): void {
         selector: 'node',
         style: {
           label: 'data(label)',
-          'font-size': 10,
-          'text-max-width': '120px',
+          'font-size': compactLabels ? 8 : 10,
+          'text-max-width': compactLabels ? '72px' : '120px',
           'text-wrap': 'ellipsis',
           'background-color': '#7a8497',
           color: '#19233b',
@@ -202,7 +200,7 @@ async function load(): Promise<void> {
     await nextTick()
     initializeGraph()
   } catch {
-    error.value = 'Knowledge Map could not be loaded.'
+    error.value = '知识图谱加载失败，请稍后重试'
   } finally {
     loading.value = false
   }
@@ -220,34 +218,42 @@ onBeforeUnmount(() => {
   <main class="knowledge-map-page">
     <header class="knowledge-map-header">
       <div>
-        <h1>Knowledge Map</h1>
-        <p>Live relationships derived from saved knowledge, documents and tags.</p>
+        <h1>知识图谱</h1>
+        <p>根据知识、文档和标签实时派生的关系。</p>
       </div>
-      <ElButton class="secondary-button" @click="fitGraph">Fit Graph</ElButton>
+      <ElButton class="secondary-button" @click="fitGraph">适应画布</ElButton>
     </header>
 
     <div v-if="error" class="conv-error" role="alert">{{ error }}</div>
-    <div v-else-if="loading" class="muted-text">Loading map…</div>
+    <div v-else-if="loading" class="muted-text">正在加载图谱…</div>
     <div v-else class="knowledge-map-layout">
-      <section class="knowledge-map-workspace" aria-label="Knowledge graph">
-        <div class="knowledge-map-filters" aria-label="Node type filters">
+      <section class="knowledge-map-workspace" aria-label="知识关系图">
+        <div class="knowledge-map-filters" aria-label="节点类型筛选">
           <label v-for="(_, type) in filters" :key="type">
             <input v-model="filters[type]" type="checkbox" />
-            {{ type.replace('_', ' ') }}
+            {{
+              { knowledge_base: '知识库', knowledge_entry: '知识', document: '文档', tag: '标签' }[
+                type
+              ]
+            }}
           </label>
         </div>
         <p v-if="entryCount === 0" class="knowledge-map-empty">
-          Save a conversation answer as knowledge to build this map.
+          请先把会话回答保存为知识，<br />再查看关系图。
         </p>
         <div ref="graphElement" class="knowledge-map-canvas" data-testid="knowledge-map-canvas" />
       </section>
 
-      <aside class="knowledge-map-inspector" aria-label="Selected map item">
+      <aside class="knowledge-map-inspector" aria-label="所选图谱项目">
         <template v-if="selectedNode">
-          <span class="eyebrow">{{ selectedNode.type.replace('_', ' ') }}</span>
+          <span class="eyebrow">{{
+            { knowledge_base: '知识库', knowledge_entry: '知识', document: '文档', tag: '标签' }[
+              selectedNode.type
+            ]
+          }}</span>
           <h2>{{ selectedNode.label }}</h2>
           <p v-if="selectedNode.type === 'tag'" class="muted-text">
-            {{ selectedNode.metadata.entry_count }} related knowledge entries
+            关联 {{ selectedNode.metadata.entry_count }} 条知识
           </p>
           <button
             v-if="['knowledge_entry', 'document'].includes(selectedNode.type)"
@@ -255,11 +261,13 @@ onBeforeUnmount(() => {
             type="button"
             @click="openSelected"
           >
-            Open {{ selectedNode.type === 'document' ? 'document' : 'knowledge' }} →
+            打开{{ selectedNode.type === 'document' ? '文档' : '知识' }} →
           </button>
         </template>
         <template v-else-if="selectedEdge">
-          <span class="eyebrow">{{ selectedEdge.type }} relationship</span>
+          <span class="eyebrow">{{
+            selectedEdge.type === 'related' ? '相关关系' : '包含或引用关系'
+          }}</span>
           <h2>
             {{ nodeById.get(selectedEdge.source)?.label }} →
             {{ nodeById.get(selectedEdge.target)?.label }}
@@ -268,7 +276,7 @@ onBeforeUnmount(() => {
             <li v-for="reason in relatedReasons" :key="reason">{{ reason }}</li>
           </ul>
         </template>
-        <p v-else class="muted-text">Select a node or relationship to inspect it.</p>
+        <p v-else class="muted-text">选择节点或关系查看详情。</p>
       </aside>
     </div>
   </main>

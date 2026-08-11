@@ -31,19 +31,23 @@ onMounted(checkBackend)
   <main class="home-view">
     <div class="home-center">
       <h1>TraceMind</h1>
-      <p class="home-desc">Your local knowledge workspace.<br>Documents. Code. Answers with evidence.</p>
-      <RouterLink to="/knowledge-bases" class="home-cta">Open Knowledge Bases →</RouterLink>
+      <p class="home-desc">你的本地知识工作台。<br />文档、代码，以及带证据的回答。</p>
+      <RouterLink to="/knowledge-bases" class="home-cta">打开知识库 →</RouterLink>
       <div v-if="recentKbs.length" class="home-recent">
-        <div class="home-recent-label">Recent</div>
+        <div class="home-recent-label">最近使用</div>
         <RouterLink
           v-for="kb in recentKbs"
           :key="kb.id"
           :to="`/knowledge-bases/${kb.id}/documents`"
           class="home-recent-item"
-        >{{ kb.name }}<span>{{ new Date(kb.updated_at).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' }) }}</span></RouterLink>
+          >{{ kb.name
+          }}<span>{{
+            new Date(kb.updated_at).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+          }}</span></RouterLink
+        >
       </div>
       <div v-if="serviceStatus === 'unavailable'" class="home-status">
-        Backend unavailable — <button class="home-retry" @click="checkBackend">retry</button>
+        后端服务不可用 — <button class="home-retry" @click="checkBackend">重试</button>
       </div>
     </div>
   </main>

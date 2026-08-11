@@ -35,10 +35,6 @@ function result(content = 'class DocumentService'): SemanticSearchResult {
     page_number: null,
     start_line: 10,
     end_line: 14,
-    symbol_kind: 'method',
-    symbol_name: 'source',
-    symbol_qualified_name: 'demo.UserService.source',
-    symbol_signature: 'public String source(String username)',
     ranking_mode: 'reranker',
     retrieval_score: 0.71,
     rerank_score: 0.91234,
@@ -77,7 +73,6 @@ describe('SemanticSearchPanel', () => {
     expect(wrapper.text()).toContain('原 RRF 分数 0.7100')
     expect(wrapper.text()).toContain('原 RRF 排名 2')
     expect(wrapper.text()).toContain('Document service')
-    expect(wrapper.text()).toContain('public String source(String username)')
     expect(wrapper.text()).toContain('第 10-14 行')
     expect(wrapper.text()).toContain('class DocumentService')
   })
@@ -112,50 +107,9 @@ describe('SemanticSearchPanel', () => {
     expect(scope.text()).toContain('source 方法返回什么？')
   })
 
-  it('shows exact overload scope together with path metadata', async () => {
-    mockedHybridSearch.mockResolvedValue({
-      items: [{ ...result(), ranking_mode: 'symbol_exact', score: 1 }],
-      path_scope_mode: 'exact',
-      scoped_relative_path: 'src/main/java/demo/UserService.java',
-      semantic_query: '实现',
-      symbol_scope_mode: 'exact',
-      symbol_scope_reason: null,
-      scoped_symbol_kind: 'method',
-      scoped_symbol_qualified_name: 'demo.UserService.source',
-      scoped_symbol_signature: 'source(String)',
-    })
-    const wrapper = mount(SemanticSearchPanel, { props: { knowledgeBaseId: 'kb-id' } })
-    await wrapper.get('select[aria-label="检索模式"]').setValue('hybrid')
-    await submit(wrapper, 'src/main/java/demo/UserService.java 中的 UserService#source(String)')
-
-    const scope = wrapper.get('[data-testid="semantic-search-scope"]')
-    expect(scope.text()).toContain('src/main/java/demo/UserService.java')
-    expect(scope.text()).toContain('精确符号：source(String)')
-    expect(scope.text()).toContain('demo.UserService.source')
-    expect(scope.text()).toContain('method')
-    expect(wrapper.text()).toContain('精确符号命中')
-    expect(wrapper.text()).not.toContain('100%')
-    expect(wrapper.html()).not.toContain('symbol_lookup')
-  })
-
-  it.each([
-    ['not_found', '符号未找到，已回退普通检索'],
-    ['ambiguous', '符号存在歧义，已回退普通检索'],
-    ['unsupported', '符号匹配范围过大，已回退普通检索'],
-  ] as const)('shows safe fallback reason %s', async (reason, label) => {
-    mockedRerankedSearch.mockResolvedValue({
-      items: [result()],
-      symbol_scope_mode: 'fallback',
-      symbol_scope_reason: reason,
-    })
-    const wrapper = mount(SemanticSearchPanel, { props: { knowledgeBaseId: 'kb-id' } })
-    await submit(wrapper, 'UserService#missing')
-    expect(wrapper.get('[data-testid="semantic-search-scope"]').text()).toContain(label)
-  })
-
-  it('keeps none, missing, and unknown scope metadata visually quiet', async () => {
+  it('keeps missing path scope metadata visually quiet', async () => {
     mockedRerankedSearch
-      .mockResolvedValueOnce({ items: [result()], symbol_scope_mode: 'none' })
+      .mockResolvedValueOnce({ items: [result()] })
       .mockResolvedValueOnce({ items: [result()] })
     const wrapper = mount(SemanticSearchPanel, { props: { knowledgeBaseId: 'kb-id' } })
     await submit(wrapper)

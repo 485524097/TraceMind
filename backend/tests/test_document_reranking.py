@@ -1,4 +1,3 @@
-from dataclasses import replace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -72,24 +71,6 @@ async def test_reranking_maps_ids_preserves_rrf_metadata_and_allows_negative_sco
     sent = provider.rerank.await_args.args[1]
     assert sent[0].candidate_id == str(first.chunk_id)
     assert sent[0].text.endswith("first")
-
-
-async def test_reranking_preserves_symbol_exact_identity_mode() -> None:
-    candidate = replace(
-        search_result("exact", score=1.0, rank=1),
-        ranking_mode="symbol_exact",
-        retrieval_score=None,
-    )
-    provider = AsyncMock()
-    provider.rerank.return_value = [RerankerResult(str(candidate.chunk_id), 3.1, 1)]
-
-    result = (
-        await DocumentRerankingService(provider).rerank("actual query", [candidate], limit=1)
-    )[0]
-
-    assert result.ranking_mode == "symbol_exact"
-    assert result.rerank_score == 3.1
-    provider.rerank.assert_awaited_once()
 
 
 @pytest.mark.parametrize("result_ids", [["unknown"], ["duplicate", "duplicate"]])

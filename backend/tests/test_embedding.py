@@ -59,6 +59,15 @@ def test_query_embedding_uses_general_knowledge_retrieval_instruction() -> None:
     assert QUERY_INSTRUCTION in prompt
 
 
+def test_warmup_only_loads_the_cached_model() -> None:
+    model = FakeModel([[1.0, 0.0, 0.0]])
+    provider = provider_with(model)
+
+    provider.warmup()
+
+    assert model.calls == []
+
+
 @pytest.mark.parametrize(
     "rows",
     [

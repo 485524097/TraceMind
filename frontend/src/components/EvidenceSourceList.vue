@@ -7,12 +7,13 @@ defineProps<{
 }>()
 
 const isCodeSource = (source: EvidenceSource) =>
-  !!(source.symbol_kind || source.symbol_qualified_name || source.symbol_signature)
+  source.chunk_type === 'code' ||
+  (source.language !== null && source.start_line !== null && source.end_line !== null)
 
 function sourceLocation(source: EvidenceSource): string {
-  if (source.page_number !== null) return `Page ${source.page_number}`
+  if (source.page_number !== null) return `第 ${source.page_number} 页`
   if (source.start_line !== null && source.end_line !== null) {
-    return `L${source.start_line}–${source.end_line}`
+    return `第 ${source.start_line}–${source.end_line} 行`
   }
   return `Chunk ${source.chunk_index}`
 }
@@ -33,7 +34,7 @@ function sourceLocation(source: EvidenceSource): string {
       "
     >
       <span class="ev-type" :class="{ 'ev-type-code': isCodeSource(source) }">
-        {{ isCodeSource(source) ? 'Code' : 'Document' }}
+        {{ isCodeSource(source) ? '代码' : '文档' }}
       </span>
       <div class="ev-src-id-row">
         <span class="ev-src-id">{{ source.source_id }}</span>
@@ -41,9 +42,6 @@ function sourceLocation(source: EvidenceSource): string {
       </div>
       <div class="ev-src-loc">
         {{ source.section_title || source.document_name }} · {{ sourceLocation(source) }}
-      </div>
-      <div v-if="source.symbol_signature" class="ev-src-sig-line">
-        <span class="ev-src-sig">{{ source.symbol_signature }}</span>
       </div>
       <div class="ev-src-excerpt">{{ source.content }}</div>
     </div>

@@ -19,6 +19,11 @@ const error = ref('')
 const query = ref('')
 const validationStatus = ref<ValidationStatus | ''>('')
 const tag = ref('')
+const statusLabels: Record<ValidationStatus, string> = {
+  unverified: '未验证',
+  verified: '已验证',
+  outdated: '已过期',
+}
 
 async function load(): Promise<void> {
   loading.value = true
@@ -33,7 +38,7 @@ async function load(): Promise<void> {
     total.value = result.total
     availableTags.value = result.available_tags
   } catch {
-    error.value = 'Knowledge entries could not be loaded.'
+    error.value = '知识列表加载失败，请稍后重试'
   } finally {
     loading.value = false
   }
@@ -54,7 +59,7 @@ onMounted(async () => {
   try {
     shellKbName.value = (await getKnowledgeBase(knowledgeBaseId)).name
   } catch {
-    error.value = 'Knowledge base could not be loaded.'
+    error.value = '知识库不存在或加载失败'
   }
   await load()
 })
@@ -64,42 +69,29 @@ onMounted(async () => {
   <main class="knowledge-page">
     <header class="page-header">
       <div>
-        <h1>Knowledge</h1>
-        <p>Verified problem-solving knowledge saved from conversations.</p>
+        <h1>知识</h1>
+        <p>从会话中沉淀的问题、根因、解决方案与证据。</p>
       </div>
       <RouterLink :to="`/knowledge-bases/${knowledgeBaseId}/chat`" class="text-action">
-        Ask a question →
+        去提问 →
       </RouterLink>
     </header>
 
     <div class="knowledge-filters">
-      <input
-        v-model="query"
-        aria-label="Search knowledge"
-        placeholder="Search problems and solutions…"
-      />
-      <ElSelect
-        v-model="validationStatus"
-        aria-label="Validation status"
-        placeholder="All statuses"
-        clearable
-      >
-        <ElOption label="Unverified" value="unverified" />
-        <ElOption label="Verified" value="verified" />
-        <ElOption label="Outdated" value="outdated" />
+      <input v-model="query" aria-label="搜索知识" placeholder="搜索问题和解决方案…" />
+      <ElSelect v-model="validationStatus" aria-label="验证状态" placeholder="全部状态" clearable>
+        <ElOption label="未验证" value="unverified" />
+        <ElOption label="已验证" value="verified" />
+        <ElOption label="已过期" value="outdated" />
       </ElSelect>
-      <ElSelect v-model="tag" aria-label="Tag" placeholder="All tags" clearable>
+      <ElSelect v-model="tag" aria-label="标签" placeholder="全部标签" clearable>
         <ElOption v-for="item in availableTags" :key="item" :label="item" :value="item" />
       </ElSelect>
     </div>
 
     <div v-if="error" class="conv-error" role="alert">{{ error }}</div>
-    <div v-if="loading" class="loading-state">Loading…</div>
-    <div
-      v-else-if="entries.length"
-      class="knowledge-list"
-      :aria-label="`${total} knowledge entries`"
-    >
+    <div v-if="loading" class="loading-state">正在加载…</div>
+    <div v-else-if="entries.length" class="knowledge-list" :aria-label="`${total} 条知识`">
       <button
         v-for="entry in entries"
         :key="entry.id"
@@ -116,12 +108,12 @@ onMounted(async () => {
         </div>
         <div class="knowledge-row-meta">
           <span class="knowledge-status" :data-status="entry.validation_status">
-            {{ entry.validation_status }}
+            {{ statusLabels[entry.validation_status] }}
           </span>
           <time>{{ new Date(entry.updated_at).toLocaleDateString() }}</time>
         </div>
       </button>
     </div>
-    <ElEmpty v-else description="No knowledge entries yet. Save a completed answer from Ask." />
+    <ElEmpty v-else description="暂无知识，请从已完成的回答中保存。" />
   </main>
 </template>

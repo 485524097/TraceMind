@@ -42,7 +42,6 @@ import type {
 } from '@/types/conversation'
 import type { RagDoneEvent } from '@/types/rag'
 import type { KnowledgeEntryInput } from '@/types/knowledgeEntry'
-import { symbolScopeLabel } from '@/utils/symbolScope'
 
 const route = useRoute()
 const router = useRouter()
@@ -73,6 +72,7 @@ type ProgressState =
 const progressState = ref<ProgressState | null>(null)
 const elapsedSeconds = ref(0)
 const activeSourceCount = ref(0)
+const pipelineMessage = ref('正在分析问题…')
 const evidenceVisible = ref(true)
 const evidenceMessageId = ref<string | null>(null)
 const knowledgeDialogVisible = ref(false)
@@ -87,7 +87,6 @@ const knowledgeInitial = ref<KnowledgeEntryInput>({
   validation_status: 'unverified',
   tags: [],
 })
-const showRetrievalQuery = import.meta.env.DEV
 let controller: AbortController | null = null
 let streamVersion = 0
 let elapsedTimer: number | null = null
@@ -107,19 +106,21 @@ const evidenceMetadata = computed(() => evidenceMessage.value?.generation_metada
 const progressMessage = computed(() => {
   switch (progressState.value) {
     case 'preparing':
-      return 'Retrieving…'
+      return pipelineMessage.value
     case 'retrieved':
-      return `Found ${activeSourceCount.value} sources`
+      return activeSourceCount.value
+        ? `找到 ${activeSourceCount.value} 条来源`
+        : pipelineMessage.value
     case 'generating':
-      return 'Generating answer…'
+      return '正在生成回答…'
     case 'finalizing':
-      return 'Finalizing…'
+      return '正在保存回答…'
     case 'completed':
-      return 'Done'
+      return '已完成'
     case 'failed':
-      return 'Failed'
+      return '生成失败'
     case 'cancelled':
-      return 'Cancelled'
+      return '已取消'
     default:
       return ''
   }
@@ -226,9 +227,9 @@ async function saveKnowledge(value: KnowledgeEntryInput): Promise<void> {
     })
     message.knowledge_entry_id = entry.id
     knowledgeDialogVisible.value = false
-    ElMessage.success('Saved as knowledge')
+    ElMessage.success('已保存为知识')
   } catch {
-    ElMessage.error('Could not save this answer as knowledge')
+    ElMessage.error('保存知识失败，请稍后重试')
   } finally {
     knowledgeSubmitting.value = false
   }
@@ -361,6 +362,24 @@ async function generate(): Promise<void> {
       knowledgeBaseId,
       { query: prompt, language: language.value.trim() || null, conversation_id: cid },
       {
+        onPipeline(event) {
+          if (selectedId.value !== cid || cv !== streamVersion) return
+          const labels: Record<typeof event.phase, string> = {
+            analyzing: '正在分析问题…',
+            routing: '正在选择回答方式…',
+            query_rewrite: '正在理解上下文…',
+            query_embedding: '正在生成查询向量…',
+            hybrid_retrieval: '正在检索知识库…',
+            candidates: `找到 ${event.candidate_count ?? 0} 条候选内容`,
+            reranking: event.status === 'fallback' ? '重排不可用，使用检索结果…' : '正在重排结果…',
+            generating: '正在生成回答…',
+            completed: '已完成',
+          }
+          pipelineMessage.value = labels[event.phase]
+          if (event.phase === 'generating') progressState.value = 'generating'
+          else if (event.phase === 'completed') progressState.value = 'finalizing'
+          else progressState.value = 'preparing'
+        },
         onRetrieval(event) {
           if (selectedId.value !== cid || cv !== streamVersion) return
           const previousMessageId = assistant.id
@@ -465,7 +484,7 @@ onBeforeUnmount(() => {
     <div class="conv-layout">
       <!-- Sidebar -->
       <aside class="conv-sidebar">
-        <div class="conv-sidebar-head">Conversations</div>
+        <div class="conv-sidebar-head">会话</div>
         <div class="conv-sidebar-list">
           <button
             v-for="c in conversations"
@@ -480,10 +499,7 @@ onBeforeUnmount(() => {
               new Date(c.updated_at).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
             }}</span>
           </button>
-          <ElEmpty
-            v-if="!loadingList && conversations.length === 0"
-            description="No conversations"
-          />
+          <ElEmpty v-if="!loadingList && conversations.length === 0" description="暂无会话" />
         </div>
         <div class="conv-sidebar-foot">
           <button
@@ -491,15 +507,15 @@ onBeforeUnmount(() => {
             data-testid="new-conversation-sidebar"
             @click="addConversation"
           >
-            + New
+            + 新建
           </button>
           <ElDropdown v-if="selectedConversation" trigger="click" :hide-on-click="true">
-            <button class="conv-sidebar-more" aria-label="Conversation actions">···</button>
+            <button class="conv-sidebar-more" aria-label="会话操作">···</button>
             <template #dropdown>
               <ElDropdownMenu>
-                <ElDropdownItem @click="renameSelected">Rename</ElDropdownItem>
+                <ElDropdownItem @click="renameSelected">重命名</ElDropdownItem>
                 <ElDropdownItem divided style="color: var(--color-error)" @click="removeSelected"
-                  >Delete</ElDropdownItem
+                  >删除</ElDropdownItem
                 >
               </ElDropdownMenu>
             </template>
@@ -509,15 +525,15 @@ onBeforeUnmount(() => {
 
       <!-- Thread -->
       <div class="conv-thread" data-testid="conversation-thread">
-        <div v-if="loadingMessages" class="loading-state">Loading…</div>
+        <div v-if="loadingMessages" class="loading-state">正在加载…</div>
         <div v-else-if="!selectedId" class="conv-empty">
-          <ElEmpty description="Select or create a conversation" />
+          <ElEmpty description="请选择或新建会话" />
           <ElButton type="primary" data-testid="new-conversation-empty" @click="addConversation"
-            >New Conversation</ElButton
+            >新建会话</ElButton
           >
         </div>
         <template v-else>
-          <ElEmpty v-if="messages.length === 0" description="Ask a question to start" />
+          <ElEmpty v-if="messages.length === 0" description="输入一个问题开始对话" />
 
           <div
             v-for="msg in messages"
@@ -526,7 +542,7 @@ onBeforeUnmount(() => {
             :class="msg.role"
             :data-message-id="msg.id"
           >
-            <div class="msg-who">{{ msg.role === 'user' ? 'You' : 'TraceMind' }}</div>
+            <div class="msg-who">{{ msg.role === 'user' ? '你' : 'TraceMind' }}</div>
             <div v-if="msg.role === 'user'" class="msg-body user-body">{{ msg.content }}</div>
             <div v-else class="msg-body">
               <template v-for="(seg, i) in answerSegments(msg)" :key="i">
@@ -544,23 +560,21 @@ onBeforeUnmount(() => {
                 v-if="msg.status === 'no_answer' && !msg.content"
                 style="color: var(--color-text-secondary)"
               >
-                No sufficiently relevant information found in the knowledge base.
+                知识库中未找到足够相关的信息。
               </div>
             </div>
 
             <!-- Provenance row -->
             <div v-if="msg.role === 'assistant' && msg.sources?.length" class="msg-prov">
               <span
-                >Cited from <strong>{{ msg.sources.length }}</strong> source{{
-                  msg.sources.length > 1 ? 's' : ''
-                }}</span
+                >引用了 <strong>{{ msg.sources.length }}</strong> 条来源</span
               >
               <button
                 v-if="!evidenceVisible || evidenceMessageId !== msg.id"
                 class="msg-prov-link"
                 @click="showEvidence(msg.id)"
               >
-                View evidence →
+                查看证据 →
               </button>
             </div>
             <div
@@ -569,11 +583,12 @@ onBeforeUnmount(() => {
                 msg.status === 'completed' &&
                 !msg.sources?.length &&
                 doneMetadata(msg) &&
+                doneMetadata(msg)?.route_mode !== 'direct' &&
                 !doneMetadata(msg)?.grounded
               "
               class="msg-ungrounded"
             >
-              This answer contains no verified citations. Verify against original sources.
+              这条回答没有可验证的引用，请结合原始资料核对。
             </div>
 
             <div
@@ -590,7 +605,7 @@ onBeforeUnmount(() => {
                 class="msg-prov-link"
                 @click="openKnowledgeDialog(msg)"
               >
-                Save as knowledge
+                保存为知识
               </button>
               <button
                 v-else
@@ -598,27 +613,27 @@ onBeforeUnmount(() => {
                 class="msg-prov-link"
                 @click="viewKnowledge(msg.knowledge_entry_id)"
               >
-                View knowledge →
+                查看知识 →
               </button>
             </div>
 
             <!-- Execution -->
             <details v-if="msg.role === 'assistant' && doneMetadata(msg)" class="exec-details">
-              <summary>Execution details</summary>
+              <summary>执行详情</summary>
               <dl class="exec-grid">
-                <dt>Rewrite</dt>
+                <dt>查询改写</dt>
                 <dd>
                   {{ doneMetadata(msg)?.query_rewrite_mode ?? '—' }} ·
                   {{ formatLatency(doneMetadata(msg)?.query_rewrite_latency_ms) }}
                 </dd>
-                <dt>Retrieval</dt>
+                <dt>检索</dt>
                 <dd>
                   {{ doneMetadata(msg)?.retrieval_mode ?? '—' }} ·
                   {{ formatLatency(doneMetadata(msg)?.retrieval_latency_ms) }}
                 </dd>
-                <dt>Reranker</dt>
+                <dt>重排</dt>
                 <dd>
-                  {{ doneMetadata(msg)?.reranker_fallback ? 'fallback' : 'no fallback' }} ·
+                  {{ doneMetadata(msg)?.reranker_fallback ? '已降级' : '正常' }} ·
                   {{ formatLatency(doneMetadata(msg)?.rerank_latency_ms) }}
                 </dd>
                 <dt>LLM</dt>
@@ -626,21 +641,13 @@ onBeforeUnmount(() => {
                   {{ formatLatency(doneMetadata(msg)?.llm_latency_ms) }} ·
                   {{
                     doneMetadata(msg)?.llm_first_token_latency_ms
-                      ? doneMetadata(msg)?.llm_first_token_latency_ms + 'ms TTFT'
+                      ? doneMetadata(msg)?.llm_first_token_latency_ms + ' ms 首字延迟'
                       : '—'
                   }}
                 </dd>
                 <template v-if="doneMetadata(msg)?.path_scope_mode === 'exact'">
-                  <dt>Path scope</dt>
+                  <dt>路径范围</dt>
                   <dd>{{ doneMetadata(msg)?.scoped_relative_path }}</dd>
-                </template>
-                <template v-if="symbolScopeLabel(doneMetadata(msg))">
-                  <dt>Symbol scope</dt>
-                  <dd>{{ symbolScopeLabel(doneMetadata(msg)) }}</dd>
-                </template>
-                <template v-if="showRetrievalQuery && doneMetadata(msg)?.retrieval_query">
-                  <dt>Retrieval query</dt>
-                  <dd>{{ doneMetadata(msg)?.retrieval_query }}</dd>
                 </template>
               </dl>
             </details>
@@ -665,14 +672,9 @@ onBeforeUnmount(() => {
             data-testid="conversation-composer"
             @submit.prevent="generate"
           >
-            <input
-              v-model="query"
-              maxlength="2000"
-              aria-label="Your question"
-              placeholder="Ask a question…"
-            />
+            <input v-model="query" maxlength="2000" aria-label="你的问题" placeholder="输入问题…" />
             <ElButton native-type="submit" type="primary" :disabled="!query.trim() || generating"
-              >Send</ElButton
+              >发送</ElButton
             >
             <ElButton
               v-if="generating"
@@ -680,7 +682,7 @@ onBeforeUnmount(() => {
               plain
               data-testid="stop-generation"
               @click="stopGeneration()"
-              >Stop</ElButton
+              >停止</ElButton
             >
           </form>
         </template>
@@ -689,8 +691,8 @@ onBeforeUnmount(() => {
       <!-- Evidence Inspector -->
       <aside class="conv-evidence" :class="{ off: !evidenceVisible }">
         <div class="ev-head">
-          <span>Evidence</span>
-          <button @click="evidenceVisible = false" aria-label="Close evidence">×</button>
+          <span>证据</span>
+          <button @click="evidenceVisible = false" aria-label="关闭证据">×</button>
         </div>
         <div class="ev-body">
           <EvidenceSourceList
@@ -707,33 +709,29 @@ onBeforeUnmount(() => {
               text-align: center;
             "
           >
-            No sources available
+            暂无来源
           </div>
 
           <hr v-if="evidenceMetadata" class="ev-divider" />
-          <div v-if="evidenceMetadata" class="ev-sec-title">Execution</div>
+          <div v-if="evidenceMetadata" class="ev-sec-title">执行信息</div>
           <dl v-if="evidenceMetadata" class="ev-exec-grid">
-            <dt>Rewrite</dt>
+            <dt>查询改写</dt>
             <dd>
               {{ evidenceMetadata.query_rewrite_mode ?? '—' }} ·
               {{ formatLatency(evidenceMetadata.query_rewrite_latency_ms) }}
             </dd>
-            <dt>Retrieval</dt>
+            <dt>检索</dt>
             <dd>
               {{ evidenceMetadata.retrieval_mode ?? '—' }} ·
               {{ formatLatency(evidenceMetadata.retrieval_latency_ms) }}
             </dd>
-            <dt>Reranker</dt>
-            <dd>{{ evidenceMetadata.reranker_fallback ? 'fallback' : 'no fallback' }}</dd>
+            <dt>重排</dt>
+            <dd>{{ evidenceMetadata.reranker_fallback ? '已降级' : '正常' }}</dd>
             <dt>LLM</dt>
             <dd>{{ formatLatency(evidenceMetadata.llm_latency_ms) }}</dd>
             <template v-if="evidenceMetadata.path_scope_mode === 'exact'">
-              <dt>Path scope</dt>
+              <dt>路径范围</dt>
               <dd>{{ evidenceMetadata.scoped_relative_path }}</dd>
-            </template>
-            <template v-if="symbolScopeLabel(evidenceMetadata)">
-              <dt>Symbol scope</dt>
-              <dd>{{ symbolScopeLabel(evidenceMetadata) }}</dd>
             </template>
           </dl>
         </div>

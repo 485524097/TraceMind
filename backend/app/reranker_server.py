@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from time import perf_counter
 from typing import Protocol
 
+import torch
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
@@ -75,7 +76,17 @@ def create_reranker_app(
         try:
             app.state.reranker_provider = await asyncio.to_thread(provider_factory, app_settings)
         except Exception as exc:
-            logger.error("Reranker model load failed error_type=%s", type(exc).__name__)
+            logger.exception(
+                "Reranker model load failed model=%s requested_device=%s torch_version=%s "
+                "torch_cuda_version=%s cuda_available=%s error_type=%s error_reason=%s",
+                app_settings.reranker_model_name,
+                app_settings.reranker_device,
+                torch.__version__,
+                torch.version.cuda,
+                torch.cuda.is_available(),
+                type(exc).__name__,
+                getattr(exc, "reason", "unexpected"),
+            )
         try:
             yield
         finally:

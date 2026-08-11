@@ -1,5 +1,6 @@
 from collections.abc import Collection
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Any
 from uuid import UUID
 
@@ -37,15 +38,12 @@ class HybridCandidate:
 
 
 @dataclass(frozen=True)
-class PayloadPoint:
-    id: str
-    payload: dict[str, Any]
-
-
-@dataclass(frozen=True)
-class PayloadScrollResult:
-    points: list[PayloadPoint]
-    truncated: bool = False
+class HybridSearchBatch:
+    hits: list[VectorSearchHit]
+    qdrant_latency_ms: int
+    fusion_latency_ms: int
+    dense_candidate_count: int
+    sparse_candidate_count: int
 
 
 def stable_payload_key(payload: dict[str, Any], point_id: str) -> tuple[object, ...]:
@@ -122,7 +120,6 @@ class QdrantGateway:
         "index_generation",
         "language",
         "chunk_type",
-        "symbol_lookup_keys",
     )
 
     def __init__(
@@ -298,7 +295,6 @@ class QdrantGateway:
         document_id: UUID | None,
         score_threshold: float,
         excluded_chunk_types: Collection[str],
-        symbol_lookup_key: str | None = None,
     ) -> list[VectorSearchHit]:
         query_filter = self._search_filter(
             knowledge_base_id,
@@ -306,7 +302,6 @@ class QdrantGateway:
             language=language,
             document_id=document_id,
             excluded_chunk_types=excluded_chunk_types,
-            symbol_lookup_key=symbol_lookup_key,
         )
         try:
             response = await self.client.query_points(
@@ -338,17 +333,43 @@ class QdrantGateway:
         document_id: UUID | None,
         dense_score_threshold: float,
         excluded_chunk_types: Collection[str],
-        symbol_lookup_key: str | None = None,
     ) -> list[VectorSearchHit]:
+        return (
+            await self.hybrid_search_with_diagnostics(
+                vector,
+                query,
+                knowledge_base_id=knowledge_base_id,
+                generations=generations,
+                limit=limit,
+                language=language,
+                document_id=document_id,
+                dense_score_threshold=dense_score_threshold,
+                excluded_chunk_types=excluded_chunk_types,
+            )
+        ).hits
+
+    async def hybrid_search_with_diagnostics(
+        self,
+        vector: list[float],
+        query: str,
+        *,
+        knowledge_base_id: UUID,
+        generations: list[UUID],
+        limit: int,
+        language: str | None,
+        document_id: UUID | None,
+        dense_score_threshold: float,
+        excluded_chunk_types: Collection[str],
+    ) -> HybridSearchBatch:
         query_filter = self._search_filter(
             knowledge_base_id,
             generations,
             language=language,
             document_id=document_id,
             excluded_chunk_types=excluded_chunk_types,
-            symbol_lookup_key=symbol_lookup_key,
         )
         try:
+            qdrant_started_at = perf_counter()
             responses = await self.client.query_batch_points(
                 self.collection_name,
                 requests=[
@@ -371,6 +392,7 @@ class QdrantGateway:
                     ),
                 ],
             )
+            qdrant_latency_ms = round((perf_counter() - qdrant_started_at) * 1_000)
             if len(responses) != 2:
                 raise VectorIndexError("Hybrid search returned an unexpected branch count")
             dense_response, sparse_response = responses
@@ -382,54 +404,20 @@ class QdrantGateway:
                 HybridCandidate(str(point.id), float(point.score), dict(point.payload or {}))
                 for point in sparse_response.points
             ]
-            return deterministic_rrf(dense_candidates, sparse_candidates, limit=limit)
+            fusion_started_at = perf_counter()
+            hits = deterministic_rrf(dense_candidates, sparse_candidates, limit=limit)
+            fusion_latency_ms = round((perf_counter() - fusion_started_at) * 1_000)
+            return HybridSearchBatch(
+                hits=hits,
+                qdrant_latency_ms=qdrant_latency_ms,
+                fusion_latency_ms=fusion_latency_ms,
+                dense_candidate_count=len(dense_candidates),
+                sparse_candidate_count=len(sparse_candidates),
+            )
         except VectorIndexError:
             raise
         except Exception as exc:
             raise VectorIndexError("Hybrid search is unavailable") from exc
-
-    async def scroll_symbol_matches(
-        self,
-        *,
-        knowledge_base_id: UUID,
-        generations: list[UUID],
-        symbol_lookup_key: str,
-        language: str | None,
-        document_id: UUID | None,
-        max_points: int = 200,
-        page_size: int = 64,
-    ) -> PayloadScrollResult:
-        query_filter = self._search_filter(
-            knowledge_base_id,
-            generations,
-            language=language,
-            document_id=document_id,
-            excluded_chunk_types=("heading",),
-            symbol_lookup_key=symbol_lookup_key,
-        )
-        points: list[PayloadPoint] = []
-        offset: models.ExtendedPointId | None = None
-        try:
-            while len(points) < max_points:
-                records, next_offset = await self.client.scroll(
-                    self.collection_name,
-                    scroll_filter=query_filter,
-                    limit=min(page_size, max_points - len(points)),
-                    offset=offset,
-                    with_payload=True,
-                    with_vectors=False,
-                )
-                points.extend(
-                    PayloadPoint(str(record.id), dict(record.payload or {})) for record in records
-                )
-                if next_offset is None:
-                    return PayloadScrollResult(points)
-                if not records:
-                    return PayloadScrollResult(points, truncated=True)
-                offset = next_offset
-            return PayloadScrollResult(points, truncated=offset is not None)
-        except Exception as exc:
-            raise VectorIndexError("Symbol scope validation is unavailable") from exc
 
     async def _delete_by_filter(self, value_filter: models.Filter) -> None:
         try:
@@ -468,7 +456,6 @@ class QdrantGateway:
         language: str | None,
         document_id: UUID | None,
         excluded_chunk_types: Collection[str],
-        symbol_lookup_key: str | None = None,
     ) -> models.Filter:
         must: list[models.Condition] = [
             cls._equal_condition("knowledge_base_id", knowledge_base_id),
@@ -481,8 +468,6 @@ class QdrantGateway:
             must.append(cls._equal_condition("language", language))
         if document_id is not None:
             must.append(cls._equal_condition("document_id", document_id))
-        if symbol_lookup_key is not None:
-            must.append(cls._equal_condition("symbol_lookup_keys", symbol_lookup_key))
         must_not: list[models.Condition] = []
         if excluded_chunk_types:
             must_not.append(

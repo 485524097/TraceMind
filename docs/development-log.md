@@ -278,3 +278,131 @@ scope.
 The endpoint derives relationships in memory and intentionally has no large-graph pagination,
 clustering or cache. These optimizations should be justified by real local data sizes before being
 added.
+
+# 2026-08-11 — Reproducible PyTorch CUDA environment
+
+## Problem and constraints
+
+The project depended on PyTorch only transitively through `sentence-transformers`. The lock file
+therefore selected the PyPI CPU wheel on Windows, so repairing the virtual environment with
+`uv sync --frozen` replaced the previously hand-installed CUDA wheel. The repair had to preserve
+the Stage 13/14 code and the Linux CPU deployment while making the local Windows CUDA environment
+reproducible from project metadata.
+
+## Adopted design
+
+- Declared `torch==2.13.0` directly and pinned it with explicit uv indexes: CUDA 12.6 on Windows,
+  and the official CPU index on non-Windows platforms. A single lock now contains hashed wheels for
+  all supported platform branches.
+- Kept the existing execution split: the launcher runs the Reranker on CUDA while Backend, query
+  embedding, indexing embedding and Celery remain on CPU. A CUDA-enabled Torch build can still run
+  those CPU workloads on Windows; Linux containers and CI resolve the CPU wheel.
+- Kept CUDA validation in the tracked provider-level preflight. The intentionally local/ignored
+  launcher avoids a second Torch import, validates occupied ports with service health endpoints,
+  runs migrations synchronously, and waits for Backend/Frontend readiness before opening the UI.
+  Explicit CPU device settings retain their existing behavior.
+- Model startup failures now log the model, requested device, Torch version, Torch CUDA runtime,
+  CUDA availability, safe error classification and the original traceback. HTTP error responses
+  remain generic and do not expose exception details.
+
+## Alternatives not adopted
+
+A one-off `pip install`, an unlocked accelerator override and automatic `uv pip --torch-backend`
+were rejected because they do not make project-level `uv sync` reproducible. CPU/CUDA extras were
+also not selected: uv project extras require callers to remember an extra on every sync, so a plain
+sync could still replace the intended local wheel. The platform split matches the current Windows
+local launcher and Linux CPU container/CI topology without adding another dependency workflow.
+
+## Validation and result
+
+- `uv 0.11.20`; NVIDIA driver `571.96`; GPU `NVIDIA GeForce GTX 1650`.
+- `uv sync --frozen` installed `torch 2.13.0+cu126`; a second identical sync retained it.
+  `torch.version.cuda` is `12.6`, `torch.cuda.is_available()` is true, and `uv pip check` reports
+  102 compatible packages.
+- A Linux x86-64 frozen dry run selected `torch 2.13.0+cpu`.
+- `Qwen/Qwen3-Reranker-0.6B` loaded from the launcher's offline cache on `cuda:0` and a two-pair
+  `CrossEncoder.predict()` smoke test completed. An isolated local Reranker server returned
+  `200 {"ready":true}` from `/health/ready`.
+- Backend gates passed: Ruff check; Ruff format check (167 files); mypy (98 source files); pytest
+  (480 passed, 24 skipped, one existing Starlette deprecation warning).
+
+## Current limits
+
+CUDA availability still depends on a compatible NVIDIA driver and a complete offline model cache.
+The provider logs an immediate diagnostic when the requested CUDA runtime is unavailable or model
+loading fails; the launcher reports the corresponding readiness timeout instead of claiming that
+all services started successfully.
+
+# 2026-08-11 — Stage 15 v1.0 architecture reset and daily-use readiness
+
+## 问题与约束
+
+Java Symbol Retrieval 与目录导入把产品推向多语言代码智能，维护面已经超过个人学习 RAG
+的 v1.0 价值。与此同时，RAG 在首次 Embedding、远程 LLM 和大文档 CPU 索引期间缺少足够早、
+足够可信的反馈。此次收敛必须保留 Path Scope、Dense/BM25/RRF/Reranker 语义、Citation、
+Knowledge 与 Knowledge Map，且不得修改固定检索评测资产或引入新的工作流框架。
+
+## 采用方案
+
+- 删除 Tree-sitter Java、Symbol parser/scope/query/direct-scroll、五个数据库字段、Qdrant
+  symbol payload/index、前端 Symbol UI 和 active Symbol evaluation。Java 与其他代码统一进入
+  Generic CodeParser；新的 `20260811_0010` 迁移线性删除旧字段。
+- 删除 directory-based ingestion，只保留普通多文件上传。上传百分比来自 XHR transferred
+  bytes；Parse/Index 使用真实状态与 elapsed time，不制造处理百分比。
+- 增加保守的 full-string Direct/RAG router。Direct 只运行现有 streaming LLM；RAG 将耗时
+  prepare 移入 SSE generator，并暴露不含 prompt、完整 retrieval query 或私有推理的 pipeline
+  event 与稳定 timing。
+- Query Embedding provider 改为 app-level 复用，并在 RAG 已配置时进行一次非阻塞后台模型
+  预热。真实断流暴露 AnyIO level cancellation 会再次取消数据库终态事务，因此用 shielded
+  terminal transaction 保证 assistant `cancelled` 状态落库。
+- 主界面文案收敛为中文，统一管理页宽度，补齐 Knowledge Select 样式，并修复窄屏 Map 的
+  空态和节点标签溢出。Evidence 仅以通用文档或 language/line-range code 信息呈现。
+
+## 未采用方案
+
+未保留 dormant Symbol compatibility、未扩展 Python/JavaScript AST、未恢复目录拓扑、未修改
+Retrieval 阈值/排序/评测资产，也未增加 Agent、GraphRAG、Playwright 或新的 UI framework。
+曾实测把 CPU indexing batch 从 2 提升到 16；同一 148-chunk 文档超过 29 分钟仍未完成，
+而 batch 2 的完整结果为 1103.11 秒（此前一次为 1219.28 秒）。该优化被撤销，两个被取消的
+冗余 generation 均由已存在的 active snapshot 恢复，且没有写入 Qdrant point。
+
+## 验证与结果
+
+- Backend reproducibility：`uv sync --frozen` 与 `uv pip check` 通过，100 packages compatible；
+  Torch 仍为 `2.13.0+cu126`，CUDA 12.6、GTX 1650 可用。Reranker ready=200，最小两候选
+  inference 排序正确，server latency 1136 ms。
+- Backend gates：Ruff check、Ruff format（160 files）与 mypy（94 source files）通过；pytest
+  收集 438 项，414 passed、24 skipped、0 failed（1 个 Starlette deprecation warning）。
+  Disposable PostgreSQL 18 的 migration/constraint/集成集为 22 passed，Qdrant 隔离集成为
+  2 passed；本机 schema 当前为 0010 head。
+- Frontend gates：type-check、lint、Prettier 与 production build 通过；Vitest 为 18 files、
+  85 tests、0 failed。生产产物 main JS 409.49 kB，Map lazy chunk 441.50 kB，无 chunk warning。
+- Qdrant 重建后为 green、267 exact points；payload index 仅有 knowledge base、document、
+  version、generation、language、chunk type 六类通用字段。13/13 原有文档均为 succeeded。
+- 固定 Hybrid evaluation 的 before/after 质量完全一致：Hit@1 0.5909、Hit@5 0.9545、
+  Recall@5 0.8182、MRR@5 0.7311、nDCG@5 0.6467、All-required@5 0.7727，17/22
+  answerable cases passed。最终 warm P95 由 4648.09 ms 降至 2464.07 ms；但原 baseline
+  regression gate 仍因 Recall 下降 0.0227 与 All-required 下降 0.0455 而 exit 1，Stage 15
+  没有降低阈值或改变 baseline。
+- Direct cold 总耗时 46068 ms，warm 三次中位 9890 ms、最大 15621 ms；首个 SSE event 为
+  37–355 ms，所有 retrieval timing/candidate 均为 0。RAG warm retrieval 中位数：知识库主题
+  5473 ms、PDF 总结 3271 ms、明确事实 9472 ms；跨资料 cold retrieval 14420 ms。远程 LLM
+  流式总耗时出现超过本轮 10 分钟采样窗口的长尾，因此完整 4-case cold/warm total matrix
+  未宣称通过。
+- 真实 acceptance KB 逐个导入 Markdown、Python、PDF、DOCX，四种 parser 全部 succeeded，
+  分别产生 9/5/1/2 chunks。worker 模型 warm 后单文档 index 为 3.47–30.75 秒；但一个
+  148-chunk FIFO 任务曾使 upload-to-ready 等待约 19 分钟。Retry Parse 请求返回 202，随后
+  Parse 与 Index 再次 succeeded。临时 KB、文档、Knowledge 与 Conversation 均已删除。
+- 真实 completed answer 保存为 Knowledge 后得到 1 个 Evidence snapshot；Knowledge detail
+  和 5-node/5-edge Map 在桌面/390 px 窄屏均可访问。真实首 token 后断流最终持久化为
+  assistant `cancelled`；不存在 Conversation 返回安全 404。浏览器未发现应用级阻断错误，
+  截图和临时验收资料未进入仓库。
+
+## 遗留风险
+
+- 固定 retrieval baseline gate 是真实红项，尽管 Stage 15 before/after 质量未变化。后续只能
+  通过独立 Retrieval Experiment 修复，不得在本次架构收敛中修改阈值或评测资产。
+- 当前配置使用远程 OpenAI-compatible LLM，RAG 会发送问题、必要历史和检索 Source；其
+  TTFT/总耗时存在显著长尾。敏感资料必须切换本地 Provider 或先完成脱敏。
+- Celery solo/FIFO 加上 CPU Qwen Embedding 会让大文档阻塞后续小文档。v1.0 已提供真实阶段
+  和 elapsed feedback，但尚未解决队列调度与 CPU 吞吐；batch 16 已被实测否决。

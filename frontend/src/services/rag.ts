@@ -5,6 +5,7 @@ import type {
   RagDoneEvent,
   RagErrorEvent,
   RagNoAnswerEvent,
+  RagPipelineEvent,
   RagRetrievalEvent,
   RagStreamRequest,
   RagTokenEvent,
@@ -13,6 +14,7 @@ import type {
 const MAX_EVENT_DATA_CHARS = 1_000_000
 
 export interface RagStreamHandlers {
+  onPipeline(event: RagPipelineEvent): void
   onRetrieval(event: RagRetrievalEvent): void
   onToken(event: RagTokenEvent): void
   onNoAnswer(event: RagNoAnswerEvent): void
@@ -26,15 +28,12 @@ export async function streamRagAnswer(
   handlers: RagStreamHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
-  const response = await fetch(
-    apiUrl(`/api/v1/knowledge-bases/${knowledgeBaseId}/rag/stream`),
-    {
-      method: 'POST',
-      headers: { Accept: 'text/event-stream', 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
-      signal,
-    },
-  )
+  const response = await fetch(apiUrl(`/api/v1/knowledge-bases/${knowledgeBaseId}/rag/stream`), {
+    method: 'POST',
+    headers: { Accept: 'text/event-stream', 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+    signal,
+  })
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { detail?: string } | null
     throw new ApiError(response.status, body?.detail ?? '回答生成服务暂时不可用')
@@ -51,7 +50,8 @@ export async function streamRagAnswer(
         throw new ApiError(502, '回答生成事件过大')
       }
       const data = JSON.parse(event.data) as unknown
-      if (event.event === 'retrieval') handlers.onRetrieval(data as RagRetrievalEvent)
+      if (event.event === 'pipeline') handlers.onPipeline(data as RagPipelineEvent)
+      else if (event.event === 'retrieval') handlers.onRetrieval(data as RagRetrievalEvent)
       else if (event.event === 'token') handlers.onToken(data as RagTokenEvent)
       else if (event.event === 'no_answer') handlers.onNoAnswer(data as RagNoAnswerEvent)
       else if (event.event === 'done') {

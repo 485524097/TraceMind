@@ -17,6 +17,7 @@ function response(chunks: string[], contentType = 'text/event-stream'): Response
 }
 
 const handlers = () => ({
+  onPipeline: vi.fn(),
   onRetrieval: vi.fn(),
   onToken: vi.fn(),
   onNoAnswer: vi.fn(),
@@ -29,6 +30,7 @@ describe('streamRagAnswer', () => {
 
   it('posts JSON and parses events split across arbitrary chunks', async () => {
     const wire =
+      'event: pipeline\ndata: {"trace_id":"t","phase":"routing","status":"completed","route_mode":"direct"}\n\n' +
       'event: retrieval\ndata: {"trace_id":"t","source_count":0,"sources":[]}\n\n' +
       'event: token\ndata: {"trace_id":"t","text":"答"}\n\n' +
       'event: token\ndata: {"trace_id":"t","text":"案"}\n\n' +
@@ -48,6 +50,9 @@ describe('streamRagAnswer', () => {
       headers: { Accept: 'text/event-stream', 'Content-Type': 'application/json' },
       body: JSON.stringify({ query: '问题', language: 'java' }),
     })
+    expect(callbacks.onPipeline).toHaveBeenCalledWith(
+      expect.objectContaining({ phase: 'routing', route_mode: 'direct' }),
+    )
     expect(callbacks.onRetrieval).toHaveBeenCalledOnce()
     expect(callbacks.onToken.mock.calls.map(([event]) => event.text)).toEqual(['答', '案'])
     expect(callbacks.onDone).toHaveBeenCalledOnce()
