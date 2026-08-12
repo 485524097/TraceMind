@@ -486,3 +486,36 @@ Remote provider latency and output grounding remain externally variable. CPU rer
 largest stable local RAG cost. The two-thread worker shares provider objects successfully in the
 measured workload, but deployments with different models or memory limits should validate their own
 concurrency before increasing it further.
+
+# 2026-08-12 — v1.0 release packaging
+
+## Problem and constraints
+
+The repository README still described an early development state and did not present the completed
+document-to-knowledge workflow. This pass is release packaging only: no runtime code, dependency,
+migration, retrieval asset, evaluation baseline or product behavior may change. Local configuration,
+credentials and `.claude/` remain outside version control.
+
+## Adopted design
+
+- Rewrote the README around the verified v1.0 product boundary, five capability groups, two Mermaid
+  diagrams, the fixed Retrieval Evaluation results, public-repository startup commands, important
+  configuration, non-goals and known limitations.
+- Added user-facing v1.0.0 release notes summarizing highlights, architecture decisions, verified
+  gates, limitations and upgrade guidance without reproducing the development history.
+- Reserved four commented README image paths under `docs/images/` for Conversation, Documents,
+  Knowledge and Knowledge Map. No screenshot or synthetic product image is committed; the project
+  owner will capture and review the final public-demo images manually.
+
+## Alternatives not adopted
+
+Runtime version metadata, application code, dependencies and existing evaluation assets were not
+changed because they are outside this documentation-only release commit. Browser screenshot
+automation was also rejected for this pass after the owner chose manual capture.
+
+## Validation and remaining work
+
+Local Markdown links, Mermaid fence structure, Quick Start commands, tracked diff scope and secret /
+absolute-path patterns were checked against the current repository. Before publishing, the owner
+must add the four reviewed screenshots, align runtime/package image version metadata if desired,
+and promote the release branch through the agreed develop/main/tag/GitHub Release flow.
