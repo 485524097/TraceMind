@@ -43,7 +43,7 @@ async def test_live_returns_expected_response() -> None:
     assert response.json() == {
         "status": "ok",
         "service": "TraceMind API",
-        "version": "0.1.0",
+        "version": "1.0.0",
     }
 
 

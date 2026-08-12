@@ -19,7 +19,7 @@ class Settings(BaseSettings):
 
     app_name: str = "TraceMind API"
     app_env: str = "development"
-    app_version: str = "0.1.0"
+    app_version: str = "1.0.0"
     log_level: str = "INFO"
     api_v1_prefix: str = "/api/v1"
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:5173"]

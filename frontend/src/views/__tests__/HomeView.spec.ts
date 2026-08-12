@@ -25,7 +25,7 @@ describe('HomeView', () => {
     mockedFetchHealth.mockResolvedValue({
       status: 'ok',
       service: 'TraceMind API',
-      version: '0.1.0',
+      version: '1.0.0',
     })
     const wrapper = mountView()
     await flushPromises()
@@ -43,7 +43,7 @@ describe('HomeView', () => {
   it('retries backend check on button click', async () => {
     mockedFetchHealth
       .mockRejectedValueOnce(new Error('temp'))
-      .mockResolvedValueOnce({ status: 'ok', service: 'TraceMind API', version: '0.1.0' })
+      .mockResolvedValueOnce({ status: 'ok', service: 'TraceMind API', version: '1.0.0' })
     const wrapper = mountView()
     await flushPromises()
     await wrapper.get('button').trigger('click')
@@ -55,7 +55,7 @@ describe('HomeView', () => {
     mockedFetchHealth.mockResolvedValue({
       status: 'ok',
       service: 'TraceMind API',
-      version: '0.1.0',
+      version: '1.0.0',
     })
     mockedListKbs.mockResolvedValue({
       items: [
