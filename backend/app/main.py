@@ -1,6 +1,7 @@
+import asyncio
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,12 +10,30 @@ from app.api.router import api_router
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
 from app.db.session import Database
+from app.embedding import EmbeddingError, SentenceTransformerEmbeddingProvider
 from app.integrations.qdrant import QdrantClient
 from app.integrations.redis import RedisClient
 from app.llm import OpenAICompatibleLLMProvider
 from app.reranker import HttpRerankerProvider
 
 logger = logging.getLogger(__name__)
+
+
+async def prewarm_embedding_provider(provider: SentenceTransformerEmbeddingProvider) -> None:
+    try:
+        await asyncio.to_thread(provider.warmup)
+        logger.info(
+            "Query embedding model prewarmed model=%s device=%s",
+            provider.model_name,
+            provider.device,
+        )
+    except EmbeddingError:
+        logger.warning(
+            "Query embedding model prewarm failed model=%s device=%s",
+            provider.model_name,
+            provider.device,
+            exc_info=True,
+        )
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -27,6 +46,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.database = Database(app_settings)
         app.state.redis_client = RedisClient(app_settings)
         app.state.qdrant_client = QdrantClient(app_settings)
+        app.state.embedding_provider = SentenceTransformerEmbeddingProvider(
+            app_settings.embedding_model_name,
+            app_settings.embedding_dimension,
+            app_settings.embedding_batch_size,
+            app_settings.resolved_query_embedding_device,
+        )
+        app.state.embedding_warmup_task = (
+            asyncio.create_task(prewarm_embedding_provider(app.state.embedding_provider))
+            if app_settings.rag_llm_enabled and app_settings.app_env.lower() != "test"
+            else None
+        )
         app.state.reranker_provider = (
             HttpRerankerProvider(
                 app_settings.reranker_base_url,
@@ -48,6 +78,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 timeout=app_settings.llm_timeout_seconds,
                 temperature=app_settings.llm_temperature,
                 max_tokens=app_settings.llm_max_tokens,
+                enable_thinking=app_settings.llm_enable_thinking,
             )
             if app_settings.rag_llm_enabled
             else None
@@ -55,6 +86,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
+            if app.state.embedding_warmup_task is not None:
+                app.state.embedding_warmup_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await app.state.embedding_warmup_task
             if app.state.reranker_provider is not None:
                 try:
                     await app.state.reranker_provider.close()

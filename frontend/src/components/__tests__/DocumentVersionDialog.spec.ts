@@ -70,7 +70,10 @@ describe('DocumentVersionDialog', () => {
       props: { modelValue: false, knowledgeBaseId: 'kb-id', document },
       global: {
         stubs: {
-          ElDialog: { props: ['modelValue', 'title'], template: '<section><h2>{{ title }}</h2><slot /></section>' },
+          ElDialog: {
+            props: ['modelValue', 'title'],
+            template: '<section><h2>{{ title }}</h2><slot /></section>',
+          },
         },
       },
     })

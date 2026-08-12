@@ -24,6 +24,17 @@ _DTYPES = {
 }
 
 
+def _validate_requested_device(device: str) -> None:
+    if device.partition(":")[0].casefold() != "cuda" or torch.cuda.is_available():
+        return
+    build_cuda = torch.version.cuda or "none (CPU-only Torch build)"
+    raise RerankerUnavailableError(
+        "CUDA was requested but is unavailable "
+        f"(torch={torch.__version__}, torch_cuda={build_cuda})",
+        reason="cuda_unavailable",
+    )
+
+
 class QwenCrossEncoderProvider(RerankerProvider):
     def __init__(
         self,
@@ -51,6 +62,7 @@ class QwenCrossEncoderProvider(RerankerProvider):
         self.queue_timeout_seconds = queue_timeout_seconds
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._ready = False
+        _validate_requested_device(device)
         try:
             self._model: CrossEncoder | None = CrossEncoder(
                 model_name,

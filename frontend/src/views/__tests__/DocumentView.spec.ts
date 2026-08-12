@@ -14,8 +14,13 @@ import type { DocumentItem, DocumentListResponse } from '@/types/document'
 import DocumentView from '@/views/DocumentView.vue'
 import { ApiError } from '@/services/api'
 
+const routeState = {
+  params: { knowledgeBaseId: 'kb-id' },
+  query: {} as Record<string, string>,
+}
+
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: { knowledgeBaseId: 'kb-id' } }),
+  useRoute: () => routeState,
   RouterLink: { template: '<a><slot /></a>' },
 }))
 vi.mock('@/services/documents', () => ({
@@ -87,7 +92,10 @@ function mountView() {
   return mount(DocumentView, {
     global: {
       stubs: {
-        DocumentUploadPanel: { template: '<button data-testid="upload-completed" @click="$emit(\'completed\')">upload</button>' },
+        DocumentUploadPanel: {
+          template:
+            '<button data-testid="upload-completed" @click="$emit(\'completed\')">upload</button>',
+        },
         DocumentVersionDialog: true,
         DocumentChunkDialog: {
           props: ['modelValue'],
@@ -100,7 +108,8 @@ function mountView() {
         ElDropdownMenu: { template: '<div class="el-dropdown-menu"><slot /></div>' },
         ElDropdownItem: {
           props: ['disabled'],
-          template: '<button :disabled="disabled" :data-testid="$attrs[\'data-testid\']" @click="$emit(\'click\')"><slot /></button>',
+          template:
+            '<button :disabled="disabled" :data-testid="$attrs[\'data-testid\']" @click="$emit(\'click\')"><slot /></button>',
         },
       },
     },
@@ -109,6 +118,7 @@ function mountView() {
 
 describe('DocumentView', () => {
   beforeEach(() => {
+    routeState.query = {}
     vi.restoreAllMocks()
     mockedList.mockReset()
     mockedDelete.mockReset()
@@ -136,20 +146,20 @@ describe('DocumentView', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Documents')
+    expect(wrapper.text()).toContain('文档')
     expect(wrapper.text()).toContain('sample.md')
     expect(wrapper.text()).toContain('V2')
     expect(wrapper.text()).toContain('2.0 KB')
-    expect(wrapper.text()).toContain('解析完成')
-    expect(wrapper.text()).toContain('2 chunks')
-    expect(wrapper.text()).toContain('Retrieval tools')
+    expect(wrapper.text()).toContain('Ready')
+    expect(wrapper.text()).toContain('2 个 Chunk')
+    expect(wrapper.text()).toContain('检索调试')
   })
 
   it('shows an empty state', async () => {
     mockedList.mockResolvedValue(response([]))
     const wrapper = mountView()
     await flushPromises()
-    expect(wrapper.text()).toContain('No documents yet')
+    expect(wrapper.text()).toContain('暂无文档')
   })
 
   it('shows a list failure', async () => {
@@ -163,12 +173,22 @@ describe('DocumentView', () => {
     mockedList.mockResolvedValue(response([document]))
     const wrapper = mountView()
     await flushPromises()
-    const input = wrapper.get('input[aria-label="Filter documents by name or path"]')
+    const input = wrapper.get('input[aria-label="按名称或路径筛选文档"]')
     await input.setValue('sample')
-    const searchBtns = wrapper.findAll('button').filter(b => b.text() === 'Search')
+    const searchBtns = wrapper.findAll('button').filter((b) => b.text() === '搜索')
     await searchBtns[0]?.trigger('click')
     await flushPromises()
     expect(mockedList).toHaveBeenLastCalledWith('kb-id', 'sample')
+  })
+
+  it('focuses a document requested by the Knowledge Map', async () => {
+    routeState.query = { query: 'src/sample.md', focusDocument: 'document-id' }
+    mockedList.mockResolvedValue(response([document]))
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(mockedList).toHaveBeenCalledWith('kb-id', 'src/sample.md')
+    expect(wrapper.get('#document-document-id').classes()).toContain('doc-item-focused')
   })
 
   it('refreshes after uploads open and complete', async () => {
@@ -176,7 +196,7 @@ describe('DocumentView', () => {
     const wrapper = mountView()
     await flushPromises()
     // Open upload panel
-    const importBtn = wrapper.findAll('button').find(b => b.text() === 'Import')
+    const importBtn = wrapper.findAll('button').find((b) => b.text() === '导入文件')
     await importBtn?.trigger('click')
     await flushPromises()
     // Trigger upload completion
@@ -189,7 +209,7 @@ describe('DocumentView', () => {
     mockedList.mockResolvedValue(response([document]))
     const wrapper = mountView()
     await flushPromises()
-    const downloadItems = wrapper.findAll('button').filter(b => b.text() === 'Download')
+    const downloadItems = wrapper.findAll('button').filter((b) => b.text() === '下载')
     await downloadItems[0]?.trigger('click')
     expect(mockedDownload).toHaveBeenCalledWith('kb-id', 'document-id')
   })
@@ -210,13 +230,15 @@ describe('DocumentView', () => {
   })
 
   it.each([
-    ['pending', '等待解析'],
+    ['pending', '等待处理'],
     ['processing', '解析中'],
-    ['succeeded', '解析完成'],
-    ['failed', '解析失败'],
+    ['succeeded', 'Ready'],
+    ['failed', '处理失败'],
   ] as const)('shows the %s parse state', async (parseStatus, label) => {
     mockedList.mockResolvedValue(
-      response([{ ...document, latest_version: { ...document.latest_version, parse_status: parseStatus } }]),
+      response([
+        { ...document, latest_version: { ...document.latest_version, parse_status: parseStatus } },
+      ]),
     )
     const wrapper = mountView()
     await flushPromises()
@@ -228,7 +250,9 @@ describe('DocumentView', () => {
     const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval')
     mockedList
       .mockResolvedValueOnce(
-        response([{ ...document, latest_version: { ...document.latest_version, parse_status: 'pending' } }]),
+        response([
+          { ...document, latest_version: { ...document.latest_version, parse_status: 'pending' } },
+        ]),
       )
       .mockResolvedValueOnce(response([document]))
     const wrapper = mountView()
@@ -255,12 +279,12 @@ describe('DocumentView', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    const reparse = wrapper.findAll('button').find(b => b.text() === 'Re-parse')
+    const reparse = wrapper.findAll('button').find((b) => b.text() === '重新解析')
     await reparse?.trigger('click')
     await flushPromises()
     expect(mockedParse).toHaveBeenCalledWith('kb-id', 'document-id', 'version-id', true)
 
-    const chunks = wrapper.findAll('button').find(b => b.text() === 'Chunks')
+    const chunks = wrapper.findAll('button').find((b) => b.text() === '查看 Chunk')
     await chunks?.trigger('click')
     expect(wrapper.find('[data-testid="chunk-dialog"]').exists()).toBe(true)
   })
@@ -274,8 +298,8 @@ describe('DocumentView', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('索引完成')
-    const reindex = wrapper.findAll('button').find(b => b.text() === 'Re-index')
+    expect(wrapper.text()).toContain('Ready')
+    const reindex = wrapper.findAll('button').find((b) => b.text() === '重建索引')
     await reindex?.trigger('click')
     await flushPromises()
 
@@ -288,7 +312,7 @@ describe('DocumentView', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    const reparse = wrapper.findAll('button').find(b => b.text() === 'Re-parse')
+    const reparse = wrapper.findAll('button').find((b) => b.text() === '重新解析')
     await reparse?.trigger('click')
     await flushPromises()
 

@@ -1,56 +1,26 @@
 import asyncio
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from unittest.mock import AsyncMock
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
-from fastapi import HTTPException
 
-from app.api.routes.rag import PreparedRagStream, prepare_rag_stream, stream_rag_answer
-from app.core.config import Settings
-from app.schemas.conversation import ConversationMessageResponse
+from app.api.routes.rag import PreparedRagStream, stream_rag_answer
 from app.schemas.rag import RagStreamRequest
 from app.services.conversation import (
     ConversationExchange,
     ConversationService,
     ConversationTurn,
 )
-from app.services.rag import RagRetrievalUnavailableError, RagService
-
-SAFE_SCOPE_METADATA = {
-    "symbol_scope_mode": "none",
-    "symbol_scope_reason": None,
-    "scoped_symbol_kind": None,
-    "scoped_symbol_qualified_name": None,
-    "scoped_symbol_signature": None,
-}
-
-
-@dataclass
-class FakePrepared:
-    trace_id: UUID
-    knowledge_base_id: UUID
-    query_rewrite_mode: str = "rewritten"
-    query_rewrite_latency_ms: int = 7
-    conversation_history: tuple[ConversationTurn, ...] = (ConversationTurn("历史问题", "历史回答"),)
-    retrieval_query: str = "独立检索问题"
-    path_scope_mode: str = "none"
-    scoped_relative_path: str | None = None
-    symbol_scope_mode: str = "none"
-    symbol_scope_reason: str | None = None
-    scoped_symbol_kind: str | None = None
-    scoped_symbol_qualified_name: str | None = None
-    scoped_symbol_signature: str | None = None
 
 
 @dataclass
 class FakeRagService:
     events: list[tuple[str, dict[str, object]]]
 
-    async def stream_answer(
-        self, prepared: object
+    async def stream_query(
+        self, *args: object, **kwargs: object
     ) -> AsyncGenerator[tuple[str, dict[str, object]]]:
         for item in self.events:
             yield item
@@ -68,8 +38,8 @@ class DisconnectRequest:
 
 @dataclass
 class BlockingRagService:
-    async def stream_answer(
-        self, prepared: object
+    async def stream_query(
+        self, *args: object, **kwargs: object
     ) -> AsyncGenerator[tuple[str, dict[str, object]]]:
         yield "retrieval", {"trace_id": "trace", "sources": []}
         await asyncio.Event().wait()
@@ -91,7 +61,10 @@ def prepared_stream(
     persistence = AsyncMock(spec=ConversationService)
     stream = PreparedRagStream(
         FakeRagService(events),  # type: ignore[arg-type]
-        FakePrepared(trace_id, knowledge_base_id),  # type: ignore[arg-type]
+        knowledge_base_id,
+        RagStreamRequest(query="问题", conversation_id=exchange.conversation_id),
+        trace_id,
+        (ConversationTurn("历史问题", "历史回答"),),
         persistence,
         exchange,
     )
@@ -114,11 +87,6 @@ async def test_completed_answer_persists_guarded_content_sources_and_metadata(
         "source_id": "S1",
         "content": "生成时正文",
         "document_name": "doc.md",
-        "symbol_kind": "method",
-        "symbol_name": "run",
-        "symbol_qualified_name": "demo.Sample.run",
-        "symbol_signature": "void run()",
-        "ranking_mode": "symbol_exact",
     }
     done = {
         "trace_id": "trace",
@@ -129,9 +97,9 @@ async def test_completed_answer_persists_guarded_content_sources_and_metadata(
         "query_rewrite_mode": "rewritten",
         "query_rewrite_latency_ms": 7,
         "history_turn_count": 1,
-        "retrieval_query": "独立检索问题",
         "path_scope_mode": "none",
         "scoped_relative_path": None,
+        "llm_first_token_latency_ms": 4,
     }
     stream, persistence, exchange = prepared_stream(
         [
@@ -141,15 +109,6 @@ async def test_completed_answer_persists_guarded_content_sources_and_metadata(
             ("done", done),
         ]
     )
-    exact_scope = {
-        "symbol_scope_mode": "exact",
-        "symbol_scope_reason": None,
-        "scoped_symbol_kind": "method",
-        "scoped_symbol_qualified_name": "demo.Sample.run",
-        "scoped_symbol_signature": "void run()",
-    }
-    for key, value in exact_scope.items():
-        setattr(stream.prepared, key, value)
     await consume(stream)
 
     persistence.finish_exchange.assert_awaited_once_with(
@@ -157,20 +116,10 @@ async def test_completed_answer_persists_guarded_content_sources_and_metadata(
         status="completed",
         content="安全回答 [S1]",
         sources=[source],
-        generation_metadata={
-            **exact_scope,
-            "llm_first_token_latency_ms": 0,
-            **done,
-        },
+        generation_metadata=done,
     )
     source["content"] = "后来改变"
     assert persistence.finish_exchange.await_args.kwargs["sources"][0]["content"] == "生成时正文"
-    assert persistence.finish_exchange.await_args.kwargs["sources"][0]["symbol_signature"] == (
-        "void run()"
-    )
-    assert persistence.finish_exchange.await_args.kwargs["sources"][0]["ranking_mode"] == (
-        "symbol_exact"
-    )
     assert "lookup" not in str(persistence.finish_exchange.await_args.kwargs)
 
 
@@ -189,14 +138,7 @@ async def test_no_answer_is_persisted_as_terminal_message() -> None:
         content="没有足够信息",
         sources=[],
         generation_metadata={
-            "query_rewrite_mode": "rewritten",
-            "query_rewrite_latency_ms": 7,
             "history_turn_count": 1,
-            "retrieval_query": "独立检索问题",
-            "path_scope_mode": "none",
-            "scoped_relative_path": None,
-            **SAFE_SCOPE_METADATA,
-            "llm_first_token_latency_ms": 0,
             "trace_id": "trace",
             "finish_reason": "no_answer",
         },
@@ -224,15 +166,10 @@ async def test_llm_error_persists_only_safe_public_error() -> None:
         "content": "回答生成服务暂时不可用，请稍后重试。",
         "sources": [],
         "generation_metadata": {
+            "trace_id": "trace",
+            "history_turn_count": 1,
             "error_code": "llm_unavailable",
             "llm_first_token_latency_ms": 0,
-            "query_rewrite_mode": "rewritten",
-            "query_rewrite_latency_ms": 7,
-            "history_turn_count": 1,
-            "retrieval_query": "独立检索问题",
-            "path_scope_mode": "none",
-            "scoped_relative_path": None,
-            **SAFE_SCOPE_METADATA,
         },
     }
     assert "upstream" not in str(kwargs).lower()
@@ -254,14 +191,9 @@ async def test_disconnect_persists_cancelled_without_pending_message() -> None:
         content="部分回答",
         sources=[],
         generation_metadata={
-            "cancelled": True,
-            "query_rewrite_mode": "rewritten",
-            "query_rewrite_latency_ms": 7,
+            "trace_id": "trace",
             "history_turn_count": 1,
-            "retrieval_query": "独立检索问题",
-            "path_scope_mode": "none",
-            "scoped_relative_path": None,
-            **SAFE_SCOPE_METADATA,
+            "cancelled": True,
             "llm_first_token_latency_ms": 0,
         },
     )
@@ -280,7 +212,10 @@ async def test_task_cancellation_persists_cancelled_status() -> None:
     persistence = AsyncMock(spec=ConversationService)
     stream = PreparedRagStream(
         BlockingRagService(),  # type: ignore[arg-type]
-        FakePrepared(trace_id, knowledge_base_id),  # type: ignore[arg-type]
+        knowledge_base_id,
+        RagStreamRequest(query="问题", conversation_id=exchange.conversation_id),
+        trace_id,
+        (),
         persistence,
         exchange,
     )
@@ -297,77 +232,47 @@ async def test_task_cancellation_persists_cancelled_status() -> None:
         content="",
         sources=[],
         generation_metadata={
+            "trace_id": "trace",
+            "history_turn_count": 0,
             "cancelled": True,
-            "query_rewrite_mode": "rewritten",
-            "query_rewrite_latency_ms": 7,
-            "history_turn_count": 1,
-            "retrieval_query": "独立检索问题",
-            "path_scope_mode": "none",
-            "scoped_relative_path": None,
-            **SAFE_SCOPE_METADATA,
             "llm_first_token_latency_ms": 0,
         },
     )
 
 
 async def test_retrieval_error_persists_failed_with_safe_scope_metadata() -> None:
-    knowledge_base_id, conversation_id, trace_id = uuid4(), uuid4(), uuid4()
-    exchange = ConversationExchange(
-        knowledge_base_id,
-        conversation_id,
-        uuid4(),
-        uuid4(),
-        trace_id,
-    )
     scope = {
         "path_scope_mode": "exact",
         "scoped_relative_path": "src/UserService.java",
-        "symbol_scope_mode": "exact",
-        "symbol_scope_reason": None,
-        "scoped_symbol_kind": "method",
-        "scoped_symbol_qualified_name": "demo.UserService.source",
-        "scoped_symbol_signature": "String source(String username)",
     }
-    service = AsyncMock(spec=RagService)
-    service.settings = Settings(_env_file=None)
-    service.prepare.side_effect = RagRetrievalUnavailableError(scope)
-    conversation = AsyncMock(spec=ConversationService)
-    conversation.begin_exchange.return_value = exchange
+    stream, persistence, exchange = prepared_stream(
+        [
+            (
+                "error",
+                {
+                    "trace_id": "trace",
+                    "route_mode": "rag",
+                    "code": "retrieval_unavailable",
+                    "message": "回答生成服务暂时不可用，请稍后重试。",
+                    **scope,
+                },
+            )
+        ]
+    )
+    await consume(stream)
 
-    with pytest.raises(HTTPException) as caught:
-        await prepare_rag_stream(
-            knowledge_base_id,
-            RagStreamRequest(query="UserService#source", conversation_id=conversation_id),
-            service,
-            conversation,
-        )
-
-    assert caught.value.status_code == 503
-    conversation.finish_exchange.assert_awaited_once_with(
+    persistence.finish_exchange.assert_awaited_once_with(
         exchange,
         status="failed",
         content="回答生成服务暂时不可用，请稍后重试。",
         sources=None,
-        generation_metadata={"error_code": "retrieval_unavailable", **scope},
+        generation_metadata={
+            "trace_id": "trace",
+            "history_turn_count": 1,
+            "route_mode": "rag",
+            "path_scope_mode": "exact",
+            "scoped_relative_path": "src/UserService.java",
+            "error_code": "retrieval_unavailable",
+            "llm_first_token_latency_ms": 0,
+        },
     )
-    assert "lookup" not in str(conversation.finish_exchange.await_args.kwargs)
-
-
-def test_legacy_generation_metadata_defaults_symbol_scope_to_none() -> None:
-    response = ConversationMessageResponse.model_validate(
-        {
-            "id": uuid4(),
-            "conversation_id": uuid4(),
-            "role": "assistant",
-            "status": "completed",
-            "content": "legacy",
-            "trace_id": uuid4(),
-            "sources": None,
-            "generation_metadata": {"retrieval_mode": "hybrid"},
-            "created_at": datetime.now(UTC),
-        }
-    )
-
-    assert response.generation_metadata is not None
-    assert response.generation_metadata["symbol_scope_mode"] == "none"
-    assert response.generation_metadata["scoped_symbol_qualified_name"] is None

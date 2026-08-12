@@ -72,6 +72,7 @@ async def test_openai_provider_passes_parameters_extracts_deltas_and_closes() ->
         stream=True,
         temperature=0.2,
         max_tokens=300,
+        extra_body=None,
     )
     upstream.close.assert_awaited_once()
 
@@ -91,6 +92,27 @@ async def test_openai_provider_converts_start_error_to_safe_exception() -> None:
     with pytest.raises(LLMProviderError, match="could not be started") as caught:
         await provider.stream([LLMMessage(role="user", content="x")])
     assert "private" not in str(caught.value)
+
+
+async def test_openai_provider_passes_explicit_thinking_setting() -> None:
+    upstream = FakeUpstream([])
+    client = fake_client(upstream)
+    provider = OpenAICompatibleLLMProvider(
+        base_url="http://localhost/v1",
+        api_key=None,
+        model="hybrid-thinking-model",
+        timeout=12,
+        temperature=0.1,
+        max_tokens=300,
+        enable_thinking=False,
+        client=cast(AsyncOpenAI, client),
+    )
+
+    stream = await provider.stream([LLMMessage(role="user", content="question")])
+    assert [delta async for delta in stream] == []
+    assert client.chat.completions.create.await_args.kwargs["extra_body"] == {
+        "enable_thinking": False
+    }
 
 
 async def test_openai_provider_ignores_empty_delta_and_closes_on_cancellation() -> None:

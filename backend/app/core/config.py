@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = 120
     llm_temperature: float = 0.1
     llm_max_tokens: int = 1_200
+    llm_enable_thinking: bool | None = None
     rag_retrieval_limit: int = 5
     rag_rerank_candidate_limit: int = 10
     rag_max_context_chars: int = 12_000
@@ -133,6 +134,13 @@ class Settings(BaseSettings):
     def normalize_optional_string(cls, value: object) -> object:
         if isinstance(value, str):
             return value.strip() or None
+        return value
+
+    @field_validator("llm_enable_thinking", mode="before")
+    @classmethod
+    def normalize_optional_bool(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
         return value
 
     @field_validator("reranker_base_url")

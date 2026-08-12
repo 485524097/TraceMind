@@ -1,7 +1,8 @@
 import asyncio
 import logging
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from time import perf_counter
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
@@ -13,7 +14,6 @@ from app.indexing import QdrantGateway, VectorIndexError, VectorPoint
 from app.models.document import DocumentChunk, DocumentVersion
 from app.repositories.document import DocumentRepository
 from app.repositories.document_indexing import (
-    ActiveGeneration,
     DocumentIndexingRepository,
     IndexingVersionRecord,
     IndexSnapshot,
@@ -27,7 +27,6 @@ from app.services.exceptions import (
     SemanticSearchUnavailableError,
 )
 from app.services.retrieval_query import ExplicitDocumentPathResolver, PreparedRetrievalQuery
-from app.services.symbol_scope import SymbolScopeResolver
 
 logger = logging.getLogger(__name__)
 
@@ -66,14 +65,31 @@ class SemanticSearchResult:
     page_number: int | None
     start_line: int | None
     end_line: int | None
-    symbol_kind: str | None = None
-    symbol_name: str | None = None
-    symbol_qualified_name: str | None = None
-    symbol_signature: str | None = None
     ranking_mode: str | None = None
     retrieval_score: float | None = None
     rerank_score: float | None = None
     retrieval_rank: int | None = None
+
+
+@dataclass(frozen=True)
+class PreparedHybridSearch:
+    knowledge_base_id: UUID
+    prepared_query: PreparedRetrievalQuery
+    language: str | None
+    limit: int
+    generations: tuple[UUID, ...]
+    vector: list[float] | None
+    embedding_latency_ms: int
+
+
+@dataclass(frozen=True)
+class HybridRetrievalResult:
+    items: list[SemanticSearchResult]
+    embedding_latency_ms: int
+    qdrant_latency_ms: int
+    fusion_latency_ms: int
+    dense_candidate_count: int
+    sparse_candidate_count: int
 
 
 def deterministic_point_id(version_id: UUID, generation: UUID, chunk_index: int) -> UUID:
@@ -85,12 +101,6 @@ def build_document_embedding_text(record: IndexingVersionRecord, chunk: Document
     relative_path = record.document.relative_path or record.document.name
     if relative_path != record.document.name:
         lines.append(f"Path: {relative_path}")
-    if chunk.symbol_qualified_name or chunk.symbol_name:
-        lines.append(f"Symbol: {chunk.symbol_qualified_name or chunk.symbol_name}")
-    if chunk.symbol_signature:
-        lines.append(f"Signature: {chunk.symbol_signature}")
-    if chunk.symbol_kind:
-        lines.append(f"Kind: {chunk.symbol_kind}")
     if chunk.section_title:
         lines.append(f"Section: {chunk.section_title}")
     lines.append(f"Type: {chunk.chunk_type}")
@@ -105,12 +115,6 @@ def build_sparse_document_text(record: IndexingVersionRecord, chunk: DocumentChu
     relative_path = record.document.relative_path or record.document.name
     if relative_path != record.document.name:
         parts.append(f"Path: {relative_path}")
-    if chunk.symbol_qualified_name or chunk.symbol_name:
-        parts.append(f"Symbol: {chunk.symbol_qualified_name or chunk.symbol_name}")
-    if chunk.symbol_signature:
-        parts.append(f"Signature: {chunk.symbol_signature}")
-    if chunk.symbol_kind:
-        parts.append(f"Kind: {chunk.symbol_kind}")
     if chunk.section_title:
         parts.append(chunk.section_title)
     parts.append(chunk.content)
@@ -128,7 +132,6 @@ class DocumentIndexingService:
         dispatcher: DocumentIndexingDispatcher | None = None,
         repository: DocumentIndexingRepository | None = None,
         path_resolver: ExplicitDocumentPathResolver | None = None,
-        symbol_scope_resolver: SymbolScopeResolver | None = None,
     ) -> None:
         self.session = session
         self.settings = settings
@@ -140,7 +143,6 @@ class DocumentIndexingService:
             DocumentRepository(session),
             set(settings.document_allowed_extensions),
         )
-        self.symbol_scope_resolver = symbol_scope_resolver or SymbolScopeResolver(gateway)
 
     async def prepare_retrieval_query(
         self,
@@ -148,39 +150,12 @@ class DocumentIndexingService:
         query: str,
         *,
         document_id: UUID | None,
-        language: str | None = None,
-        resolve_symbol_scope: bool = True,
     ) -> PreparedRetrievalQuery:
-        prepared = await self.path_resolver.prepare(
+        return await self.path_resolver.prepare(
             knowledge_base_id,
             query,
             document_id=document_id,
         )
-        if not resolve_symbol_scope:
-            return prepared
-        generations = await self.repository.list_active_generations(
-            knowledge_base_id, document_id=prepared.scoped_document_id
-        )
-        try:
-            return await self.symbol_scope_resolver.prepare(
-                prepared,
-                knowledge_base_id=knowledge_base_id,
-                generations=[item.generation for item in generations],
-                language=language,
-            )
-        except VectorIndexError as exc:
-            raise SemanticSearchUnavailableError(
-                "Semantic search is unavailable",
-                scope_metadata={
-                    "path_scope_mode": prepared.path_scope_mode,
-                    "scoped_relative_path": prepared.explicit_relative_path,
-                    "symbol_scope_mode": "none",
-                    "symbol_scope_reason": None,
-                    "scoped_symbol_kind": None,
-                    "scoped_symbol_qualified_name": None,
-                    "scoped_symbol_signature": None,
-                },
-            ) from exc
 
     async def request_index(
         self,
@@ -342,7 +317,7 @@ class DocumentIndexingService:
         prepared_query: PreparedRetrievalQuery | None = None,
     ) -> list[SemanticSearchResult]:
         prepared = prepared_query or await self.prepare_retrieval_query(
-            knowledge_base_id, query, document_id=document_id, language=language
+            knowledge_base_id, query, document_id=document_id
         )
         generations = await self.repository.list_active_generations(
             knowledge_base_id, document_id=prepared.scoped_document_id
@@ -362,21 +337,11 @@ class DocumentIndexingService:
                 document_id=prepared.scoped_document_id,
                 score_threshold=self.settings.semantic_search_score_threshold,
                 excluded_chunk_types=("heading",),
-                symbol_lookup_key=prepared.scoped_symbol_lookup_key,
             )
             results = [
                 self._search_result(hit.score, hit.payload, ranking_mode="dense") for hit in hits
             ]
-            results = self._enforce_retrieval_scope(results, prepared)
-            if results or prepared.symbol_scope_mode != "exact":
-                return results
-            return await self._direct_symbol_results(
-                knowledge_base_id,
-                prepared,
-                generations,
-                language=language,
-                limit=limit,
-            )
+            return self._enforce_document_scope(results, prepared.scoped_document_id)
         except (EmbeddingError, VectorIndexError) as exc:
             raise SemanticSearchUnavailableError("Semantic search is unavailable") from exc
 
@@ -390,29 +355,77 @@ class DocumentIndexingService:
         document_id: UUID | None,
         prepared_query: PreparedRetrievalQuery | None = None,
     ) -> list[SemanticSearchResult]:
-        prepared = prepared_query or await self.prepare_retrieval_query(
-            knowledge_base_id, query, document_id=document_id, language=language
+        prepared = await self.prepare_hybrid_search(
+            knowledge_base_id,
+            query=query,
+            limit=limit,
+            language=language,
+            document_id=document_id,
+            prepared_query=prepared_query,
         )
-        generations = await self.repository.list_active_generations(
+        return (await self.execute_hybrid_search(prepared)).items
+
+    async def prepare_hybrid_search(
+        self,
+        knowledge_base_id: UUID,
+        *,
+        query: str,
+        limit: int,
+        language: str | None,
+        document_id: UUID | None,
+        prepared_query: PreparedRetrievalQuery | None = None,
+    ) -> PreparedHybridSearch:
+        prepared = prepared_query or await self.prepare_retrieval_query(
+            knowledge_base_id, query, document_id=document_id
+        )
+        active = await self.repository.list_active_generations(
             knowledge_base_id, document_id=prepared.scoped_document_id
         )
+        generations = tuple(item.generation for item in active)
         if not generations:
-            return []
+            return PreparedHybridSearch(
+                knowledge_base_id,
+                prepared,
+                language,
+                limit,
+                (),
+                None,
+                0,
+            )
         try:
-            await self.gateway.ensure_collection()
+            embedding_started_at = perf_counter()
             vector = await asyncio.to_thread(self.provider.embed_query, prepared.semantic_query)
             validate_embeddings([vector], dimension=self.provider.dimension)
-            hits = await self.gateway.hybrid_search(
+            return PreparedHybridSearch(
+                knowledge_base_id,
+                prepared,
+                language,
+                limit,
+                generations,
                 vector,
-                prepared.semantic_query,
-                knowledge_base_id=knowledge_base_id,
-                generations=[item.generation for item in generations],
-                limit=limit,
-                language=language,
-                document_id=prepared.scoped_document_id,
+                round((perf_counter() - embedding_started_at) * 1_000),
+            )
+        except EmbeddingError as exc:
+            raise HybridSearchUnavailableError("Hybrid search is unavailable") from exc
+
+    async def execute_hybrid_search(
+        self,
+        prepared: PreparedHybridSearch,
+    ) -> HybridRetrievalResult:
+        if prepared.vector is None or not prepared.generations:
+            return HybridRetrievalResult([], prepared.embedding_latency_ms, 0, 0, 0, 0)
+        try:
+            await self.gateway.ensure_collection()
+            batch = await self.gateway.hybrid_search_with_diagnostics(
+                prepared.vector,
+                prepared.prepared_query.semantic_query,
+                knowledge_base_id=prepared.knowledge_base_id,
+                generations=list(prepared.generations),
+                limit=prepared.limit,
+                language=prepared.language,
+                document_id=prepared.prepared_query.scoped_document_id,
                 dense_score_threshold=self.settings.semantic_search_score_threshold,
                 excluded_chunk_types=("heading",),
-                symbol_lookup_key=prepared.scoped_symbol_lookup_key,
             )
             results = [
                 self._search_result(
@@ -422,19 +435,17 @@ class DocumentIndexingService:
                     retrieval_score=hit.score,
                     retrieval_rank=rank,
                 )
-                for rank, hit in enumerate(hits, start=1)
+                for rank, hit in enumerate(batch.hits, start=1)
             ]
-            results = self._enforce_retrieval_scope(results, prepared)
-            if results or prepared.symbol_scope_mode != "exact":
-                return results
-            return await self._direct_symbol_results(
-                knowledge_base_id,
-                prepared,
-                generations,
-                language=language,
-                limit=limit,
+            return HybridRetrievalResult(
+                self._enforce_document_scope(results, prepared.prepared_query.scoped_document_id),
+                prepared.embedding_latency_ms,
+                batch.qdrant_latency_ms,
+                batch.fusion_latency_ms,
+                batch.dense_candidate_count,
+                batch.sparse_candidate_count,
             )
-        except (EmbeddingError, VectorIndexError) as exc:
+        except VectorIndexError as exc:
             raise HybridSearchUnavailableError("Hybrid search is unavailable") from exc
 
     async def _claim(self, version_id: UUID, *, force: bool) -> IndexClaim | None:
@@ -527,65 +538,6 @@ class DocumentIndexingService:
         except VectorIndexError:
             logger.warning("A stale Qdrant index generation requires later cleanup")
 
-    async def _direct_symbol_results(
-        self,
-        knowledge_base_id: UUID,
-        prepared: PreparedRetrievalQuery,
-        generations: list[ActiveGeneration],
-        *,
-        language: str | None,
-        limit: int,
-    ) -> list[SemanticSearchResult]:
-        lookup_key = prepared.scoped_symbol_lookup_key
-        if lookup_key is None:
-            return []
-
-        async def load_results(
-            active_generations: list[ActiveGeneration],
-        ) -> list[SemanticSearchResult]:
-            result = await self.gateway.scroll_symbol_matches(
-                knowledge_base_id=knowledge_base_id,
-                generations=[item.generation for item in active_generations],
-                symbol_lookup_key=lookup_key,
-                language=language,
-                document_id=prepared.scoped_document_id,
-            )
-            converted = [
-                self._search_result(1.0, point.payload, ranking_mode="symbol_exact")
-                for point in result.points
-            ]
-            scoped = self._enforce_retrieval_scope(converted, prepared)
-            scoped.sort(key=self._symbol_result_order)
-            return scoped
-
-        results = await load_results(generations)
-        if not results:
-            refreshed = await self.repository.list_active_generations(
-                knowledge_base_id, document_id=prepared.scoped_document_id
-            )
-            results = await load_results(refreshed) if refreshed else []
-        return [
-            replace(
-                result,
-                retrieval_score=None,
-                rerank_score=None,
-                retrieval_rank=rank,
-            )
-            for rank, result in enumerate(results[:limit], start=1)
-        ]
-
-    @staticmethod
-    def _symbol_result_order(result: SemanticSearchResult) -> tuple[object, ...]:
-        return (
-            result.relative_path,
-            result.start_line is None,
-            result.start_line or 0,
-            result.end_line is None,
-            result.end_line or 0,
-            result.chunk_index,
-            str(result.chunk_id),
-        )
-
     async def _require_scoped_version(
         self, knowledge_base_id: UUID, document_id: UUID, version_id: UUID
     ) -> DocumentVersion:
@@ -623,13 +575,7 @@ class DocumentIndexingService:
             "page_number": chunk.page_number,
             "start_line": chunk.start_line,
             "end_line": chunk.end_line,
-            "symbol_kind": chunk.symbol_kind,
-            "symbol_name": chunk.symbol_name,
-            "symbol_qualified_name": chunk.symbol_qualified_name,
-            "symbol_signature": chunk.symbol_signature,
         }
-        if chunk.symbol_lookup_keys:
-            payload["symbol_lookup_keys"] = list(chunk.symbol_lookup_keys)
         return VectorPoint(
             id=deterministic_point_id(version.id, generation, chunk.chunk_index),
             dense_vector=vector,
@@ -668,10 +614,6 @@ class DocumentIndexingService:
                 page_number=int(payload["page_number"]) if payload.get("page_number") else None,
                 start_line=int(payload["start_line"]) if payload.get("start_line") else None,
                 end_line=int(payload["end_line"]) if payload.get("end_line") else None,
-                symbol_kind=_optional_payload_string(payload, "symbol_kind"),
-                symbol_name=_optional_payload_string(payload, "symbol_name"),
-                symbol_qualified_name=_optional_payload_string(payload, "symbol_qualified_name"),
-                symbol_signature=_optional_payload_string(payload, "symbol_signature"),
                 ranking_mode=ranking_mode,
                 retrieval_score=retrieval_score,
                 retrieval_rank=retrieval_rank,
@@ -687,24 +629,3 @@ class DocumentIndexingService:
         if document_id is None:
             return results
         return [result for result in results if result.document_id == document_id]
-
-    @classmethod
-    def _enforce_retrieval_scope(
-        cls,
-        results: list[SemanticSearchResult],
-        prepared: PreparedRetrievalQuery,
-    ) -> list[SemanticSearchResult]:
-        scoped = cls._enforce_document_scope(results, prepared.scoped_document_id)
-        if prepared.symbol_scope_mode != "exact":
-            return scoped
-        return [
-            result
-            for result in scoped
-            if result.symbol_kind == prepared.scoped_symbol_kind
-            and result.symbol_qualified_name == prepared.scoped_symbol_qualified_name
-        ]
-
-
-def _optional_payload_string(payload: dict[str, Any], key: str) -> str | None:
-    value = payload.get(key)
-    return value if isinstance(value, str) and value else None

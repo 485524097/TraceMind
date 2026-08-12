@@ -40,7 +40,6 @@ Core principle: Minimal clarity + Developer precision + Inspectable evidence
 - File path
 - Section / Page / Chunk
 - Version
-- Method signature
 - Line range
 - Status tags
 
@@ -49,7 +48,7 @@ Core principle: Minimal clarity + Developer precision + Inspectable evidence
 - Retrieval mode (hybrid, reranker)
 - Reranker fallback
 - Latency
-- Symbol scope / Path scope
+- Path scope
 - Trace metadata
 
 **Rules:**
@@ -65,18 +64,18 @@ Two semantic layers. No global sidebar.
 
 ### Global Bar (44px)
 ```
-TraceMind                              Knowledge Bases
+TraceMind                              知识库
 ```
 - Brand wordmark on left. No decorative logo.
-- Knowledge Bases link on right. Active state = bottom border accent.
+- 知识库 link on right. Active state = bottom border accent.
 - `1px solid` bottom border. No shadow. No gradient.
 
 ### KB Context Bar (38–40px, only when inside a KB)
 ```
-Current KB Name                       Documents    Ask
+当前知识库名称                         文档    问答    知识    知识图谱
 ```
 - KB name from page data (existing `knowledgeBaseName` ref).
-- Documents / Ask as text tabs. Active state = bottom border accent.
+- 文档 / 问答 / 知识 / 知识图谱 as text tabs. Active state = bottom border accent.
 - No global KB selector dropdown at current stage.
 - No duplicated Documents/Ask controls.
 
@@ -216,7 +215,7 @@ code excerpt…
 
 - Source type distinguished by `# DOCUMENT` / `<> CODE` labels + composition
 - Not color alone
-- Code evidence: method signature + line range + code block with left accent border
+- Code evidence: relative path + line range + code block with left accent border
 
 **Anti-patterns to avoid:**
 - ChatGPT-style chat bubbles
@@ -235,6 +234,18 @@ code excerpt…
 - Same color for all citations (document and code)
 - Source TYPE distinguished in Evidence Inspector via labels, not citation color
 - Clicking a citation opens/focuses the Evidence Inspector
+
+## Problem & Solution Knowledge
+
+Knowledge entries are durable engineering records saved from completed answers.
+
+- The Knowledge list uses editorial resource rows, not a CRUD table or card grid.
+- Search, validation status and tag filters remain compact and secondary to the entries.
+- A detail page gives the solution primary reading space and keeps Evidence visible as L1 content.
+- Background, root cause and failed attempts appear only when present.
+- The original conversation is linked when it still exists; immutable question, answer and source
+  snapshots remain visible after it is deleted.
+- Editing changes the maintained knowledge fields, never the provenance snapshots.
 
 ---
 
@@ -308,6 +319,18 @@ For every new frontend feature:
 6. Never create a page-specific visual language silently.
 
 ---
+
+## Knowledge Map
+
+- The graph and selected-item inspector are both L1. The inspector moves below the graph on narrow
+  screens and is never hidden by default.
+- Node color communicates type: Knowledge Base, KnowledgeEntry, Document and derived Tag. Related
+  edges are dashed and expose their shared tag/document reasons in the inspector.
+- Cytoscape core owns zoom, pan, drag, selection and the built-in layout. TraceMind owns the data
+  contract, filters, navigation and visual tokens; no wrapper or graph-layout plugin is used.
+- Filters operate locally and hide edges whose endpoint is hidden. KnowledgeEntry and Document
+  nodes provide direct navigation back to their existing detail/list locations.
+- The map is a visualization of current knowledge assets, not a retrieval surface or GraphRAG UI.
 
 ## Review Checklist
 

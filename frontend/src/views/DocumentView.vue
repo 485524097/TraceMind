@@ -1,6 +1,15 @@
 <script setup lang="ts">
-import { ElAlert, ElButton, ElDropdown, ElDropdownItem, ElDropdownMenu, ElEmpty, ElMessage, ElMessageBox } from 'element-plus'
-import { inject, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
+import {
+  ElAlert,
+  ElButton,
+  ElDropdown,
+  ElDropdownItem,
+  ElDropdownMenu,
+  ElEmpty,
+  ElMessage,
+  ElMessageBox,
+} from 'element-plus'
+import { inject, nextTick, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 import DocumentUploadPanel from '@/components/DocumentUploadPanel.vue'
@@ -28,6 +37,7 @@ watch(knowledgeBaseName, (name) => {
 })
 const items = ref<DocumentItem[]>([])
 const query = ref('')
+const focusedDocumentId = ref('')
 const loading = ref(false)
 const errorMessage = ref('')
 const deletingId = ref<string | null>(null)
@@ -40,19 +50,32 @@ const showUpload = ref(false)
 const showRetrievalDebug = ref(false)
 let pollingTimer: ReturnType<typeof setInterval> | undefined
 
-const parseLabels = {
-  pending: '等待解析',
-  processing: '解析中',
-  succeeded: '解析完成',
-  failed: '解析失败',
-} as const
+function elapsedLabel(value: string | null): string {
+  if (!value) return ''
+  const seconds = Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 1000))
+  return ` · ${seconds}s`
+}
 
-const indexLabels = {
-  pending: '等待索引',
-  processing: '索引中',
-  succeeded: '索引完成',
-  failed: '索引失败',
-} as const
+function processingSummary(document: DocumentItem): string {
+  const version = document.latest_version
+  if (version.parse_status === 'failed') {
+    return `处理失败 · ${parseErrorSummary(document)}`
+  }
+  if (version.parse_status === 'pending') return '等待处理'
+  if (version.parse_status === 'processing') {
+    return `解析中${elapsedLabel(version.parse_started_at)}`
+  }
+  if (version.index_status === 'failed') {
+    return `处理失败 · ${version.index_error_message || '索引失败，请重试'}`
+  }
+  if (version.index_status === 'pending') {
+    return `已解析 · ${version.chunk_count} 个 Chunk · 等待建立索引`
+  }
+  if (version.index_status === 'processing') {
+    return `正在建立索引${elapsedLabel(version.index_started_at)}`
+  }
+  return 'Ready'
+}
 
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(
@@ -74,6 +97,7 @@ async function loadDocuments(): Promise<void> {
     const response = await listDocuments(knowledgeBaseId, query.value)
     items.value = response.items
     updatePolling()
+    await focusRequestedDocument()
   } catch {
     errorMessage.value = '文档列表加载失败，请检查知识库或后端服务后重试'
   } finally {
@@ -81,11 +105,20 @@ async function loadDocuments(): Promise<void> {
   }
 }
 
+async function focusRequestedDocument(): Promise<void> {
+  if (!focusedDocumentId.value) return
+  await nextTick()
+  document.getElementById(`document-${focusedDocumentId.value}`)?.scrollIntoView?.({
+    block: 'center',
+  })
+}
+
 function updatePolling(): void {
-  const needsPolling = items.value.some(({ latest_version }) =>
-    ['pending', 'processing'].includes(latest_version.parse_status) ||
-    (latest_version.parse_status === 'succeeded' &&
-      ['pending', 'processing'].includes(latest_version.index_status)),
+  const needsPolling = items.value.some(
+    ({ latest_version }) =>
+      ['pending', 'processing'].includes(latest_version.parse_status) ||
+      (latest_version.parse_status === 'succeeded' &&
+        ['pending', 'processing'].includes(latest_version.index_status)),
   )
   if (needsPolling && pollingTimer === undefined) {
     pollingTimer = setInterval(() => void loadDocuments(), 2500)
@@ -157,12 +190,20 @@ async function requestParse(document: DocumentItem, force: boolean): Promise<voi
 }
 
 async function loadPage(): Promise<void> {
+  query.value = typeof route.query?.query === 'string' ? route.query.query : ''
+  focusedDocumentId.value =
+    typeof route.query?.focusDocument === 'string' ? route.query.focusDocument : ''
   try {
     knowledgeBaseName.value = (await getKnowledgeBase(knowledgeBaseId)).name
   } catch {
     errorMessage.value = '知识库不存在或加载失败'
   }
   await loadDocuments()
+}
+
+async function handleUploadCompleted(): Promise<void> {
+  await loadDocuments()
+  showUpload.value = false
 }
 
 function showVersions(document: DocumentItem): void {
@@ -228,12 +269,12 @@ onBeforeUnmount(() => {
     <!-- Page Header -->
     <header class="management-header">
       <div>
-        <h1>Documents</h1>
-        <p>Documents and code available for search, answers, and traceable citations</p>
+        <h1>文档</h1>
+        <p>可用于检索、问答与可追溯引用的文档和代码资料</p>
       </div>
       <div class="header-actions">
         <ElButton type="primary" @click="showUpload = !showUpload">
-          {{ showUpload ? 'Close' : 'Import' }}
+          {{ showUpload ? '收起' : '导入文件' }}
         </ElButton>
       </div>
     </header>
@@ -242,32 +283,41 @@ onBeforeUnmount(() => {
     <DocumentUploadPanel
       v-if="showUpload"
       :knowledge-base-id="knowledgeBaseId"
-      @completed="loadDocuments(); showUpload = false"
+      @completed="handleUploadCompleted"
     />
 
     <!-- Search -->
     <div class="doc-search-bar">
       <input
         v-model="query"
-        aria-label="Filter documents by name or path"
-        placeholder="Filter by name or path…"
+        aria-label="按名称或路径筛选文档"
+        placeholder="按名称或路径筛选…"
         @keyup.enter="loadDocuments"
       />
-      <ElButton :loading="loading" @click="loadDocuments" size="small">Search</ElButton>
+      <ElButton :loading="loading" @click="loadDocuments" size="small">搜索</ElButton>
     </div>
 
-    <ElAlert v-if="errorMessage" :title="errorMessage" type="error" show-icon :closable="false" style="max-width:1200px;margin:0 auto var(--space-lg)" />
+    <ElAlert
+      v-if="errorMessage"
+      :title="errorMessage"
+      type="error"
+      show-icon
+      :closable="false"
+      style="max-width: 1160px; margin: 0 auto var(--space-lg)"
+    />
 
     <!-- Document List -->
     <section :aria-busy="loading">
-      <div v-if="loading && items.length === 0" class="loading-state">Loading documents…</div>
-      <ElEmpty v-else-if="items.length === 0 && !errorMessage" description="No documents yet" />
+      <div v-if="loading && items.length === 0" class="loading-state">正在加载文档…</div>
+      <ElEmpty v-else-if="items.length === 0 && !errorMessage" description="暂无文档" />
 
       <div v-else class="doc-list">
         <div
           v-for="document in items"
           :key="document.id"
+          :id="`document-${document.id}`"
           class="doc-item"
+          :class="{ 'doc-item-focused': document.id === focusedDocumentId }"
         >
           <div class="doc-main">
             <div class="doc-name-row">
@@ -280,49 +330,77 @@ onBeforeUnmount(() => {
               <span class="doc-meta-sep">·</span>
               <span class="doc-meta">{{ formatSize(document.latest_version.file_size) }}</span>
               <span class="doc-meta-sep">·</span>
-              <span class="doc-meta">{{ document.latest_version.chunk_count }} chunks</span>
+              <span class="doc-meta">{{ document.latest_version.chunk_count }} 个 Chunk</span>
               <span class="doc-meta-sep">·</span>
-              <span class="doc-meta">{{ document.latest_version.parsed_at ? formatDate(document.latest_version.parsed_at) : '—' }}</span>
+              <span class="doc-meta">{{
+                document.latest_version.parsed_at
+                  ? formatDate(document.latest_version.parsed_at)
+                  : '—'
+              }}</span>
               <span class="doc-statuses">
-                <span :class="statusPillClass(document.latest_version.parse_status)">
-                  {{ parseLabels[document.latest_version.parse_status] }}
-                </span>
-                <span :class="statusPillClass(document.latest_version.index_status)">
-                  {{ indexLabels[document.latest_version.index_status] }}
-                </span>
+                <span
+                  :class="
+                    statusPillClass(
+                      document.latest_version.parse_status === 'failed' ||
+                        document.latest_version.index_status === 'failed'
+                        ? 'failed'
+                        : document.latest_version.parse_status === 'succeeded' &&
+                            document.latest_version.index_status === 'succeeded'
+                          ? 'succeeded'
+                          : 'processing',
+                    )
+                  "
+                  >{{ processingSummary(document) }}</span
+                >
               </span>
-              <small
-                v-if="document.latest_version.parse_error_message"
-                class="parse-error-summary"
-              >{{ parseErrorSummary(document) }}</small>
             </div>
           </div>
 
           <!-- Overflow actions -->
           <ElDropdown trigger="click" :hide-on-click="true">
-            <button class="doc-more" aria-label="Document actions">···</button>
+            <button class="doc-more" aria-label="文档操作">···</button>
             <template #dropdown>
               <ElDropdownMenu>
                 <ElDropdownItem
                   :disabled="document.latest_version.chunk_count === 0"
                   @click="showChunks(document)"
-                >Chunks</ElDropdownItem>
+                  >查看 Chunk</ElDropdownItem
+                >
                 <ElDropdownItem
-                  :disabled="parsingId !== null || document.latest_version.parse_status === 'processing'"
-                  @click="requestParse(document, document.latest_version.parse_status === 'succeeded')"
-                >{{ document.latest_version.parse_status === 'succeeded' ? 'Re-parse' : 'Retry parse' }}</ElDropdownItem>
+                  :disabled="
+                    parsingId !== null || document.latest_version.parse_status === 'processing'
+                  "
+                  @click="
+                    requestParse(document, document.latest_version.parse_status === 'succeeded')
+                  "
+                  >{{
+                    document.latest_version.parse_status === 'succeeded' ? '重新解析' : '重试解析'
+                  }}</ElDropdownItem
+                >
                 <ElDropdownItem
-                  :disabled="indexingId !== null || document.latest_version.parse_status !== 'succeeded' || document.latest_version.index_status === 'processing'"
-                  @click="requestIndex(document, document.latest_version.index_status === 'succeeded')"
-                >{{ document.latest_version.index_status === 'succeeded' ? 'Re-index' : 'Index' }}</ElDropdownItem>
-                <ElDropdownItem @click="downloadCurrentDocument(knowledgeBaseId, document.id)">Download</ElDropdownItem>
-                <ElDropdownItem @click="showVersions(document)">Versions</ElDropdownItem>
+                  :disabled="
+                    indexingId !== null ||
+                    document.latest_version.parse_status !== 'succeeded' ||
+                    document.latest_version.index_status === 'processing'
+                  "
+                  @click="
+                    requestIndex(document, document.latest_version.index_status === 'succeeded')
+                  "
+                  >{{
+                    document.latest_version.index_status === 'succeeded' ? '重建索引' : '建立索引'
+                  }}</ElDropdownItem
+                >
+                <ElDropdownItem @click="downloadCurrentDocument(knowledgeBaseId, document.id)"
+                  >下载</ElDropdownItem
+                >
+                <ElDropdownItem @click="showVersions(document)">历史版本</ElDropdownItem>
                 <ElDropdownItem
                   :data-testid="`delete-document-${document.id}`"
                   divided
-                  style="color:var(--color-error)"
+                  style="color: var(--color-error)"
                   @click="confirmDelete(document)"
-                >Delete</ElDropdownItem>
+                  >删除</ElDropdownItem
+                >
               </ElDropdownMenu>
             </template>
           </ElDropdown>
@@ -331,18 +409,18 @@ onBeforeUnmount(() => {
     </section>
 
     <!-- Retrieval Tools -->
-    <div style="max-width:1200px;margin:var(--space-2xl) auto 0;padding-top:var(--space-lg);border-top:1px solid var(--color-border-light)">
-      <ElButton
-        size="small"
-        text
-        @click="showRetrievalDebug = !showRetrievalDebug"
-      >
-        {{ showRetrievalDebug ? '▾' : '▸' }} Retrieval tools
+    <div
+      style="
+        max-width: 1160px;
+        margin: var(--space-2xl) auto 0;
+        padding-top: var(--space-lg);
+        border-top: 1px solid var(--color-border-light);
+      "
+    >
+      <ElButton size="small" text @click="showRetrievalDebug = !showRetrievalDebug">
+        {{ showRetrievalDebug ? '▾' : '▸' }} 检索调试
       </ElButton>
-      <SemanticSearchPanel
-        v-if="showRetrievalDebug"
-        :knowledge-base-id="knowledgeBaseId"
-      />
+      <SemanticSearchPanel v-if="showRetrievalDebug" :knowledge-base-id="knowledgeBaseId" />
     </div>
 
     <!-- Dialogs -->

@@ -94,7 +94,7 @@ async def test_collection_is_created_with_named_cosine_vector_and_payload_indexe
     assert vectors["dense_v1"].distance == models.Distance.COSINE
     sparse = client.create_collection.await_args.kwargs["sparse_vectors_config"]
     assert sparse["bm25_v1"].modifier == models.Modifier.IDF
-    assert client.create_payload_index.await_count == 7
+    assert client.create_payload_index.await_count == 6
     assert client.get_collection.await_count == 2
 
 
@@ -128,7 +128,7 @@ async def test_concurrent_collection_creation_is_rechecked() -> None:
     await gateway(client).ensure_collection()
 
     assert client.get_collection.await_count == 2
-    assert client.create_payload_index.await_count == 7
+    assert client.create_payload_index.await_count == 6
 
 
 async def test_concurrent_payload_index_creation_is_rechecked() -> None:
@@ -151,7 +151,7 @@ async def test_concurrent_payload_index_creation_is_rechecked() -> None:
 
 async def test_successful_payload_index_creation_must_be_visible_on_refresh() -> None:
     client = AsyncMock(spec=AsyncQdrantClient)
-    existing = set(QdrantGateway.payload_indexes) - {"symbol_lookup_keys"}
+    existing = set(QdrantGateway.payload_indexes) - {"chunk_type"}
     client.collection_exists.return_value = True
     client.get_collection.side_effect = [
         collection_info(payload_schema={name: object() for name in existing}),
@@ -302,7 +302,6 @@ async def test_hybrid_search_uses_shared_filters_and_application_rrf() -> None:
         SimpleNamespace(points=[result]),
     ]
     knowledge_base_id, document_id, generation = uuid4(), uuid4(), uuid4()
-    lookup_key = "v1:method:UserService#source"
 
     hits = await gateway(client).hybrid_search(
         [1.0, 0.0, 0.0],
@@ -314,7 +313,6 @@ async def test_hybrid_search_uses_shared_filters_and_application_rrf() -> None:
         document_id=document_id,
         dense_score_threshold=0.5,
         excluded_chunk_types=("heading",),
-        symbol_lookup_key=lookup_key,
     )
 
     assert hits[0].score == 1.0
@@ -339,14 +337,9 @@ async def test_hybrid_search_uses_shared_filters_and_application_rrf() -> None:
         "index_generation",
         "language",
         "document_id",
-        "symbol_lookup_keys",
     }
     assert dense.filter.must_not[0].key == "chunk_type"
     assert dense.filter.must_not[0].match.any == ["heading"]
-    symbol_condition = next(
-        condition for condition in dense.filter.must if condition.key == "symbol_lookup_keys"
-    )
-    assert symbol_condition.match.value == lookup_key
 
 
 def test_deterministic_rrf_resolves_crossed_branch_tie_by_payload() -> None:
@@ -550,7 +543,7 @@ async def test_incompatible_payload_index_type_is_rejected_without_rebuild() -> 
         name: models.PayloadIndexInfo(
             data_type=(
                 models.PayloadSchemaType.TEXT
-                if name == "symbol_lookup_keys"
+                if name == "language"
                 else models.PayloadSchemaType.KEYWORD
             ),
             points=0,
@@ -559,73 +552,7 @@ async def test_incompatible_payload_index_type_is_rejected_without_rebuild() -> 
     }
     client.get_collection.return_value = collection_info(payload_schema=schema)
 
-    with pytest.raises(IncompatibleCollectionError, match="symbol_lookup_keys"):
+    with pytest.raises(IncompatibleCollectionError, match="language"):
         await gateway(client).ensure_collection()
 
     client.delete_collection.assert_not_called()
-
-
-async def test_symbol_filter_combines_with_existing_search_scope() -> None:
-    client = AsyncMock(spec=AsyncQdrantClient)
-    client.query_points.return_value = SimpleNamespace(points=[])
-    lookup_key = "v1:method:UserService#source"
-
-    await gateway(client).search(
-        [1.0, 0.0, 0.0],
-        knowledge_base_id=uuid4(),
-        generations=[uuid4()],
-        limit=5,
-        language="java",
-        document_id=uuid4(),
-        score_threshold=0.5,
-        excluded_chunk_types=("heading",),
-        symbol_lookup_key=lookup_key,
-    )
-
-    query_filter = client.query_points.await_args.kwargs["query_filter"]
-    symbol_condition = next(
-        condition for condition in query_filter.must if condition.key == "symbol_lookup_keys"
-    )
-    assert symbol_condition.match.value == lookup_key
-
-
-async def test_symbol_scroll_is_paginated_without_vectors() -> None:
-    client = AsyncMock(spec=AsyncQdrantClient)
-    first = SimpleNamespace(id="a", payload={"content": "a"})
-    second = SimpleNamespace(id="b", payload={"content": "b"})
-    client.scroll.side_effect = [([first], "b"), ([second], None)]
-
-    result = await gateway(client).scroll_symbol_matches(
-        knowledge_base_id=uuid4(),
-        generations=[uuid4()],
-        symbol_lookup_key="v1:method:UserService#source",
-        language="java",
-        document_id=None,
-        max_points=10,
-        page_size=1,
-    )
-
-    assert [point.id for point in result.points] == ["a", "b"]
-    assert not result.truncated
-    assert client.scroll.await_count == 2
-    assert client.scroll.await_args_list[0].kwargs["with_payload"] is True
-    assert client.scroll.await_args_list[0].kwargs["with_vectors"] is False
-    assert client.scroll.await_args_list[1].kwargs["offset"] == "b"
-
-
-async def test_symbol_scroll_reports_truncation_when_more_points_exist() -> None:
-    client = AsyncMock(spec=AsyncQdrantClient)
-    client.scroll.return_value = ([SimpleNamespace(id="a", payload={})], "next")
-
-    result = await gateway(client).scroll_symbol_matches(
-        knowledge_base_id=uuid4(),
-        generations=[uuid4()],
-        symbol_lookup_key="v1:method:UserService#source",
-        language=None,
-        document_id=None,
-        max_points=1,
-        page_size=1,
-    )
-
-    assert result.truncated
-    assert len(result.points) == 1

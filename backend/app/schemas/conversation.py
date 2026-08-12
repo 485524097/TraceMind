@@ -62,19 +62,7 @@ class ConversationMessageResponse(BaseModel):
     sources: list[dict[str, Any]] | None
     generation_metadata: dict[str, Any] | None
     created_at: datetime
-
-    @field_validator("generation_metadata", mode="before")
-    @classmethod
-    def normalize_generation_metadata(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
-        if value is None:
-            return None
-        normalized = dict(value)
-        normalized.setdefault("symbol_scope_mode", "none")
-        normalized.setdefault("symbol_scope_reason", None)
-        normalized.setdefault("scoped_symbol_kind", None)
-        normalized.setdefault("scoped_symbol_qualified_name", None)
-        normalized.setdefault("scoped_symbol_signature", None)
-        return normalized
+    knowledge_entry_id: UUID | None = None
 
 
 class ConversationDetailResponse(ConversationResponse):

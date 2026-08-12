@@ -17,11 +17,13 @@ class OpenAICompatibleLLMProvider:
         timeout: float,
         temperature: float,
         max_tokens: int,
+        enable_thinking: bool | None = None,
         client: AsyncOpenAI | None = None,
     ) -> None:
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.enable_thinking = enable_thinking
         self.client = client or AsyncOpenAI(
             base_url=base_url,
             api_key=api_key or "not-required",
@@ -30,6 +32,11 @@ class OpenAICompatibleLLMProvider:
 
     async def stream(self, messages: list[LLMMessage]) -> AsyncGenerator[LLMStreamDelta]:
         try:
+            extra_body = (
+                {"enable_thinking": self.enable_thinking}
+                if self.enable_thinking is not None
+                else None
+            )
             upstream = await self.client.chat.completions.create(
                 model=self.model,
                 messages=cast(
@@ -39,6 +46,7 @@ class OpenAICompatibleLLMProvider:
                 stream=True,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
+                extra_body=extra_body,
             )
         except Exception as exc:
             raise LLMProviderError("LLM stream could not be started") from exc

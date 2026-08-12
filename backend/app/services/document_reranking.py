@@ -63,11 +63,7 @@ class DocumentRerankingService:
             replace(
                 by_id[result.candidate_id],
                 score=result.score,
-                ranking_mode=(
-                    "symbol_exact"
-                    if by_id[result.candidate_id].ranking_mode == "symbol_exact"
-                    else "reranker"
-                ),
+                ranking_mode="reranker",
                 rerank_score=result.score,
             )
             for result in results

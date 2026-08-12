@@ -142,3 +142,17 @@ uv run --no-sync python -m evals.retrieval.runner ^
 ## 自动评测不能替代的人工检查
 
 自动指标不能判断语义答案是否完整、文档解析是否保持排版、引用是否便于用户理解，也不能证明无答案结果足够安全。人工仍需检查多证据问题是否真的覆盖不同章节、相似概念是否被混淆、短查询是否命中偶然关键词、无答案 Top1 是否具有误导性，以及实际界面展示的文件名、章节和行号是否正确。
+
+## Qdrant collection isolation
+
+The formal regression gate must run against a dedicated Qdrant collection containing only the
+fixed synthetic corpus. A knowledge-base or document payload filter is not sufficient isolation:
+Qdrant's BM25 IDF modifier derives document-frequency statistics from the entire collection, so
+unrelated user documents in the same collection can change sparse ranks even when every returned
+point is correctly filtered to the evaluation document.
+
+Use a disposable collection name through `QDRANT_COLLECTION_NAME`, ingest only
+`synthetic_retrieval_corpus_v1.md`, run the frozen dataset and baseline unchanged, and remove the
+collection afterwards. Never reuse the normal user collection for a release gate and never repair
+collection contamination by changing the corpus, expected evidence, baseline, thresholds, BM25,
+RRF, Dense retrieval or reranking behavior.

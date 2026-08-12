@@ -72,7 +72,15 @@ watch(
     <p v-if="loading">正在加载版本历史…</p>
     <p v-else-if="errorMessage" class="form-error">{{ errorMessage }}</p>
     <table v-else>
-      <thead><tr><th>版本</th><th>大小</th><th>索引状态</th><th>时间</th><th></th></tr></thead>
+      <thead>
+        <tr>
+          <th>版本</th>
+          <th>大小</th>
+          <th>索引状态</th>
+          <th>时间</th>
+          <th></th>
+        </tr>
+      </thead>
       <tbody>
         <tr v-for="version in versions" :key="version.id">
           <td>Version {{ version.version_number }}</td>
@@ -83,13 +91,17 @@ watch(
             <ElButton
               size="small"
               :loading="indexingId === version.id"
-              :disabled="version.parse_status !== 'succeeded' || version.index_status === 'processing'"
+              :disabled="
+                version.parse_status !== 'succeeded' || version.index_status === 'processing'
+              "
               @click="indexVersion(version)"
-            >{{ version.index_status === 'succeeded' ? '重新索引' : '索引' }}</ElButton>
+              >{{ version.index_status === 'succeeded' ? '重新索引' : '索引' }}</ElButton
+            >
             <ElButton
               size="small"
               @click="downloadDocumentVersion(knowledgeBaseId, document!.id, version.id)"
-            >下载</ElButton>
+              >下载</ElButton
+            >
           </td>
         </tr>
       </tbody>

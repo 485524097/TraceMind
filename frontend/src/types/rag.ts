@@ -1,3 +1,5 @@
+import type { EvidenceSource } from '@/types/evidence'
+
 export interface RagStreamRequest {
   query: string
   language?: string | null
@@ -10,45 +12,40 @@ export interface ConversationEventFields {
   message_id?: string
 }
 
-export interface SymbolScopeEventFields {
-  symbol_scope_mode?: 'none' | 'exact' | 'fallback'
-  symbol_scope_reason?: 'not_found' | 'ambiguous' | 'unsupported' | null
-  scoped_symbol_kind?: string | null
-  scoped_symbol_qualified_name?: string | null
-  scoped_symbol_signature?: string | null
+export type RagPipelinePhase =
+  | 'analyzing'
+  | 'routing'
+  | 'query_rewrite'
+  | 'query_embedding'
+  | 'hybrid_retrieval'
+  | 'candidates'
+  | 'reranking'
+  | 'generating'
+  | 'completed'
+
+export type RagPipelineStatus = 'started' | 'completed' | 'skipped' | 'fallback' | 'failed'
+
+export interface RagPipelineEvent extends ConversationEventFields {
+  trace_id: string
+  phase: RagPipelinePhase
+  status: RagPipelineStatus
+  elapsed_ms?: number
+  candidate_count?: number
+  route_mode?: 'direct' | 'rag'
+  fallback_reason?: string
 }
 
-export interface RagSource {
-  source_id: string
+export interface RagSource extends EvidenceSource {
   score: number
-  content: string
   knowledge_base_id: string
-  document_id: string
-  document_version_id: string
-  chunk_id: string
   index_generation: string
-  document_name: string
-  relative_path?: string
-  version_number: number
-  chunk_index: number
-  content_hash: string
-  chunk_type: string
-  language: string | null
-  section_title: string | null
-  page_number: number | null
-  start_line: number | null
-  end_line: number | null
-  symbol_kind?: string | null
-  symbol_name?: string | null
-  symbol_qualified_name?: string | null
-  symbol_signature?: string | null
   ranking_mode?: string | null
   retrieval_score?: number | null
   rerank_score?: number | null
   retrieval_rank?: number | null
 }
 
-export interface RagRetrievalEvent extends ConversationEventFields, SymbolScopeEventFields {
+export interface RagRetrievalEvent extends ConversationEventFields {
   trace_id: string
   source_count: number
   sources: RagSource[]
@@ -59,12 +56,12 @@ export interface RagTokenEvent extends ConversationEventFields {
   text: string
 }
 
-export interface RagNoAnswerEvent extends ConversationEventFields, SymbolScopeEventFields {
+export interface RagNoAnswerEvent extends ConversationEventFields {
   trace_id: string
   message: string
 }
 
-export interface RagDoneEvent extends ConversationEventFields, SymbolScopeEventFields {
+export interface RagDoneEvent extends ConversationEventFields {
   trace_id: string
   finish_reason: string
   grounded: boolean
@@ -73,7 +70,18 @@ export interface RagDoneEvent extends ConversationEventFields, SymbolScopeEventF
   retrieval_latency_ms: number
   llm_first_token_latency_ms?: number
   llm_latency_ms: number
+  llm_generation_latency_ms?: number
+  local_pre_llm_latency_ms?: number
+  conversation_persistence_latency_ms?: number
+  response_total_latency_ms?: number
   total_latency_ms: number
+  route_mode?: 'direct' | 'rag'
+  routing_latency_ms?: number
+  embedding_latency_ms?: number
+  qdrant_latency_ms?: number
+  fusion_latency_ms?: number
+  dense_candidate_count?: number
+  sparse_candidate_count?: number
   source_count?: number
   retrieval_mode?: string
   rerank_latency_ms?: number
@@ -86,7 +94,7 @@ export interface RagDoneEvent extends ConversationEventFields, SymbolScopeEventF
   scoped_relative_path?: string | null
 }
 
-export interface RagErrorEvent extends ConversationEventFields, SymbolScopeEventFields {
+export interface RagErrorEvent extends ConversationEventFields {
   trace_id: string
   code: string
   message: string

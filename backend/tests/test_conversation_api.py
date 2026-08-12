@@ -53,7 +53,11 @@ async def test_conversation_crud_and_stable_detail_shape() -> None:
     )
     service.create.return_value = conversation
     service.list.return_value = ([conversation], 1)
-    service.get_detail.return_value = (conversation, [message])
+    service.get_detail_with_knowledge.return_value = (
+        conversation,
+        [message],
+        {message.id: uuid4()},
+    )
     service.update.return_value = conversation
     base = f"/api/v1/knowledge-bases/{conversation.knowledge_base_id}/conversations"
 
@@ -74,7 +78,7 @@ async def test_conversation_crud_and_stable_detail_shape() -> None:
 async def test_cross_knowledge_base_access_returns_404() -> None:
     service = AsyncMock(spec=ConversationService)
     conversation_id = uuid4()
-    service.get_detail.side_effect = ConversationNotFoundError(conversation_id)
+    service.get_detail_with_knowledge.side_effect = ConversationNotFoundError(conversation_id)
     app = make_app(service)
     async for client in client_for(app):
         response = await client.get(

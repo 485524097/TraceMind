@@ -66,10 +66,6 @@ class SemanticSearchResultResponse(BaseModel):
     content_hash: str
     chunk_type: str
     language: str | None
-    symbol_kind: str | None = None
-    symbol_name: str | None = None
-    symbol_qualified_name: str | None = None
-    symbol_signature: str | None = None
     section_title: str | None
     page_number: int | None
     start_line: int | None
@@ -85,8 +81,3 @@ class SemanticSearchResponse(BaseModel):
     path_scope_mode: Literal["none", "exact"] = "none"
     scoped_relative_path: str | None = None
     semantic_query: str | None = None
-    symbol_scope_mode: Literal["none", "exact", "fallback"] = "none"
-    symbol_scope_reason: Literal["not_found", "ambiguous", "unsupported"] | None = None
-    scoped_symbol_kind: str | None = None
-    scoped_symbol_qualified_name: str | None = None
-    scoped_symbol_signature: str | None = None

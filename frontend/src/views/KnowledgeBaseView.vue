@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { ElAlert, ElButton, ElDropdown, ElDropdownItem, ElDropdownMenu, ElEmpty, ElMessage, ElMessageBox } from 'element-plus'
+import {
+  ElAlert,
+  ElButton,
+  ElDropdown,
+  ElDropdownItem,
+  ElDropdownMenu,
+  ElEmpty,
+  ElMessage,
+  ElMessageBox,
+} from 'element-plus'
 import { onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 
@@ -16,7 +25,11 @@ const editingKnowledgeBase = ref<KnowledgeBase | null>(null)
 const deletingId = ref<string | null>(null)
 
 function formatDate(value: string): string {
-  return new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value))
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(new Date(value))
 }
 
 async function loadKnowledgeBases(): Promise<void> {
@@ -54,7 +67,9 @@ async function confirmDelete(knowledgeBase: KnowledgeBase): Promise<void> {
       '删除确认',
       { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' },
     )
-  } catch { return }
+  } catch {
+    return
+  }
   if (deletingId.value) return
   deletingId.value = knowledgeBase.id
   try {
@@ -62,8 +77,14 @@ async function confirmDelete(knowledgeBase: KnowledgeBase): Promise<void> {
     ElMessage.success('知识库删除成功')
     await loadKnowledgeBases()
   } catch (error) {
-    ElMessage.error(error instanceof ApiError && error.status === 409 ? '知识库中仍有文档，请先删除文档' : '知识库删除失败，请稍后重试')
-  } finally { deletingId.value = null }
+    ElMessage.error(
+      error instanceof ApiError && error.status === 409
+        ? '知识库中仍有文档，请先删除文档'
+        : '知识库删除失败，请稍后重试',
+    )
+  } finally {
+    deletingId.value = null
+  }
 }
 
 onMounted(loadKnowledgeBases)
@@ -73,45 +94,68 @@ onMounted(loadKnowledgeBases)
   <main class="management-page">
     <header class="management-header">
       <div>
-        <h1>Knowledge Bases</h1>
-        <p>Your local knowledge spaces for documents, search, and traceable answers.</p>
+        <h1>知识库</h1>
+        <p>用于整理文档、检索知识并生成可追溯回答的本地空间。</p>
       </div>
       <div class="header-actions">
-        <ElButton v-if="errorMessage" :loading="loading" size="small" text @click="loadKnowledgeBases">Retry</ElButton>
-        <ElButton type="primary" @click="openCreateDialog">New</ElButton>
+        <ElButton
+          v-if="errorMessage"
+          :loading="loading"
+          size="small"
+          text
+          @click="loadKnowledgeBases"
+          >重试</ElButton
+        >
+        <ElButton type="primary" @click="openCreateDialog">新建</ElButton>
       </div>
     </header>
 
-    <ElAlert v-if="errorMessage" :title="errorMessage" type="error" show-icon :closable="false" style="max-width:1200px;margin:0 auto var(--space-lg)" />
+    <ElAlert
+      v-if="errorMessage"
+      :title="errorMessage"
+      type="error"
+      show-icon
+      :closable="false"
+      style="max-width: 1160px; margin: 0 auto var(--space-lg)"
+    />
 
     <section :aria-busy="loading">
-      <div v-if="loading && items.length === 0" class="loading-state">Loading…</div>
-      <ElEmpty v-else-if="items.length === 0 && !errorMessage" description="No knowledge bases yet" />
+      <div v-if="loading && items.length === 0" class="loading-state">正在加载…</div>
+      <ElEmpty v-else-if="items.length === 0 && !errorMessage" description="暂无知识库" />
 
-      <div v-else class="doc-list" style="max-width:1200px;margin:0 auto">
-        <div
-          v-for="kb in items"
-          :key="kb.id"
-          class="doc-item kb-item"
-        >
-          <RouterLink
-            :to="`/knowledge-bases/${kb.id}/documents`"
-            class="doc-main kb-item-link"
-          >
+      <div v-else class="doc-list" style="max-width: 1160px; margin: 0 auto">
+        <div v-for="kb in items" :key="kb.id" class="doc-item kb-item">
+          <RouterLink :to="`/knowledge-bases/${kb.id}/documents`" class="doc-main kb-item-link">
             <div class="doc-name-row">
               <span class="doc-name">{{ kb.name }}</span>
             </div>
-            <div v-if="kb.description" class="doc-path" style="font-family:var(--font-sans);font-size:var(--font-size-base);color:var(--color-text-secondary)">{{ kb.description }}</div>
+            <div
+              v-if="kb.description"
+              class="doc-path"
+              style="
+                font-family: var(--font-sans);
+                font-size: var(--font-size-base);
+                color: var(--color-text-secondary);
+              "
+            >
+              {{ kb.description }}
+            </div>
             <div class="doc-meta-row">
-              <span class="doc-meta">Updated {{ formatDate(kb.updated_at) }}</span>
+              <span class="doc-meta">更新于 {{ formatDate(kb.updated_at) }}</span>
             </div>
           </RouterLink>
           <ElDropdown trigger="click" :hide-on-click="true">
-            <button class="doc-more" aria-label="Actions">···</button>
+            <button class="doc-more" aria-label="知识库操作">···</button>
             <template #dropdown>
               <ElDropdownMenu>
-                <ElDropdownItem @click="openEditDialog(kb)">Edit</ElDropdownItem>
-                <ElDropdownItem :data-testid="`delete-${kb.id}`" divided style="color:var(--color-error)" @click="confirmDelete(kb)">Delete</ElDropdownItem>
+                <ElDropdownItem @click="openEditDialog(kb)">编辑</ElDropdownItem>
+                <ElDropdownItem
+                  :data-testid="`delete-${kb.id}`"
+                  divided
+                  style="color: var(--color-error)"
+                  @click="confirmDelete(kb)"
+                  >删除</ElDropdownItem
+                >
               </ElDropdownMenu>
             </template>
           </ElDropdown>
@@ -119,6 +163,10 @@ onMounted(loadKnowledgeBases)
       </div>
     </section>
 
-    <KnowledgeBaseFormDialog v-model="dialogVisible" :knowledge-base="editingKnowledgeBase" @saved="handleSaved" />
+    <KnowledgeBaseFormDialog
+      v-model="dialogVisible"
+      :knowledge-base="editingKnowledgeBase"
+      @saved="handleSaved"
+    />
   </main>
 </template>

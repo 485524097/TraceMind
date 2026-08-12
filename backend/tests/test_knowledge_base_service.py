@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.knowledge_base import KnowledgeBase
 from app.repositories.document import DocumentRepository
 from app.repositories.knowledge_base import KnowledgeBaseRepository
+from app.repositories.knowledge_entry import KnowledgeEntryRepository
 from app.schemas.knowledge_base import KnowledgeBaseCreate, KnowledgeBaseUpdate
 from app.services.exceptions import (
     KnowledgeBaseNameConflictError,
@@ -35,10 +36,13 @@ def make_service() -> tuple[KnowledgeBaseService, AsyncMock, AsyncMock]:
     repository = AsyncMock(spec=KnowledgeBaseRepository)
     documents = AsyncMock(spec=DocumentRepository)
     documents.count_by_knowledge_base.return_value = 0
+    knowledge_entries = AsyncMock(spec=KnowledgeEntryRepository)
+    knowledge_entries.count.return_value = 0
     service = KnowledgeBaseService(
         cast(AsyncSession, session),
         cast(KnowledgeBaseRepository, repository),
         cast(DocumentRepository, documents),
+        cast(KnowledgeEntryRepository, knowledge_entries),
     )
     return service, session, repository
 
@@ -159,6 +163,19 @@ async def test_delete_non_empty_knowledge_base_is_rejected() -> None:
     existing = make_knowledge_base()
     repository.get_by_id.return_value = existing
     service.documents.count_by_knowledge_base = AsyncMock(return_value=1)
+
+    with pytest.raises(KnowledgeBaseNotEmptyError):
+        await service.delete(existing.id)
+
+    repository.delete.assert_not_awaited()
+    session.commit.assert_not_awaited()
+
+
+async def test_delete_knowledge_base_with_knowledge_entry_is_rejected() -> None:
+    service, session, repository = make_service()
+    existing = make_knowledge_base()
+    repository.get_by_id.return_value = existing
+    service.knowledge_entries.count = AsyncMock(return_value=1)
 
     with pytest.raises(KnowledgeBaseNotEmptyError):
         await service.delete(existing.id)
