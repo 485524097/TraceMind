@@ -255,7 +255,11 @@ qdrant-data/
 # Local uploads and models
 uploads/
 storage/uploads/
-models/
+/data/uploads/
+**/.upload-tmp/
+**/.trash/
+/models/
+storage/models/
 local-models/
 *.bin
 *.safetensors
@@ -269,3 +273,5 @@ logs/
 dist/
 build/
 coverage/
+backend/evals/retrieval/reports/*
+!backend/evals/retrieval/reports/.gitkeep

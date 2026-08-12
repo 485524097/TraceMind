@@ -23,6 +23,8 @@
 
 > 导入一个包含 Java、JSP、JavaScript、SQL、Markdown 和 PDF 的项目资料库，用户可以通过关键词或自然语言查询代码、业务逻辑和历史问题，并获得带文件路径、页码或代码行号的回答。
 
+当前交付已覆盖知识库管理、原始文件本地持久化、增量版本管理，Markdown、UTF-8 文本、代码、PDF 文本层和 DOCX 的异步解析与可追溯 Chunk，以及 Dense + BM25 RRF 混合检索和单轮引用约束流式问答。
+
 ## MVP 功能范围
 
 - 知识库、文件和导入任务的基础管理
@@ -32,7 +34,13 @@
 - 文件路径、页码、章节和代码行级引用
 - 多模型配置与检索效果评测
 
+当前文档导入约束：只允许配置中的常见技术文件扩展名，按同知识库规范化文件名识别逻辑文档，按 SHA-256 判断内容是否变化；不同文件名不跨文档去重。
+
+当前解析约束：文本和代码仅支持 UTF-8/UTF-8-SIG；PDF 仅提取文本层且不支持 OCR；代码按行切分而非 AST；`parse_status=succeeded` 只表示 Chunk 可用，不表示已建立检索索引。
+
 ## 暂不实现的功能
+
+当前阶段明确暂不实现 Reranker 训练/微调、BGE 备用模型、Weighted RRF、检索评测集自动调参、Query Rewrite、Multi-query、HyDE、GraphRAG 和多轮对话历史。
 
 - 完整知识图谱
 - 多用户权限系统
@@ -63,3 +71,11 @@
 - 展示从资料导入、解析、检索到带引用问答的完整闭环。
 - 展示对 Java 项目资料、文档与历史问题的联合检索能力。
 - 展示清晰的工程分层、可验证引用和可复用的开发经验沉淀。
+
+## 第一阶段 RAG 边界
+
+第一条问答链路为单轮、无状态的 Citation-grounded Streaming RAG。默认检索方式为
+Dense + BM25 RRF Top 10 后使用本地 Cross-Encoder 重排到 Top 5；Reranker 不可用时
+回退 Hybrid RRF。无来源时不调用 LLM。Sparse 召回可能改变
+no-answer 行为，需要继续用真实资料验收。回答提供 `[Sx]` 与原始 Chunk 定位，但当前
+不实现对话历史、Agent 或 Tools。

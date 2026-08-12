@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.4-alpine3.23
+        env:
+          POSTGRES_USER: tracemind
+          POSTGRES_PASSWORD: tracemind-ci-only
+          POSTGRES_DB: tracemind_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tracemind -d tracemind_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://tracemind:tracemind-ci-only@127.0.0.1:5432/tracemind_test
+      TEST_DATABASE_URL: postgresql+asyncpg://tracemind:tracemind-ci-only@127.0.0.1:5432/tracemind_test
+      DOCUMENT_STORAGE_ROOT: ${{ runner.temp }}/tracemind-uploads
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy app
+      - run: uv run pytest -m "not integration"
+      - run: uv run alembic upgrade head
+      - run: uv run alembic downgrade 20260717_0002
+      - run: uv run alembic upgrade head
+      - run: uv run pytest -m integration
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test:unit -- --run
+      - run: npm run build

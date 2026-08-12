@@ -1,0 +1,71 @@
+[project]
+name = "tracemind-backend"
+version = "1.0.0"
+description = "TraceMind API foundation"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "alembic>=1.18.5",
+    "asyncpg>=0.31.0",
+    "celery>=5.6.3",
+    "fastapi>=0.139.2",
+    "httpx>=0.28.1",
+    "openai>=2.46,<3",
+    "pydantic-settings>=2.14.2",
+    "pypdf>=6.14.2,<7",
+    "python-docx>=1.2.0,<2",
+    "python-multipart>=0.0.22",
+    "qdrant-client>=1.18.0",
+    "redis>=8.0.1",
+    "sentence-transformers>=5.6,<6",
+    "sqlalchemy>=2.0.51",
+    "torch==2.13.0",
+    "uvicorn[standard]>=0.51.0",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.3.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.15.22",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "integration: tests requiring an explicit external test database",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["celery", "celery.*"]
+ignore_missing_imports = true
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu126", marker = "sys_platform == 'win32'" },
+    { index = "pytorch-cpu", marker = "sys_platform != 'win32'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
