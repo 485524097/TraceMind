@@ -89,6 +89,8 @@ async def test_rag_api_streams_native_sse_events_and_validates_request() -> None
     assert "event: retrieval" in response.text
     assert "event: token" in response.text
     assert "event: done" in response.text
+    assert '"conversation_persistence_latency_ms":' in response.text
+    assert '"response_total_latency_ms":' in response.text
     assert invalid.status_code == 422
 
 

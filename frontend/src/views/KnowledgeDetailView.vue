@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import EvidenceSourceList from '@/components/EvidenceSourceList.vue'
 import KnowledgeEntryFormDialog from '@/components/KnowledgeEntryFormDialog.vue'
+import MarkdownContent from '@/components/MarkdownContent.vue'
 import { getKnowledgeBase } from '@/services/knowledgeBases'
 import {
   deleteKnowledgeEntry,
@@ -121,7 +122,7 @@ onMounted(async () => {
           </section>
           <section>
             <h2>解决方案</h2>
-            <div class="knowledge-prose">{{ entry.solution }}</div>
+            <MarkdownContent class="knowledge-prose" :content="entry.solution" />
           </section>
           <section v-if="entry.failed_attempts.length">
             <h2>失败尝试</h2>
@@ -132,7 +133,7 @@ onMounted(async () => {
           <section class="knowledge-origin">
             <h2>原始回答快照</h2>
             <p class="knowledge-question-snapshot">{{ entry.question_snapshot }}</p>
-            <div class="knowledge-prose">{{ entry.answer_snapshot }}</div>
+            <MarkdownContent class="knowledge-prose" :content="entry.answer_snapshot" />
             <RouterLink
               v-if="entry.source_conversation_id"
               :to="`/knowledge-bases/${knowledgeBaseId}/chat?conversation=${entry.source_conversation_id}`"

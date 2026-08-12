@@ -2,7 +2,8 @@ import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from time import perf_counter
 from typing import Annotated, Any, cast
 from uuid import UUID, uuid4
 
@@ -59,6 +60,7 @@ class PreparedRagStream:
     conversation_history: tuple[ConversationTurn, ...] = ()
     conversation_service: ConversationService | None = None
     exchange: ConversationExchange | None = None
+    request_started_at: float = field(default_factory=perf_counter)
 
 
 async def prepare_rag_stream(
@@ -67,6 +69,7 @@ async def prepare_rag_stream(
     service: RagServiceDependency,
     conversation_service: ConversationServiceDependency,
 ) -> PreparedRagStream:
+    request_started_at = perf_counter()
     trace_id = uuid4()
     exchange: ConversationExchange | None = None
     history: tuple[ConversationTurn, ...] = ()
@@ -96,6 +99,7 @@ async def prepare_rag_stream(
         history,
         conversation_service if exchange is not None else None,
         exchange,
+        request_started_at,
     )
 
 
@@ -211,11 +215,21 @@ async def stream_rag_answer(
                     status = (
                         "no_answer" if data.get("finish_reason") == "no_answer" else "completed"
                     )
+                    persistence_started_at = perf_counter()
                     await finish(
                         status,
                         no_answer_content or "".join(answer_parts),
                         execution,
                     )
+                    data = {
+                        **data,
+                        "conversation_persistence_latency_ms": round(
+                            (perf_counter() - persistence_started_at) * 1_000
+                        ),
+                        "response_total_latency_ms": round(
+                            (perf_counter() - prepared_stream.request_started_at) * 1_000
+                        ),
+                    }
                 if await request.is_disconnected():
                     await finish(
                         "no_answer" if no_answer_content is not None else "cancelled",

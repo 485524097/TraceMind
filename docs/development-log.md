@@ -406,3 +406,83 @@ Retrieval 阈值/排序/评测资产，也未增加 Agent、GraphRAG、Playwrigh
   TTFT/总耗时存在显著长尾。敏感资料必须切换本地 Provider 或先完成脱敏。
 - Celery solo/FIFO 加上 CPU Qwen Embedding 会让大文档阻塞后续小文档。v1.0 已提供真实阶段
   和 elapsed feedback，但尚未解决队列调度与 CPU 吞吐；batch 16 已被实测否决。
+
+# 2026-08-11 — v1.0 final stabilization
+
+## Problem and constraints
+
+The final release pass had three concrete daily-use risks: remote Qwen responses had highly
+variable thinking latency, a CPU-only solo Celery worker allowed one large indexing task to starve
+small documents, and saved Knowledge answers displayed Markdown as plain text. The fixed Retrieval
+corpus, expected evidence, baseline, thresholds and production ranking algorithms remained frozen.
+
+## Adopted design
+
+- Added an optional provider capability switch for Qwen thinking. Empty configuration preserves the
+  provider default; the local launcher explicitly disables thinking for predictable daily-use
+  latency. The SSE completion metadata now separates local pre-LLM work, first token, generation,
+  conversation persistence and total response time without exposing prompts or private reasoning.
+- Kept one CPU embedding model process, but changed the local worker to a two-thread pool with
+  prefetch one. The tracked Celery default also uses prefetch one, preventing a worker from reserving
+  a backlog that other workers cannot receive. No queue, database or indexing algorithm changed.
+- Rendered only the solution and immutable answer snapshot with markdown-it core. Raw HTML,
+  linkification, typographer features and images are disabled. Lists, emphasis and fenced/inline code
+  use the existing design tokens; no remote content is loaded.
+- Documented that the Retrieval release gate requires a dedicated Qdrant collection. Qdrant BM25
+  IDF statistics are collection-wide, so a payload-filtered evaluation document inside the normal
+  user collection is not a reproducible baseline environment.
+
+## Alternatives not adopted
+
+Changing frozen retrieval thresholds or ranking behavior, increasing CPU embedding batch size,
+creating multiple embedding model processes, adding new queues/databases, and introducing a broad
+Markdown extension stack were rejected. A permanent global thinking default was also rejected;
+providers that do not expose this capability retain their existing behavior.
+
+## Measured results
+
+- Direct mode before the provider switch ranged from 9.1 to 87.2 seconds in four valid Unicode
+  samples. Afterwards, one cold sample completed in 6.38 seconds and three subsequent samples in
+  2.07–2.23 seconds; retrieval remained zero and local pre-LLM work remained 2–4 ms warm.
+- RAG afterwards completed in 14.03–23.55 seconds for two fact and two summary requests. Retrieval
+  took 9.43–12.53 seconds, with reranking responsible for about 6.85–7.16 seconds. The timing split
+  shows the next optimization target without changing candidate counts or retrieval quality here.
+- With the previous solo worker, a 148-chunk document took about 1103 seconds and a later small
+  document waited about 19 minutes. With threads=2 and prefetch=1, a 72-chunk document took 466.21
+  seconds while a later 20-chunk document started indexing after 1.43 seconds and completed in
+  117.73 seconds, about 5 minutes 47 seconds before the large document. Both versions succeeded and
+  the temporary KB/documents were deleted; the normal Qdrant collection returned to exactly 267
+  points.
+- Running the frozen gate in the shared 267-point collection failed Recall@5 and All-required@5
+  thresholds (0.8182 and 0.7727). The formal runner against the same current code and exact 72
+  corpus points in an isolated temporary collection exited zero with Hit@1 0.5909, Hit@5 1.0000,
+  Recall@5 0.8409, MRR@5 0.7424, nDCG@5 0.6623 and All-required@5 0.8182; every frozen regression
+  threshold passed. The temporary backend/collection was deleted and no evaluation asset or
+  retrieval implementation changed.
+
+## Final validation and browser acceptance
+
+- `uv sync --frozen` retained Torch 2.13.0+cu126 and CUDA 12.6 on the GTX 1650; `uv pip check`
+  reported 100 compatible packages. Backend Ruff check/format (160 files) and mypy (94 source
+  files) passed; pytest completed with 415 passed and 24 skipped. Disposable PostgreSQL 18
+  migration/constraint integration tests were 22 passed, and isolated Qdrant tests were 2 passed.
+- Frontend type-check, lint, Prettier and build passed; Vitest completed with 19 files and 87 tests
+  passed. Lazy-loading Knowledge Detail keeps markdown-it out of the main bundle: main JavaScript is
+  132.45 kB, Knowledge Detail 106.94 kB and Knowledge Map 441.53 kB, with no chunk-size warning.
+- A real Edge walkthrough created a disposable KB from the UI and uploaded `architecture.md`
+  (29 chunks) with the 72-chunk fixed corpus concurrently. Both started indexing within 18 ms; the
+  smaller document became Ready after about 316 seconds and the larger after about 545 seconds.
+  Direct completed in about 14 seconds with zero retrieval; a RAG fact request completed in 15.47
+  seconds, returned the correct value 15 and displayed five source snapshots.
+- Saving that answer produced a Knowledge detail with two rendered strong elements and four inline
+  code elements. No script or remote image element was created. Documents, Knowledge and Map had no
+  horizontal overflow at 1440 px or 390 px and produced no browser console exception. The exact
+  temporary KnowledgeEntry, Conversation, two Documents and KB were deleted; Qdrant returned to 267
+  points, and the temporary browser profile was removed.
+
+## Remaining risks
+
+Remote provider latency and output grounding remain externally variable. CPU reranking is now the
+largest stable local RAG cost. The two-thread worker shares provider objects successfully in the
+measured workload, but deployments with different models or memory limits should validate their own
+concurrency before increasing it further.

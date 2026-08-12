@@ -544,6 +544,7 @@ class RagService:
         if include_pipeline:
             yield "pipeline", self._pipeline(prepared.trace_id, "generating", "started")
         guard = StreamingCitationGuard({source.source_id for source in prepared.context.sources})
+        local_pre_llm_latency_ms = self._elapsed(prepared.started_at)
         llm_started_at = perf_counter()
         llm_first_token_latency_ms = 0
         finish_reason = "stop"
@@ -616,6 +617,7 @@ class RagService:
                 guard.invalid_citation_count,
                 llm_latency_ms,
                 llm_first_token_latency_ms,
+                local_pre_llm_latency_ms,
             ),
         )
 
@@ -643,6 +645,8 @@ class RagService:
         }
         yield "retrieval", {**metadata, "sources": []}
         yield "pipeline", self._pipeline(trace_id, "generating", "started")
+        local_pre_llm_latency_ms = self._elapsed(started_at)
+        metadata["local_pre_llm_latency_ms"] = local_pre_llm_latency_ms
         llm_started_at = perf_counter()
         first_token_ms = 0
         finish_reason = "stop"
@@ -705,6 +709,7 @@ class RagService:
                 "invalid_citation_count": 0,
                 "llm_first_token_latency_ms": first_token_ms,
                 "llm_latency_ms": llm_latency_ms,
+                "llm_generation_latency_ms": max(0, llm_latency_ms - first_token_ms),
                 "total_latency_ms": self._elapsed(started_at),
             },
         )
@@ -727,6 +732,7 @@ class RagService:
         invalid_count: int,
         llm_latency_ms: int,
         llm_first_token_latency_ms: int,
+        local_pre_llm_latency_ms: int = 0,
     ) -> dict[str, object]:
         return {
             **RagService._execution_metadata(prepared),
@@ -737,6 +743,8 @@ class RagService:
             "source_count": len(prepared.context.sources),
             "llm_first_token_latency_ms": llm_first_token_latency_ms,
             "llm_latency_ms": llm_latency_ms,
+            "llm_generation_latency_ms": max(0, llm_latency_ms - llm_first_token_latency_ms),
+            "local_pre_llm_latency_ms": local_pre_llm_latency_ms,
             "total_latency_ms": RagService._elapsed(prepared.started_at),
         }
 

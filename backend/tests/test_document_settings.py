@@ -109,11 +109,18 @@ def test_index_names_must_not_be_empty(field: str) -> None:
 
 
 def test_rag_settings_default_to_disabled_and_normalize_empty_values() -> None:
-    settings = Settings(_env_file=None, llm_base_url=" ", llm_model="", llm_api_key=" ")
+    settings = Settings(
+        _env_file=None,
+        llm_base_url=" ",
+        llm_model="",
+        llm_api_key=" ",
+        llm_enable_thinking="",
+    )
     assert settings.rag_llm_enabled is False
     assert settings.llm_base_url is None
     assert settings.llm_model is None
     assert settings.llm_api_key is None
+    assert settings.llm_enable_thinking is None
 
 
 def test_rag_settings_allow_empty_key_and_require_url_model_pair() -> None:

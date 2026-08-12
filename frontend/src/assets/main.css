@@ -1769,8 +1769,50 @@ th {
 .knowledge-prose {
   margin: 0;
   overflow-wrap: anywhere;
-  white-space: pre-wrap;
   line-height: 1.7;
+}
+
+.knowledge-article > section > p {
+  white-space: pre-wrap;
+}
+
+.markdown-content > :first-child {
+  margin-top: 0;
+}
+
+.markdown-content > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-content p,
+.markdown-content ul,
+.markdown-content ol,
+.markdown-content pre {
+  margin: 0 0 var(--space-md);
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  padding-left: var(--space-xl);
+}
+
+.markdown-content pre {
+  max-width: 100%;
+  overflow-x: auto;
+  padding: var(--space-md);
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  white-space: pre;
+}
+
+.markdown-content code {
+  font-family: var(--font-mono);
+}
+
+.markdown-content :not(pre) > code {
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+  background: var(--code-bg);
 }
 
 .knowledge-origin {

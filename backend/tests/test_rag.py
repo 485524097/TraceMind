@@ -228,6 +228,9 @@ async def test_rag_service_uses_hybrid_search_and_streams_grounded_answer() -> N
     assert events[-1][1]["source_count"] == 1
     assert isinstance(events[-1][1]["llm_first_token_latency_ms"], int)
     assert events[-1][1]["llm_first_token_latency_ms"] >= 1
+    assert isinstance(events[-1][1]["local_pre_llm_latency_ms"], int)
+    assert isinstance(events[-1][1]["llm_generation_latency_ms"], int)
+    assert events[-1][1]["llm_generation_latency_ms"] >= 0
 
 
 async def test_rag_service_short_circuits_no_answer_without_llm() -> None:

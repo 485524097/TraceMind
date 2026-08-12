@@ -70,6 +70,10 @@ export interface RagDoneEvent extends ConversationEventFields {
   retrieval_latency_ms: number
   llm_first_token_latency_ms?: number
   llm_latency_ms: number
+  llm_generation_latency_ms?: number
+  local_pre_llm_latency_ms?: number
+  conversation_persistence_latency_ms?: number
+  response_total_latency_ms?: number
   total_latency_ms: number
   route_mode?: 'direct' | 'rag'
   routing_latency_ms?: number

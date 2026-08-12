@@ -78,6 +78,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 timeout=app_settings.llm_timeout_seconds,
                 temperature=app_settings.llm_temperature,
                 max_tokens=app_settings.llm_max_tokens,
+                enable_thinking=app_settings.llm_enable_thinking,
             )
             if app_settings.rag_llm_enabled
             else None

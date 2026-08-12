@@ -15,5 +15,6 @@ celery_app.conf.update(
     accept_content=["json"],
     timezone="Asia/Shanghai",
     enable_utc=True,
+    worker_prefetch_multiplier=1,
     imports=("app.tasks.documents", "app.tasks.indexing"),
 )
