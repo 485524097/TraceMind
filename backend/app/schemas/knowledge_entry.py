@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ValidationStatus = Literal["unverified", "verified", "outdated"]
+KnowledgeIndexStatus = Literal["not_indexed", "pending", "processing", "succeeded", "failed"]
 
 
 def normalize_required_text(value: str) -> str:
@@ -129,6 +130,15 @@ class KnowledgeEntryResponse(BaseModel):
     answer_snapshot: str
     sources_snapshot: list[dict[str, Any]]
     generation_metadata_snapshot: dict[str, Any] | None
+    index_status: KnowledgeIndexStatus
+    active_index_generation: UUID | None
+    index_started_at: datetime | None
+    indexed_at: datetime | None
+    indexed_chunk_count: int
+    embedding_model: str | None
+    embedding_dimension: int | None
+    index_error_code: str | None
+    index_error_message: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -139,3 +149,7 @@ class KnowledgeEntryListResponse(BaseModel):
     offset: int
     limit: int
     available_tags: list[str]
+
+
+class KnowledgeEntryIndexRequest(BaseModel):
+    force: bool = False

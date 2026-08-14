@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -26,6 +27,10 @@ class KnowledgeEntry(Base):
         CheckConstraint(
             "validation_status IN ('unverified', 'verified', 'outdated')",
             name="ck_knowledge_entries_validation_status",
+        ),
+        CheckConstraint(
+            "index_status IN ('not_indexed', 'pending', 'processing', 'succeeded', 'failed')",
+            name="ck_knowledge_entries_index_status",
         ),
         UniqueConstraint(
             "source_assistant_message_id",
@@ -96,6 +101,28 @@ class KnowledgeEntry(Base):
         JSON, nullable=False, default=list
     )
     generation_metadata_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    index_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="not_indexed", server_default="not_indexed"
+    )
+    active_index_generation: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    index_attempt_generation: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    index_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    indexed_source_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_index_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    indexed_chunk_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    embedding_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    embedding_dimension: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    index_error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    index_error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

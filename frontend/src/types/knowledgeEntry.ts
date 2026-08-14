@@ -1,6 +1,7 @@
 import type { EvidenceSource } from '@/types/evidence'
 
 export type ValidationStatus = 'unverified' | 'verified' | 'outdated'
+export type KnowledgeIndexStatus = 'not_indexed' | 'pending' | 'processing' | 'succeeded' | 'failed'
 
 export interface KnowledgeEntryInput {
   question: string
@@ -26,6 +27,15 @@ export interface KnowledgeEntry extends KnowledgeEntryInput {
   answer_snapshot: string
   sources_snapshot: EvidenceSource[]
   generation_metadata_snapshot: Record<string, unknown> | null
+  index_status: KnowledgeIndexStatus
+  active_index_generation: string | null
+  index_started_at: string | null
+  indexed_at: string | null
+  indexed_chunk_count: number
+  embedding_model: string | null
+  embedding_dimension: number | null
+  index_error_code: string | null
+  index_error_message: string | null
   created_at: string
   updated_at: string
 }

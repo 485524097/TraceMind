@@ -14,6 +14,7 @@ from app.indexing import QdrantGateway, VectorIndexError, VectorPoint
 from app.models.document import DocumentChunk, DocumentVersion
 from app.repositories.document import DocumentRepository
 from app.repositories.document_indexing import (
+    ActiveGeneration,
     DocumentIndexingRepository,
     IndexingVersionRecord,
     IndexSnapshot,
@@ -69,6 +70,18 @@ class SemanticSearchResult:
     retrieval_score: float | None = None
     rerank_score: float | None = None
     retrieval_rank: int | None = None
+
+    @property
+    def source_type(self) -> str:
+        return "document"
+
+    @property
+    def retrieval_id(self) -> UUID:
+        return self.chunk_id
+
+    @property
+    def title(self) -> str:
+        return self.document_name
 
 
 @dataclass(frozen=True)
@@ -155,6 +168,14 @@ class DocumentIndexingService:
             knowledge_base_id,
             query,
             document_id=document_id,
+        )
+
+    async def list_active_generations(
+        self, knowledge_base_id: UUID, *, document_id: UUID | None
+    ) -> list[ActiveGeneration]:
+        """Return the document generations that are eligible for retrieval."""
+        return await self.repository.list_active_generations(
+            knowledge_base_id, document_id=document_id
         )
 
     async def request_index(
@@ -339,7 +360,7 @@ class DocumentIndexingService:
                 excluded_chunk_types=("heading",),
             )
             results = [
-                self._search_result(hit.score, hit.payload, ranking_mode="dense") for hit in hits
+                self.search_result(hit.score, hit.payload, ranking_mode="dense") for hit in hits
             ]
             return self._enforce_document_scope(results, prepared.scoped_document_id)
         except (EmbeddingError, VectorIndexError) as exc:
@@ -428,7 +449,7 @@ class DocumentIndexingService:
                 excluded_chunk_types=("heading",),
             )
             results = [
-                self._search_result(
+                self.search_result(
                     hit.score,
                     hit.payload,
                     ranking_mode="hybrid",
@@ -559,6 +580,7 @@ class DocumentIndexingService:
         version = record.version
         payload: dict[str, Any] = {
             "knowledge_base_id": str(document.knowledge_base_id),
+            "source_type": "document",
             "document_id": str(document.id),
             "document_version_id": str(version.id),
             "chunk_id": str(chunk.id),
@@ -584,7 +606,7 @@ class DocumentIndexingService:
         )
 
     @staticmethod
-    def _search_result(
+    def search_result(
         score: float,
         payload: dict[str, Any],
         *,

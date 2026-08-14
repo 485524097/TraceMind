@@ -1,6 +1,7 @@
 import asyncio
 import os
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -16,6 +17,7 @@ from app.core.config import get_settings
 from app.models.conversation import Conversation, ConversationMessage
 from app.models.knowledge_base import KnowledgeBase
 from app.models.knowledge_entry import KnowledgeEntry
+from app.repositories.knowledge_entry_indexing import KnowledgeEntryIndexingRepository
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 pytestmark = [
@@ -160,6 +162,52 @@ async def test_database_enforces_unique_answer_and_validation_status(
     with pytest.raises(IntegrityError):
         await session.commit()
     await session.rollback()
+
+
+async def test_index_state_updates_preserve_knowledge_edit_timestamp(
+    session: AsyncSession,
+) -> None:
+    knowledge_base = KnowledgeBase(name=f"Knowledge indexing {uuid4()}")
+    session.add(knowledge_base)
+    await session.flush()
+    entry = KnowledgeEntry(
+        knowledge_base_id=knowledge_base.id,
+        question="Why?",
+        solution="Use one transaction",
+        failed_attempts=[],
+        validation_status="verified",
+        tags=[],
+        question_snapshot="Why?",
+        answer_snapshot="Use one transaction",
+        sources_snapshot=[],
+        index_status="pending",
+    )
+    session.add(entry)
+    await session.commit()
+    await session.refresh(entry)
+    maintained_at = entry.updated_at
+    generation = uuid4()
+    repository = KnowledgeEntryIndexingRepository(session)
+
+    await repository.mark_processing(entry, generation, datetime.now(UTC))
+    await session.commit()
+    await session.refresh(entry)
+    assert entry.updated_at == maintained_at
+
+    await repository.mark_succeeded(
+        entry,
+        generation=generation,
+        source_updated_at=maintained_at,
+        chunk_count=1,
+        model_name="fake",
+        dimension=3,
+        indexed_at=datetime.now(UTC),
+    )
+    await session.commit()
+    await session.refresh(entry)
+    assert entry.updated_at == maintained_at
+    active = await repository.list_active_generations(knowledge_base.id)
+    assert [(item.entry_id, item.generation) for item in active] == [(entry.id, generation)]
 
 
 def test_knowledge_entry_migration_round_trip() -> None:

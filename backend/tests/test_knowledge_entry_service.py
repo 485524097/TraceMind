@@ -19,6 +19,7 @@ from app.services.exceptions import (
     KnowledgeEntryNotFoundError,
 )
 from app.services.knowledge_entry import KnowledgeEntryService
+from app.services.knowledge_entry_index_dispatcher import KnowledgeEntryIndexingDispatcher
 
 
 def source_payload(
@@ -243,3 +244,41 @@ async def test_list_update_delete_are_scoped_and_transactional() -> None:
     repository.get_scoped.return_value = None
     with pytest.raises(KnowledgeEntryNotFoundError):
         await service.get(knowledge_base_id, uuid4())
+
+
+async def test_verified_update_marks_pending_and_enqueues_index() -> None:
+    service, _, repository, _ = make_service()
+    dispatcher = AsyncMock(spec=KnowledgeEntryIndexingDispatcher)
+    service.dispatcher = cast(KnowledgeEntryIndexingDispatcher, dispatcher)
+    entry = KnowledgeEntry(
+        id=uuid4(),
+        knowledge_base_id=uuid4(),
+        question="Question",
+        solution="Solution",
+        failed_attempts=[],
+        validation_status="unverified",
+        tags=[],
+        question_snapshot="Question",
+        answer_snapshot="Answer",
+        sources_snapshot=[],
+        index_status="not_indexed",
+        indexed_chunk_count=0,
+        updated_at=datetime.now(UTC),
+    )
+    repository.get_scoped.return_value = entry
+
+    async def apply_update(target: KnowledgeEntry, changes: dict[str, object]) -> KnowledgeEntry:
+        for key, value in changes.items():
+            setattr(target, key, value)
+        return target
+
+    repository.update.side_effect = apply_update
+
+    result = await service.update(
+        entry.knowledge_base_id,
+        entry.id,
+        KnowledgeEntryUpdate(validation_status="verified"),
+    )
+
+    assert result.index_status == "pending"
+    dispatcher.enqueue_sync.assert_awaited_once_with(entry.id, force=False)

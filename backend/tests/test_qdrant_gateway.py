@@ -94,7 +94,7 @@ async def test_collection_is_created_with_named_cosine_vector_and_payload_indexe
     assert vectors["dense_v1"].distance == models.Distance.COSINE
     sparse = client.create_collection.await_args.kwargs["sparse_vectors_config"]
     assert sparse["bm25_v1"].modifier == models.Modifier.IDF
-    assert client.create_payload_index.await_count == 6
+    assert client.create_payload_index.await_count == 8
     assert client.get_collection.await_count == 2
 
 
@@ -128,7 +128,7 @@ async def test_concurrent_collection_creation_is_rechecked() -> None:
     await gateway(client).ensure_collection()
 
     assert client.get_collection.await_count == 2
-    assert client.create_payload_index.await_count == 6
+    assert client.create_payload_index.await_count == 8
 
 
 async def test_concurrent_payload_index_creation_is_rechecked() -> None:

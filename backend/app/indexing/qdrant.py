@@ -115,8 +115,10 @@ def deterministic_rrf(
 class QdrantGateway:
     payload_indexes = (
         "knowledge_base_id",
+        "source_type",
         "document_id",
         "document_version_id",
+        "knowledge_entry_id",
         "index_generation",
         "language",
         "chunk_type",
@@ -283,6 +285,9 @@ class QdrantGateway:
 
     async def delete_version(self, version_id: UUID) -> None:
         await self._delete_by_filter(self._equal_filter("document_version_id", version_id))
+
+    async def delete_knowledge_entry(self, entry_id: UUID) -> None:
+        await self._delete_by_filter(self._equal_filter("knowledge_entry_id", entry_id))
 
     async def search(
         self,

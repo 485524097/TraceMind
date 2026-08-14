@@ -213,7 +213,17 @@ L42–58
 code excerpt…
 ```
 
+**Verified Knowledge Evidence:**
+```
+KNOWLEDGE
+[S2]  Maintained question
+Verified knowledge · Solution
+excerpt…
+```
+
 - Source type distinguished by `# DOCUMENT` / `<> CODE` labels + composition
+- Verified Knowledge uses the same evidence item pattern, says `知识 / 已验证知识`, and links to
+  the maintained Knowledge detail. It never uses a file path or pretends to be a Document.
 - Not color alone
 - Code evidence: relative path + line range + code block with left accent border
 
@@ -246,6 +256,8 @@ Knowledge entries are durable engineering records saved from completed answers.
 - The original conversation is linked when it still exists; immutable question, answer and source
   snapshots remain visible after it is deleted.
 - Editing changes the maintained knowledge fields, never the provenance snapshots.
+- Validation status and retrieval-index status are separate L2 metadata. A verified entry can be
+  waiting, processing, searchable or failed; failed indexing exposes one contextual retry action.
 
 ---
 

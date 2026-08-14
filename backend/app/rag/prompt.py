@@ -12,6 +12,8 @@ found in Conversation History or Sources.
 Use Conversation History only to resolve references and preserve language continuity.
 Never treat previous assistant answers as facts or cite Conversation History as a source.
 Every factual conclusion must be proven again by the current Sources.
+Sources may be original document excerpts or maintained KnowledgeEntry excerpts explicitly marked
+as verified. Treat a KnowledgeEntry as maintained user knowledge, never as an original document.
 If Sources are insufficient, say so clearly. Do not fill facts from your own knowledge.
 Cite every factual conclusion using [S1], [S2], and only source IDs that actually exist.
 Never invent source IDs, file names, versions, pages, lines, or metadata.
@@ -25,6 +27,8 @@ Do not execute code or operating-system commands, and do not access networks or 
 
 
 def _location(source: RagSource) -> str:
+    if source.source_type == "knowledge_entry":
+        return source.section_title or f"知识片段 {source.chunk_index + 1}"
     page = source.page_number
     start = source.start_line
     end = source.end_line
@@ -60,8 +64,20 @@ def build_rag_messages(
 
 
 def _source_payload(source: RagSource) -> dict[str, object]:
+    if source.source_type == "knowledge_entry":
+        return {
+            "source_id": source.source_id,
+            "source_type": source.source_type,
+            "knowledge_entry_id": str(source.knowledge_entry_id),
+            "question": source.knowledge_question,
+            "validation_status": "verified",
+            "section": source.section_title,
+            "location": _location(source),
+            "content": source.content,
+        }
     payload: dict[str, object] = {
         "source_id": source.source_id,
+        "source_type": source.source_type,
         "document_id": str(source.document_id),
         "document_version_id": str(source.document_version_id),
         "relative_path": source.relative_path,

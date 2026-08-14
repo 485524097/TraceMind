@@ -12,10 +12,7 @@ from app.rag import RagContext, StreamingCitationGuard, build_rag_context, build
 from app.reranker import RerankerError, RerankerUnavailableError
 from app.services.conversation import ConversationTurn
 from app.services.document_indexing import (
-    DocumentIndexingService,
-    HybridRetrievalResult,
     PreparedHybridSearch,
-    SemanticSearchResult,
 )
 from app.services.document_reranking import DocumentRerankingService
 from app.services.exceptions import HybridSearchUnavailableError, SemanticSearchUnavailableError
@@ -24,6 +21,11 @@ from app.services.query_rewrite import (
     QueryRewriteResult,
 )
 from app.services.query_router import RouteMode, route_query
+from app.services.rag_retrieval import (
+    RagHybridRetrievalResult,
+    RagRetrievalServiceProtocol,
+    RetrievalSearchResult,
+)
 from app.services.retrieval_query import PreparedRetrievalQuery
 
 logger = logging.getLogger(__name__)
@@ -71,7 +73,7 @@ class RetrievalPreparation:
 
 @dataclass(frozen=True)
 class RerankOutcome:
-    results: list[SemanticSearchResult]
+    results: list[RetrievalSearchResult]
     retrieval_mode: str
     latency_ms: int
     fallback: bool
@@ -87,7 +89,7 @@ class RagRetrievalUnavailableError(HybridSearchUnavailableError):
 class RagService:
     def __init__(
         self,
-        indexing_service: DocumentIndexingService,
+        indexing_service: RagRetrievalServiceProtocol,
         provider: LLMProvider,
         settings: Settings,
         reranking_service: DocumentRerankingService | None = None,
@@ -137,7 +139,7 @@ class RagService:
             raise RagRetrievalUnavailableError(
                 _scope_metadata_from_query(preparation.scoped_query)
             ) from exc
-        retrieval = HybridRetrievalResult(candidates, 0, 0, 0, len(candidates), 0)
+        retrieval = RagHybridRetrievalResult(candidates, 0, 0, 0, len(candidates), 0)
         reranked = await self._rerank(preparation.rewrite.query, retrieval.items)
         prepared = self._assemble(
             trace_id,
@@ -277,7 +279,7 @@ class RagService:
         )
 
         if hybrid.vector is None:
-            retrieval = HybridRetrievalResult([], 0, 0, 0, 0, 0)
+            retrieval = RagHybridRetrievalResult([], 0, 0, 0, 0, 0)
             yield "pipeline", self._pipeline(trace_id, "hybrid_retrieval", "skipped")
         else:
             yield "pipeline", self._pipeline(trace_id, "hybrid_retrieval", "started")
@@ -403,7 +405,7 @@ class RagService:
     async def _execute_hybrid(
         self,
         prepared: PreparedHybridSearch,
-    ) -> HybridRetrievalResult:
+    ) -> RagHybridRetrievalResult:
         try:
             return await self.indexing_service.execute_hybrid_search(prepared)
         except HybridSearchUnavailableError as exc:
@@ -411,7 +413,7 @@ class RagService:
                 _scope_metadata_from_query(prepared.prepared_query)
             ) from exc
 
-    async def _rerank(self, query: str, candidates: list[SemanticSearchResult]) -> RerankOutcome:
+    async def _rerank(self, query: str, candidates: list[RetrievalSearchResult]) -> RerankOutcome:
         results = candidates[: self.settings.rag_retrieval_limit]
         if not candidates or not self.settings.reranker_enabled:
             return RerankOutcome(results, "hybrid", 0, False, None)
@@ -455,7 +457,7 @@ class RagService:
         knowledge_base_id: UUID,
         original_query: str,
         preparation: RetrievalPreparation,
-        retrieval: HybridRetrievalResult,
+        retrieval: RagHybridRetrievalResult,
         reranked: RerankOutcome,
         started_at: float,
         *,

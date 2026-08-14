@@ -137,6 +137,14 @@ class KnowledgeEntryAlreadyExistsError(KnowledgeEntryError):
         self.source_message_id = source_message_id
 
 
+class KnowledgeEntryIndexingQueueError(KnowledgeEntryError):
+    pass
+
+
+class KnowledgeEntryNotReadyForIndexError(KnowledgeEntryError):
+    pass
+
+
 __all__ = [
     "DocumentAlreadyParsedError",
     "DocumentAlreadyProcessingError",

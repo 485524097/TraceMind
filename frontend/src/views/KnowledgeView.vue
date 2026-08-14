@@ -24,6 +24,13 @@ const statusLabels: Record<ValidationStatus, string> = {
   verified: '已验证',
   outdated: '已过期',
 }
+const indexLabels = {
+  not_indexed: '未进入检索',
+  pending: '等待索引',
+  processing: '正在索引',
+  succeeded: '可检索',
+  failed: '索引失败',
+} as const
 
 async function load(): Promise<void> {
   loading.value = true
@@ -109,6 +116,9 @@ onMounted(async () => {
         <div class="knowledge-row-meta">
           <span class="knowledge-status" :data-status="entry.validation_status">
             {{ statusLabels[entry.validation_status] }}
+          </span>
+          <span class="knowledge-index-status" :data-status="entry.index_status">
+            {{ indexLabels[entry.index_status] }}
           </span>
           <time>{{ new Date(entry.updated_at).toLocaleDateString() }}</time>
         </div>

@@ -34,10 +34,11 @@ Query Embedding provider 在应用级复用。配置 RAG 时，lifespan 在后�
 
 ## 4. Knowledge Plane
 
-Conversation → KnowledgeEntry → Knowledge → derived Knowledge Map。
+Conversation → KnowledgeEntry → verified Knowledge index → RAG / Knowledge / derived Knowledge Map。
 
-KnowledgeEntry 保存安全 allowlist snapshot。Knowledge Map 从 PostgreSQL 实时派生，不参与
-检索，也不持久化图节点或边。
+KnowledgeEntry 保存安全 allowlist snapshot。只有用户维护为 `verified` 的结构化字段进入派生
+检索索引；原始 assistant answer snapshot 不进入索引。Knowledge Map 从 PostgreSQL 实时派生，
+不参与检索，也不持久化图节点或边。
 
 ## 5. Experience & Observability Plane
 
