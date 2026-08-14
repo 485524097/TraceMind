@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db_session
 from app.schemas.knowledge_entry import (
     KnowledgeEntryCreate,
+    KnowledgeEntryIndexRequest,
     KnowledgeEntryListResponse,
     KnowledgeEntryResponse,
     KnowledgeEntryUpdate,
@@ -17,10 +18,13 @@ from app.services.exceptions import (
     InvalidKnowledgeEntrySourceError,
     KnowledgeBaseNotFoundError,
     KnowledgeEntryAlreadyExistsError,
+    KnowledgeEntryIndexingQueueError,
     KnowledgeEntryNotFoundError,
+    KnowledgeEntryNotReadyForIndexError,
     KnowledgeEntrySourceNotFoundError,
 )
 from app.services.knowledge_entry import KnowledgeEntryService
+from app.services.knowledge_entry_index_dispatcher import CeleryKnowledgeEntryIndexingDispatcher
 
 logger = logging.getLogger(__name__)
 router = APIRouter(
@@ -31,7 +35,10 @@ SessionDependency = Annotated[AsyncSession, Depends(get_db_session)]
 
 
 def get_knowledge_entry_service(session: SessionDependency) -> KnowledgeEntryService:
-    return KnowledgeEntryService(session)
+    return KnowledgeEntryService(
+        session,
+        dispatcher=CeleryKnowledgeEntryIndexingDispatcher(),
+    )
 
 
 ServiceDependency = Annotated[KnowledgeEntryService, Depends(get_knowledge_entry_service)]
@@ -51,6 +58,10 @@ def raise_http_error(exc: Exception) -> NoReturn:
         raise HTTPException(status_code=409, detail="This answer is already saved as knowledge")
     if isinstance(exc, InvalidKnowledgeEntrySourceError):
         raise HTTPException(status_code=422, detail=str(exc))
+    if isinstance(exc, KnowledgeEntryNotReadyForIndexError):
+        raise HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, KnowledgeEntryIndexingQueueError):
+        raise HTTPException(status_code=503, detail=str(exc))
     if isinstance(exc, SQLAlchemyError):
         logger.exception("Knowledge entry database operation failed (%s)", type(exc).__name__)
         raise HTTPException(status_code=500, detail="Knowledge entry operation failed")
@@ -129,6 +140,29 @@ async def update_knowledge_entry(
     try:
         entry = await service.update(knowledge_base_id, entry_id, payload)
     except (KnowledgeEntryNotFoundError, SQLAlchemyError) as exc:
+        raise_http_error(exc)
+    return KnowledgeEntryResponse.model_validate(entry)
+
+
+@router.post(
+    "/{entry_id}/index",
+    response_model=KnowledgeEntryResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def request_knowledge_entry_index(
+    knowledge_base_id: UUID,
+    entry_id: UUID,
+    payload: KnowledgeEntryIndexRequest,
+    service: ServiceDependency,
+) -> KnowledgeEntryResponse:
+    try:
+        entry = await service.request_index(knowledge_base_id, entry_id, force=payload.force)
+    except (
+        KnowledgeEntryNotFoundError,
+        KnowledgeEntryNotReadyForIndexError,
+        KnowledgeEntryIndexingQueueError,
+        SQLAlchemyError,
+    ) as exc:
         raise_http_error(exc)
     return KnowledgeEntryResponse.model_validate(entry)
 

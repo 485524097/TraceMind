@@ -15,6 +15,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.api.routes.conversations import ConversationServiceDependency
 from app.api.routes.indexing import IndexingServiceDependency
 from app.llm import LLMProvider
+from app.repositories.knowledge_entry_indexing import KnowledgeEntryIndexingRepository
 from app.schemas.rag import RagStreamRequest
 from app.services.conversation import (
     ConversationExchange,
@@ -24,6 +25,7 @@ from app.services.conversation import (
 from app.services.document_reranking import DocumentRerankingService
 from app.services.exceptions import ConversationNotFoundError
 from app.services.rag import RagService
+from app.services.rag_retrieval import RagRetrievalService
 
 router = APIRouter(prefix="/knowledge-bases/{knowledge_base_id}/rag", tags=["rag"])
 logger = logging.getLogger(__name__)
@@ -36,8 +38,15 @@ def get_rag_service(
     provider = request.app.state.llm_provider
     if provider is None:
         raise HTTPException(status_code=503, detail="RAG answer generation is not configured")
-    return RagService(
+    retrieval_service = RagRetrievalService(
         indexing_service,
+        request.app.state.settings,
+        request.app.state.embedding_provider,
+        indexing_service.gateway,
+        KnowledgeEntryIndexingRepository(indexing_service.session),
+    )
+    return RagService(
+        retrieval_service,
         cast(LLMProvider, provider),
         request.app.state.settings,
         (

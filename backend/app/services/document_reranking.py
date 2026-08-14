@@ -1,5 +1,6 @@
 import asyncio
 from dataclasses import replace
+from typing import TypeVar
 
 from app.reranker import (
     RerankerCandidate,
@@ -7,11 +8,13 @@ from app.reranker import (
     RerankerProvider,
     RerankerUnavailableError,
 )
-from app.services.document_indexing import SemanticSearchResult
+from app.services.rag_retrieval import RetrievalSearchResult
+
+RetrievalT = TypeVar("RetrievalT", bound=RetrievalSearchResult)
 
 
-def build_reranker_candidate_text(result: SemanticSearchResult) -> str:
-    parts = [result.document_name]
+def build_reranker_candidate_text(result: RetrievalSearchResult) -> str:
+    parts = [result.title]
     if result.section_title:
         parts.append(result.section_title)
     parts.append(result.content)
@@ -25,13 +28,13 @@ class DocumentRerankingService:
     async def rerank(
         self,
         query: str,
-        candidates: list[SemanticSearchResult],
+        candidates: list[RetrievalT],
         *,
         limit: int,
-    ) -> list[SemanticSearchResult]:
+    ) -> list[RetrievalT]:
         if not candidates:
             return []
-        by_id = {str(candidate.chunk_id): candidate for candidate in candidates}
+        by_id = {str(candidate.retrieval_id): candidate for candidate in candidates}
         if len(by_id) != len(candidates):
             raise RerankerUnavailableError(reason="invalid_response")
         try:
@@ -39,7 +42,7 @@ class DocumentRerankingService:
                 query,
                 [
                     RerankerCandidate(
-                        candidate_id=str(candidate.chunk_id),
+                        candidate_id=str(candidate.retrieval_id),
                         text=build_reranker_candidate_text(candidate),
                     )
                     for candidate in candidates

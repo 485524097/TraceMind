@@ -42,6 +42,15 @@ describe('KnowledgeView', () => {
           answer_snapshot: 'Answer',
           sources_snapshot: [],
           generation_metadata_snapshot: null,
+          index_status: 'succeeded',
+          active_index_generation: 'generation',
+          index_started_at: null,
+          indexed_at: '2026-08-11T00:00:00Z',
+          indexed_chunk_count: 1,
+          embedding_model: 'fake',
+          embedding_dimension: 3,
+          index_error_code: null,
+          index_error_message: null,
           created_at: '2026-08-11T00:00:00Z',
           updated_at: '2026-08-11T00:00:00Z',
         },
@@ -61,6 +70,7 @@ describe('KnowledgeView', () => {
     const row = wrapper.get('[data-testid="knowledge-entry-entry"]')
     expect(row.text()).toContain('Why did the transaction fail?')
     expect(row.text()).toContain('已验证')
+    expect(row.text()).toContain('可检索')
     await row.trigger('click')
     expect(push).toHaveBeenCalledWith('/knowledge-bases/kb/knowledge/entry')
   })

@@ -283,3 +283,89 @@ async def test_real_qdrant_online_sparse_schema_upgrade() -> None:
                 await client.delete_collection(collection)
         finally:
             await client.close()
+
+
+async def test_real_qdrant_mixes_document_and_knowledge_then_deletes_only_entry() -> None:
+    assert TEST_QDRANT_URL is not None
+    client = AsyncQdrantClient(
+        url=TEST_QDRANT_URL,
+        check_compatibility=False,
+        trust_env=False,
+    )
+    collection = f"tracemind_knowledge_retrieval_test_{uuid4().hex}"
+    gateway = QdrantGateway(
+        client,
+        collection_name=collection,
+        vector_name="dense_v1",
+        sparse_vector_name="bm25_v1",
+        bm25_model="qdrant/bm25",
+        bm25_tokenizer="multilingual",
+        bm25_language="none",
+        dimension=3,
+        upsert_batch_size=64,
+        dense_prefetch_limit=20,
+        sparse_prefetch_limit=20,
+    )
+    knowledge_base_id = uuid4()
+    document_id, document_generation = uuid4(), uuid4()
+    entry_id, knowledge_generation = uuid4(), uuid4()
+    try:
+        await gateway.ensure_collection()
+        await gateway.upsert(
+            [
+                VectorPoint(
+                    uuid4(),
+                    [1.0, 0.0, 0.0],
+                    "transaction document",
+                    {
+                        "source_type": "document",
+                        "knowledge_base_id": str(knowledge_base_id),
+                        "document_id": str(document_id),
+                        "index_generation": str(document_generation),
+                        "chunk_type": "paragraph",
+                        "language": None,
+                        "content": "transaction document",
+                    },
+                ),
+                VectorPoint(
+                    uuid4(),
+                    [1.0, 0.0, 0.0],
+                    "verified transaction solution",
+                    {
+                        "source_type": "knowledge_entry",
+                        "knowledge_base_id": str(knowledge_base_id),
+                        "knowledge_entry_id": str(entry_id),
+                        "index_generation": str(knowledge_generation),
+                        "chunk_type": "knowledge_entry",
+                        "language": None,
+                        "content": "verified transaction solution",
+                    },
+                ),
+            ]
+        )
+
+        hits = await gateway.hybrid_search(
+            [1.0, 0.0, 0.0],
+            "transaction",
+            knowledge_base_id=knowledge_base_id,
+            generations=[document_generation, knowledge_generation],
+            limit=5,
+            language=None,
+            document_id=None,
+            dense_score_threshold=0.5,
+            excluded_chunk_types=("heading",),
+        )
+        assert {hit.payload["source_type"] for hit in hits} == {
+            "document",
+            "knowledge_entry",
+        }
+
+        await gateway.delete_knowledge_entry(entry_id)
+        assert await gateway.count_generation(knowledge_generation) == 0
+        assert await gateway.count_generation(document_generation) == 1
+    finally:
+        try:
+            if await client.collection_exists(collection):
+                await client.delete_collection(collection)
+        finally:
+            await client.close()

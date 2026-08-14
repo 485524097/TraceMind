@@ -5,6 +5,7 @@ import {
   deleteKnowledgeEntry,
   getKnowledgeEntry,
   listKnowledgeEntries,
+  requestKnowledgeEntryIndex,
   updateKnowledgeEntry,
 } from '@/services/knowledgeEntries'
 
@@ -18,6 +19,7 @@ describe('knowledge entry service', () => {
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ items: [], total: 0, available_tags: [] })),
       )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'entry' })))
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'entry' })))
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'entry' })))
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
@@ -39,6 +41,7 @@ describe('knowledge entry service', () => {
     })
     await getKnowledgeEntry('kb', 'entry')
     await updateKnowledgeEntry('kb', 'entry', { validation_status: 'outdated' })
+    await requestKnowledgeEntryIndex('kb', 'entry', true)
     await deleteKnowledgeEntry('kb', 'entry')
 
     expect(String(fetchMock.mock.calls[1]?.[0])).toContain(
@@ -46,6 +49,8 @@ describe('knowledge entry service', () => {
     )
     expect(fetchMock.mock.calls[0]?.[1]?.method).toBe('POST')
     expect(fetchMock.mock.calls[3]?.[1]?.method).toBe('PATCH')
-    expect(fetchMock.mock.calls[4]?.[1]?.method).toBe('DELETE')
+    expect(fetchMock.mock.calls[4]?.[1]?.method).toBe('POST')
+    expect(fetchMock.mock.calls[4]?.[1]?.body).toBe(JSON.stringify({ force: true }))
+    expect(fetchMock.mock.calls[5]?.[1]?.method).toBe('DELETE')
   })
 })

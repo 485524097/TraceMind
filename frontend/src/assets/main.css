@@ -1401,6 +1401,11 @@ th {
   border-left: 3px solid var(--color-accent);
   border-bottom: 1px solid var(--code-border);
 }
+
+.ev-src.knowledge {
+  border-left: 2px solid var(--color-accent);
+  padding-left: 12px;
+}
 .ev-type {
   font-size: 0.625rem;
   font-weight: 600;
@@ -1702,6 +1707,20 @@ th {
 .knowledge-status[data-status='outdated'] {
   border-color: var(--color-warning);
   color: var(--color-warning);
+}
+
+.knowledge-index-status {
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.knowledge-index-status[data-status='succeeded'] {
+  color: var(--color-success);
+}
+
+.knowledge-index-status[data-status='failed'] {
+  color: var(--color-error);
 }
 
 .msg-knowledge-action {

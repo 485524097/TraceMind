@@ -30,7 +30,7 @@ RAG（检索增强生成）过程通过 Pipeline Trace 展示路由、改写、�
 
 ### 知识沉淀：对话不是终点
 
-重要回答可以保存为 `KnowledgeEntry`，继续整理 Question、Background、Root Cause、Solution、Failed Attempts、Tags、验证状态和 Evidence Snapshot，让一次问题解决真正变成长期知识资产。
+重要回答可以保存为 `KnowledgeEntry`，继续整理 Question、Background、Root Cause、Solution、Failed Attempts、Tags、验证状态和 Evidence Snapshot。已验证知识会进入后续 RAG 检索，让一次问题解决真正变成可复用的长期知识资产。
 
 ### Knowledge Map：从已有知识中看到关系
 

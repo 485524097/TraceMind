@@ -518,4 +518,56 @@ automation was also rejected for this pass after the owner chose manual capture.
 Local Markdown links, Mermaid fence structure, Quick Start commands, tracked diff scope and secret /
 absolute-path patterns were checked against the current repository. Before publishing, the owner
 must add the four reviewed screenshots, align runtime/package image version metadata if desired,
-and promote the release branch through the agreed develop/main/tag/GitHub Release flow.
+    and promote the release branch through the agreed develop/main/tag/GitHub Release flow.
+
+# 2026-08-14 — Stage 16 Verified Knowledge Retrieval Loop
+
+## 问题与约束
+
+Stage 13 已能把 completed answer 保存为结构化 KnowledgeEntry，但 RAG 仍只检索 Document
+Chunk。沉淀经验无法自动参与后续问答，与“问题 → 方案 → 经验 → 复用”的产品闭环不一致。
+实现必须继续使用 Provider 抽象、真实来源和确定性流程；不得把 assistant answer snapshot
+直接当作事实，不得破坏现有文档检索、Path Scope 和 Citation Guard。
+
+## 采用方案
+
+- 为 KnowledgeEntry 增加独立索引状态、active/attempt generation、模型维度、Chunk 数和安全
+  错误字段；迁移 `20260814_0011` 使存量条目保持 `not_indexed`，不隐式信任历史回答。
+- 只索引 `verified` 条目的 maintained fields，明确排除 answer snapshot。采用现有确定性
+  Chunker、Embedding Provider、Celery 和 Qdrant Collection，payload 使用真实
+  `knowledge_entry_id` 与 `source_type=knowledge_entry`。
+- RAG 在一次 Query Embedding 后，把数据库确认有效的文档代次与已验证知识代次合并到同一轮
+  Dense/BM25/RRF；文档/路径或 language scope 不混入知识来源。
+- Knowledge 来源继续使用 `[Sx]`，Evidence Inspector 明确显示“已验证知识”并链接详情。前端
+  展示 `未进入检索/等待索引/正在索引/可检索/索引失败`，失败可显式重试。
+- 用户内容更新时间与派生索引状态分离：Repository 在索引状态写入时显式保留 `updated_at`；
+  内容编辑会立即使旧索引代次不再满足 active-generation 条件。
+
+## 未采用方案
+
+未采用同步索引、第二 Qdrant Collection、把 KnowledgeEntry 伪装成 Markdown Document、索引
+完整 answer snapshot、Agent 或 GraphRAG。前四项分别会造成请求阻塞、重复向量化/跨库融合、
+虚假来源身份和模型回答自我强化；后两项与当前确定性闭环无关。
+
+## 验证方法与当前结果
+
+- 新增 KnowledgeEntry 索引与统一 RAG 召回专项测试，覆盖 verified 索引、outdated 清理、
+  answer snapshot 排除、文档/知识代次联合召回和知识 Prompt/Citation 契约。
+- 迁移集成测试增加索引状态更新不改变 maintained `updated_at`、有效代次可查询的断言。
+- 后端静态检查通过；420 项非集成测试通过。PostgreSQL 集成测试 23 项通过、2 项按配置
+  跳过，独立 Qdrant 集成测试 3 项通过，其中包含 Migration 往返、索引时间语义和联合来源
+  召回。
+- 前端 type-check、lint、build 通过，19 个测试文件共 88 项测试分组运行通过。
+- 24 Case 固定 Hybrid 回归在模型预热后通过正式质量阈值：Hit@5 1.0000、Recall@5
+  0.8409、MRR@5 0.7424、nDCG@5 0.6623、All-required@5 0.8182。P95 为
+  3549.68 ms，较历史 baseline 触发延迟警告；首次冷启动请求曾达到 60 秒超时。完整边界与
+  风险记录在 `docs/experiments/knowledge-entry-retrieval-v1.md`。
+
+## 遗留风险
+
+- Qdrant 或队列在删除清理时长期不可用，可能留下不会被检索但占用空间的 orphan point；需要
+  后续一致性审计/修复命令处理。
+- 存量 KnowledgeEntry 不自动进入索引，必须经用户明确验证或重试，避免把历史生成内容静默
+  升级为事实。
+- 固定 synthetic retrieval corpus 不包含 KnowledgeEntry 来源；需要增加真实、可本地留存的
+  问题解决案例评测，分别观察文档与知识来源的召回、引用支持率、延迟和成本。

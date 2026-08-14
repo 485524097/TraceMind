@@ -1,3 +1,4 @@
+import logging
 import re
 from uuid import UUID
 
@@ -9,19 +10,27 @@ from app.models.conversation import ConversationMessage
 from app.models.knowledge_entry import KnowledgeEntry
 from app.repositories.knowledge_base import KnowledgeBaseRepository
 from app.repositories.knowledge_entry import KnowledgeEntryRepository
+from app.repositories.knowledge_entry_indexing import KnowledgeEntryIndexingRepository
 from app.schemas.knowledge_entry import KnowledgeEntryCreate, KnowledgeEntryUpdate
 from app.schemas.rag import RagSource
 from app.services.exceptions import (
     InvalidKnowledgeEntrySourceError,
     KnowledgeBaseNotFoundError,
     KnowledgeEntryAlreadyExistsError,
+    KnowledgeEntryIndexingQueueError,
     KnowledgeEntryNotFoundError,
+    KnowledgeEntryNotReadyForIndexError,
     KnowledgeEntrySourceNotFoundError,
 )
+from app.services.knowledge_entry_index_dispatcher import KnowledgeEntryIndexingDispatcher
+
+logger = logging.getLogger(__name__)
 
 _CITATION_PATTERN = re.compile(r"\[S\d+\]")
 _SOURCE_SNAPSHOT_FIELDS = (
     "source_id",
+    "source_type",
+    "knowledge_base_id",
     "document_id",
     "document_version_id",
     "chunk_id",
@@ -37,6 +46,9 @@ _SOURCE_SNAPSHOT_FIELDS = (
     "page_number",
     "start_line",
     "end_line",
+    "knowledge_entry_id",
+    "knowledge_question",
+    "knowledge_updated_at",
 )
 _GENERATION_METADATA_FIELDS = {
     "finish_reason",
@@ -72,10 +84,14 @@ class KnowledgeEntryService:
         session: AsyncSession,
         repository: KnowledgeEntryRepository | None = None,
         knowledge_bases: KnowledgeBaseRepository | None = None,
+        indexing_repository: KnowledgeEntryIndexingRepository | None = None,
+        dispatcher: KnowledgeEntryIndexingDispatcher | None = None,
     ) -> None:
         self.session = session
         self.repository = repository or KnowledgeEntryRepository(session)
         self.knowledge_bases = knowledge_bases or KnowledgeBaseRepository(session)
+        self.indexing_repository = indexing_repository or KnowledgeEntryIndexingRepository(session)
+        self.dispatcher = dispatcher
 
     async def _require_knowledge_base(self, knowledge_base_id: UUID) -> None:
         if await self.knowledge_bases.get_by_id(knowledge_base_id) is None:
@@ -201,6 +217,9 @@ class KnowledgeEntryService:
                 answer_snapshot=assistant.content,
                 sources_snapshot=self._sources_snapshot(knowledge_base_id, assistant),
                 generation_metadata_snapshot=self._generation_metadata_snapshot(assistant),
+                index_status=(
+                    "pending" if payload.validation_status == "verified" else "not_indexed"
+                ),
             )
             await self.repository.create(entry)
             await self.session.commit()
@@ -211,6 +230,8 @@ class KnowledgeEntryService:
         except Exception:
             await self.session.rollback()
             raise
+        if entry.index_status == "pending":
+            await self._enqueue_sync(entry, force=False, raise_queue_error=False)
         return entry
 
     async def get(self, knowledge_base_id: UUID, entry_id: UUID) -> KnowledgeEntry:
@@ -254,11 +275,14 @@ class KnowledgeEntryService:
         try:
             entry = await self.get(knowledge_base_id, entry_id)
             await self.repository.update(entry, payload.model_dump(exclude_unset=True))
+            await self._mark_sync_required(entry)
             await self.session.commit()
             await self.session.refresh(entry)
         except Exception:
             await self.session.rollback()
             raise
+        if entry.index_status == "pending":
+            await self._enqueue_sync(entry, force=False, raise_queue_error=False)
         return entry
 
     async def delete(self, knowledge_base_id: UUID, entry_id: UUID) -> None:
@@ -269,3 +293,53 @@ class KnowledgeEntryService:
         except Exception:
             await self.session.rollback()
             raise
+        if self.dispatcher is not None:
+            try:
+                await self.dispatcher.enqueue_delete(entry_id)
+            except KnowledgeEntryIndexingQueueError:
+                logger.warning(
+                    "Deleted knowledge entry %s has Qdrant points requiring later cleanup",
+                    entry_id,
+                )
+
+    async def request_index(
+        self, knowledge_base_id: UUID, entry_id: UUID, *, force: bool = False
+    ) -> KnowledgeEntry:
+        entry = await self.get(knowledge_base_id, entry_id)
+        if entry.validation_status != "verified":
+            raise KnowledgeEntryNotReadyForIndexError(
+                "Only verified knowledge entries can be indexed"
+            )
+        await self.indexing_repository.mark_pending(entry)
+        await self.session.commit()
+        await self.session.refresh(entry)
+        await self._enqueue_sync(entry, force=force, raise_queue_error=True)
+        return entry
+
+    async def _mark_sync_required(self, entry: KnowledgeEntry) -> None:
+        if entry.validation_status == "verified":
+            await self.indexing_repository.mark_pending(entry)
+            return
+        if entry.active_index_generation is not None or entry.index_attempt_generation is not None:
+            await self.indexing_repository.mark_pending(entry)
+            return
+        await self.indexing_repository.mark_not_indexed(entry)
+
+    async def _enqueue_sync(
+        self,
+        entry: KnowledgeEntry,
+        *,
+        force: bool,
+        raise_queue_error: bool,
+    ) -> None:
+        if self.dispatcher is None:
+            return
+        try:
+            await self.dispatcher.enqueue_sync(entry.id, force=force)
+        except KnowledgeEntryIndexingQueueError:
+            await self.indexing_repository.mark_queue_failed(entry)
+            await self.session.commit()
+            await self.session.refresh(entry)
+            if raise_queue_error:
+                raise
+            logger.warning("Knowledge entry %s could not be queued for indexing", entry.id)

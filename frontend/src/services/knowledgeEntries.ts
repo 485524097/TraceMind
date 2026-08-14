@@ -62,3 +62,14 @@ export function updateKnowledgeEntry(
 export function deleteKnowledgeEntry(knowledgeBaseId: string, entryId: string): Promise<void> {
   return apiRequest(`${basePath(knowledgeBaseId)}/${entryId}`, { method: 'DELETE' })
 }
+
+export function requestKnowledgeEntryIndex(
+  knowledgeBaseId: string,
+  entryId: string,
+  force = false,
+): Promise<KnowledgeEntry> {
+  return apiRequest(`${basePath(knowledgeBaseId)}/${entryId}/index`, {
+    method: 'POST',
+    body: JSON.stringify({ force }),
+  })
+}

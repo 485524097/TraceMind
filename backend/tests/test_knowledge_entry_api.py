@@ -33,6 +33,8 @@ def make_entry() -> KnowledgeEntry:
         answer_snapshot="Use one transaction [S1]",
         sources_snapshot=[],
         generation_metadata_snapshot=None,
+        index_status="not_indexed",
+        indexed_chunk_count=0,
         created_at=now,
         updated_at=now,
     )
@@ -57,6 +59,7 @@ async def test_knowledge_entry_crud_contract() -> None:
     service.list.return_value = ([entry], 1, ["python"])
     service.get.return_value = entry
     service.update.return_value = entry
+    service.request_index.return_value = entry
     base = f"/api/v1/knowledge-bases/{entry.knowledge_base_id}/knowledge-entries"
     payload = {
         "source_assistant_message_id": str(entry.source_assistant_message_id),
@@ -69,11 +72,14 @@ async def test_knowledge_entry_crud_contract() -> None:
         listed = await client.get(f"{base}?validation_status=unverified&tag=python")
         detail = await client.get(f"{base}/{entry.id}")
         updated = await client.patch(f"{base}/{entry.id}", json={"validation_status": "verified"})
+        indexed = await client.post(f"{base}/{entry.id}/index", json={"force": True})
         deleted = await client.delete(f"{base}/{entry.id}")
     assert created.status_code == 201
     assert listed.json()["available_tags"] == ["python"]
     assert detail.json()["question_snapshot"] == "Why?"
     assert updated.status_code == 200
+    assert indexed.status_code == 202
+    service.request_index.assert_awaited_once_with(entry.knowledge_base_id, entry.id, force=True)
     assert deleted.status_code == 204
 
 
