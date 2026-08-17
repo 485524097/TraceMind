@@ -119,9 +119,14 @@ class FakeRepository:
         self.active: list[ActiveGeneration] = []
         self.active_results: list[list[ActiveGeneration]] = []
         self.active_calls: list[tuple[UUID, UUID | None]] = []
+        self.latest = True
+        self.latest_results: list[bool] = []
 
     async def lock_version(self, version_id: UUID) -> IndexingVersionRecord | None:
         return self.record if version_id == self.record.version.id else None
+
+    async def is_latest_version(self, _record: IndexingVersionRecord) -> bool:
+        return self.latest_results.pop(0) if self.latest_results else self.latest
 
     async def get_scoped_version(
         self, knowledge_base_id: UUID, document_id: UUID, version_id: UUID
@@ -302,6 +307,28 @@ async def test_successful_index_writes_traceable_point_and_activates_generation(
         "TraceMind service"
     ]
     assert session.commit.await_count == 2
+
+
+async def test_historical_version_is_rejected_before_index_claim() -> None:
+    service, session, repository, gateway, _, version = make_service()
+    repository.latest = False
+
+    assert not await service.index_version(version.id)
+    assert version.index_status == "pending"
+    assert version.index_attempt_generation is None
+    assert gateway.points == []
+    session.commit.assert_not_awaited()
+
+
+async def test_version_that_becomes_historical_cannot_activate_new_generation() -> None:
+    service, _, repository, gateway, _, version = make_service()
+    repository.latest_results = [True, False]
+
+    assert not await service.index_version(version.id)
+    assert version.active_index_generation is None
+    assert version.index_attempt_generation is None
+    assert version.index_error_code == "version_not_latest"
+    assert len(gateway.deleted_generations) == 1
 
 
 def test_path_is_added_to_dense_and_sparse_text_only_for_directory_documents() -> None:

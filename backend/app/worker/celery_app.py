@@ -16,5 +16,11 @@ celery_app.conf.update(
     timezone="Asia/Shanghai",
     enable_utc=True,
     worker_prefetch_multiplier=1,
-    imports=("app.tasks.documents", "app.tasks.indexing", "app.tasks.knowledge_entries"),
+    imports=(
+        "app.tasks.documents",
+        "app.tasks.indexing",
+        "app.tasks.knowledge_entries",
+        "app.tasks.rebuild",
+        "app.tasks.repair",
+    ),
 )

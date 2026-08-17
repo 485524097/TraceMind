@@ -49,7 +49,39 @@ def test_chunk_overlap_and_extraction_limits_are_consistent() -> None:
 
 @pytest.mark.parametrize(
     "field",
-    ["embedding_dimension", "embedding_batch_size", "document_index_stale_after_seconds"],
+    [
+        "archive_max_upload_size_bytes",
+        "archive_max_extracted_single_file_size_bytes",
+        "archive_max_total_extracted_size_bytes",
+        "archive_max_zip_entries",
+        "archive_max_json_size_bytes",
+        "archive_max_jsonl_records",
+        "archive_max_compression_ratio",
+        "archive_io_chunk_size_bytes",
+    ],
+)
+def test_archive_safety_limits_must_be_positive(field: str) -> None:
+    with pytest.raises(ValidationError):
+        Settings(**{field: 0})
+
+
+def test_archive_single_file_limit_must_not_exceed_total() -> None:
+    with pytest.raises(ValidationError):
+        Settings(
+            archive_max_extracted_single_file_size_bytes=101,
+            archive_max_total_extracted_size_bytes=100,
+        )
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "embedding_dimension",
+        "embedding_batch_size",
+        "document_index_stale_after_seconds",
+        "knowledge_base_rebuild_stale_after_seconds",
+        "consistency_repair_stale_after_seconds",
+    ],
 )
 def test_index_settings_must_be_positive(field: str) -> None:
     with pytest.raises(ValidationError):

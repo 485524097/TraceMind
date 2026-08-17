@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     qdrant_bm25_language: str = "none"
     qdrant_operation_timeout_seconds: int = 60
     qdrant_upsert_batch_size: int = 64
+    consistency_audit_qdrant_page_size: int = 256
     hybrid_dense_prefetch_limit: int = 20
     hybrid_sparse_prefetch_limit: int = 20
     semantic_search_score_threshold: float = 0.50
@@ -79,6 +80,8 @@ class Settings(BaseSettings):
     query_embedding_device: str | None = None
     index_embedding_device: str | None = None
     document_index_stale_after_seconds: int = 1_800
+    knowledge_base_rebuild_stale_after_seconds: int = 3_600
+    consistency_repair_stale_after_seconds: int = 3_600
     celery_broker_url: str = "redis://127.0.0.1:6379/1"
     celery_result_backend: str = "redis://127.0.0.1:6379/2"
     healthcheck_timeout_seconds: int = 2
@@ -90,6 +93,14 @@ class Settings(BaseSettings):
     document_parse_stale_after_seconds: int = 1_800
     document_chunk_max_chars: int = 1_800
     document_chunk_overlap_chars: int = 200
+    archive_max_upload_size_bytes: int = 1_207_959_552
+    archive_max_extracted_single_file_size_bytes: int = 104_857_600
+    archive_max_total_extracted_size_bytes: int = 1_073_741_824
+    archive_max_zip_entries: int = 20_000
+    archive_max_json_size_bytes: int = 67_108_864
+    archive_max_jsonl_records: int = 100_000
+    archive_max_compression_ratio: float = 100.0
+    archive_io_chunk_size_bytes: int = 1_048_576
     document_allowed_extensions: Annotated[list[str], NoDecode] = [
         ".md",
         ".txt",
@@ -225,8 +236,13 @@ class Settings(BaseSettings):
             "EMBEDDING_DIMENSION": self.embedding_dimension,
             "EMBEDDING_BATCH_SIZE": self.embedding_batch_size,
             "DOCUMENT_INDEX_STALE_AFTER_SECONDS": self.document_index_stale_after_seconds,
+            "KNOWLEDGE_BASE_REBUILD_STALE_AFTER_SECONDS": (
+                self.knowledge_base_rebuild_stale_after_seconds
+            ),
+            "CONSISTENCY_REPAIR_STALE_AFTER_SECONDS": self.consistency_repair_stale_after_seconds,
             "QDRANT_OPERATION_TIMEOUT_SECONDS": self.qdrant_operation_timeout_seconds,
             "QDRANT_UPSERT_BATCH_SIZE": self.qdrant_upsert_batch_size,
+            "CONSISTENCY_AUDIT_QDRANT_PAGE_SIZE": self.consistency_audit_qdrant_page_size,
         }
         invalid_index = [name for name, value in index_values.items() if value <= 0]
         if invalid_index:
@@ -289,6 +305,28 @@ class Settings(BaseSettings):
             raise ValueError("DOCUMENT_CHUNK_OVERLAP_CHARS must be smaller than max chars")
         if self.document_parse_max_extracted_chars < self.document_chunk_max_chars:
             raise ValueError("Parse character limit must not be smaller than chunk max chars")
+        archive_limits = {
+            "ARCHIVE_MAX_UPLOAD_SIZE_BYTES": self.archive_max_upload_size_bytes,
+            "ARCHIVE_MAX_EXTRACTED_SINGLE_FILE_SIZE_BYTES": (
+                self.archive_max_extracted_single_file_size_bytes
+            ),
+            "ARCHIVE_MAX_TOTAL_EXTRACTED_SIZE_BYTES": (self.archive_max_total_extracted_size_bytes),
+            "ARCHIVE_MAX_ZIP_ENTRIES": self.archive_max_zip_entries,
+            "ARCHIVE_MAX_JSON_SIZE_BYTES": self.archive_max_json_size_bytes,
+            "ARCHIVE_MAX_JSONL_RECORDS": self.archive_max_jsonl_records,
+            "ARCHIVE_MAX_COMPRESSION_RATIO": self.archive_max_compression_ratio,
+            "ARCHIVE_IO_CHUNK_SIZE_BYTES": self.archive_io_chunk_size_bytes,
+        }
+        invalid_archive = [name for name, value in archive_limits.items() if value <= 0]
+        if invalid_archive:
+            raise ValueError(
+                f"Archive settings must be greater than zero: {', '.join(invalid_archive)}"
+            )
+        if (
+            self.archive_max_extracted_single_file_size_bytes
+            > self.archive_max_total_extracted_size_bytes
+        ):
+            raise ValueError("Archive single-file limit must not exceed total extracted limit")
         return self
 
     @property

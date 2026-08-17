@@ -291,6 +291,21 @@ class DocumentIndexingService:
                 logger.info("Document indexing attempt no longer owns version %s", version_id)
                 await self._cleanup_generation(generation)
                 return False
+            if not await self.repository.is_latest_version(record):
+                await self.repository.mark_failed(
+                    record.version,
+                    code="version_not_latest",
+                    message="Document version became historical before index activation",
+                    previous=claim.previous,
+                )
+                await self.session.commit()
+                await self._cleanup_generation(generation)
+                await self._cleanup_generations(claim.cleanup_generations)
+                logger.info(
+                    "Document indexing skipped stale version before activation version_id=%s",
+                    version_id,
+                )
+                return False
             await self.repository.mark_succeeded(
                 record.version,
                 generation=generation,
@@ -474,6 +489,10 @@ class DocumentIndexingService:
         if record is None:
             raise DocumentVersionNotFoundError("Document version was not found")
         version = record.version
+        if not await self.repository.is_latest_version(record):
+            await self.session.rollback()
+            logger.info("Document indexing skipped historical version version_id=%s", version_id)
+            return None
         if version.parse_status != "succeeded" or version.chunk_count <= 0:
             await self.session.rollback()
             raise DocumentNotReadyForIndexError("Document version has no parsed chunks")

@@ -39,11 +39,21 @@ class DocumentIndexingRepository:
             select(Document, DocumentVersion)
             .join(DocumentVersion, DocumentVersion.document_id == Document.id)
             .where(DocumentVersion.id == version_id)
-            .with_for_update(of=DocumentVersion)
+            .with_for_update(of=(Document, DocumentVersion))
             .execution_options(populate_existing=True)
         )
         row = (await self.session.execute(statement)).one_or_none()
         return IndexingVersionRecord(*row) if row is not None else None
+
+    async def is_latest_version(self, record: IndexingVersionRecord) -> bool:
+        latest_number = (
+            await self.session.execute(
+                select(func.max(DocumentVersion.version_number)).where(
+                    DocumentVersion.document_id == record.document.id
+                )
+            )
+        ).scalar_one()
+        return latest_number == record.version.version_number
 
     async def get_scoped_version(
         self, knowledge_base_id: UUID, document_id: UUID, version_id: UUID
