@@ -1016,3 +1016,19 @@ wrapper class、adapter 或 message 类型；`main.py` 和旧 `OpenAICompatibleL
 `mypy app`（126 source files）通过；默认全量 pytest 为 544 passed、40 skipped，skip 为现有外部集成门禁，保留
 既有 Starlette TestClient deprecation warning。真实 provider 的 `ainvoke`/`astream` 能力不属于本 Step，仍待后续
 显式 smoke test，不能仅凭参数可构造推断 endpoint 支持。
+
+# 2026-08-17 — RAG V2 Step 2 Minimal StateGraph
+
+新增隔离的 `app.rag.graph` package，使用官方 `StateGraph`、`START`、`END` 和 conditional edges 建立最小 V2
+流程。`RagState` 只包含请求 workflow data、route、answer 和 terminal status；`RagRuntimeContext` 本轮只注入实际
+使用的 `BaseChatModel`，没有把 Settings、Session、Repository、client 或 service 放入 State。
+
+图复用现有 deterministic `route_query()`。direct 路径使用 LangChain `SystemMessage`/`HumanMessage` 调用
+`BaseChatModel.ainvoke()`，并通过公开 `AIMessage.text` 提取文本；RAG 路径暂时进入明确的
+`rag_not_implemented` terminal placeholder，不调用模型或 Retrieval。`finalize` 只写 graph terminal state，不处理
+HTTP、SSE、Conversation persistence、checkpointer 或 store。生产 `main.py`、RagService 与 `/rag/stream` 未接线。
+
+新增离线 graph tests，覆盖 compile、direct/rag conditional path、LangChain messages、terminal state、State 依赖
+边界、router 复用以及无 checkpointer/store。targeted tests 为 21 passed；`ruff check app tests`、
+`ruff format --check app tests` 和 `mypy app`（130 source files）通过；默认全量 pytest 为 548 passed、40 skipped，
+保留既有 Starlette TestClient deprecation warning。
