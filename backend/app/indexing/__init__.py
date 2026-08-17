@@ -1,6 +1,8 @@
 from app.indexing.qdrant import (
     HybridSearchBatch,
     IncompatibleCollectionError,
+    QdrantAuditPage,
+    QdrantAuditPoint,
     QdrantGateway,
     VectorIndexError,
     VectorPoint,
@@ -10,6 +12,8 @@ from app.indexing.qdrant import (
 __all__ = [
     "IncompatibleCollectionError",
     "HybridSearchBatch",
+    "QdrantAuditPage",
+    "QdrantAuditPoint",
     "QdrantGateway",
     "VectorIndexError",
     "VectorPoint",

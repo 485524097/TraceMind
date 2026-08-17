@@ -106,7 +106,13 @@ class DocumentParsingService:
         total = await self.repository.count_chunks(version_id)
         return ChunkPage(version, items, total)
 
-    async def parse_version(self, version_id: UUID, *, force: bool = False) -> bool:
+    async def parse_version(
+        self,
+        version_id: UUID,
+        *,
+        force: bool = False,
+        enqueue_index: bool = True,
+    ) -> bool:
         claimed = await self._claim(version_id, force=force)
         if claimed is None:
             return False
@@ -169,7 +175,8 @@ class DocumentParsingService:
                 parsed_at=datetime.now(UTC),
             )
             await self.session.commit()
-            await self._enqueue_index(version_id)
+            if enqueue_index:
+                await self._enqueue_index(version_id)
             return True
         except Exception as exc:
             await self.session.rollback()

@@ -281,6 +281,15 @@ async def test_parse_success_queues_index_and_queue_failure_does_not_rollback(
     assert session.rollback.await_count == 0
 
 
+async def test_parse_only_does_not_enqueue_index(tmp_path: Path) -> None:
+    dispatcher = FakeIndexDispatcher()
+    service, _, _, _, version = make_service(tmp_path, index_dispatcher=dispatcher)
+
+    assert await service.parse_version(version.id, enqueue_index=False)
+    assert version.parse_status == "succeeded"
+    assert dispatcher.calls == []
+
+
 async def test_initial_parse_failure_marks_failed_with_safe_error(tmp_path: Path) -> None:
     service, _, repository, _, version = make_service(
         tmp_path, parser=FakeParser(DocumentEncodingError("C:\\private\\file"))

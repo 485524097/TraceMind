@@ -32,15 +32,18 @@ class StagedDeletion:
 
 
 class LocalFileStorage:
-    def __init__(self, root: Path, *, max_size: int, chunk_size: int) -> None:
+    def __init__(
+        self, root: Path, *, max_size: int, chunk_size: int, create_roots: bool = True
+    ) -> None:
         self.root = root.expanduser().resolve()
         self.max_size = max_size
         self.chunk_size = chunk_size
         self.temp_root = self.root / ".upload-tmp"
         self.trash_root = self.root / ".trash"
-        self.root.mkdir(parents=True, exist_ok=True)
-        self.temp_root.mkdir(exist_ok=True)
-        self.trash_root.mkdir(exist_ok=True)
+        if create_roots:
+            self.root.mkdir(parents=True, exist_ok=True)
+            self.temp_root.mkdir(exist_ok=True)
+            self.trash_root.mkdir(exist_ok=True)
 
     async def write_upload(self, upload: UploadFile) -> TemporaryUpload:
         descriptor: int | None = None

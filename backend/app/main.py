@@ -14,7 +14,10 @@ from app.embedding import EmbeddingError, SentenceTransformerEmbeddingProvider
 from app.integrations.qdrant import QdrantClient
 from app.integrations.redis import RedisClient
 from app.llm import OpenAICompatibleLLMProvider
+from app.repositories.knowledge_base_restore_lock import RestoreAdvisoryLock
 from app.reranker import HttpRerankerProvider
+from app.services.knowledge_base_restore import KnowledgeBaseRestoreRecoveryService
+from app.storage.archive import LocalArchiveStorage, archive_limits_from_settings
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +39,22 @@ async def prewarm_embedding_provider(provider: SentenceTransformerEmbeddingProvi
         )
 
 
+async def recover_pending_knowledge_base_restores(settings: Settings, database: Database) -> None:
+    journal_root = settings.document_storage_root / ".restore-tmp" / "journals"
+    if not journal_root.is_dir():
+        return
+    storage = LocalArchiveStorage(
+        settings.document_storage_root,
+        archive_limits_from_settings(settings),
+    )
+    async with database.session_factory() as session:
+        await KnowledgeBaseRestoreRecoveryService(
+            session,
+            storage,
+            restore_lock=RestoreAdvisoryLock(database.engine),
+        ).recover()
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     app_settings = settings or get_settings()
     configure_logging(app_settings)
@@ -44,6 +63,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.settings = app_settings
         app.state.database = Database(app_settings)
+        await recover_pending_knowledge_base_restores(app_settings, app.state.database)
         app.state.redis_client = RedisClient(app_settings)
         app.state.qdrant_client = QdrantClient(app_settings)
         app.state.embedding_provider = SentenceTransformerEmbeddingProvider(

@@ -131,6 +131,29 @@ async def test_concurrent_collection_creation_is_rechecked() -> None:
     assert client.create_payload_index.await_count == 8
 
 
+async def test_repair_cleanup_reads_and_deletes_only_explicit_point_ids() -> None:
+    client = AsyncMock(spec=AsyncQdrantClient)
+    point_id = uuid4()
+    client.retrieve.return_value = [
+        SimpleNamespace(id=str(point_id), payload={"source_type": "document"})
+    ]
+    target = gateway(client)
+
+    points = await target.audit_points([point_id])
+    await target.delete_points([point_id])
+
+    assert points[0].point_id == str(point_id)
+    client.retrieve.assert_awaited_once_with(
+        "tracemind_chunks",
+        ids=[point_id],
+        with_payload=True,
+        with_vectors=False,
+    )
+    selector = client.delete.await_args.kwargs["points_selector"]
+    assert selector.points == [str(point_id)]
+    assert client.delete.await_args.kwargs["wait"] is True
+
+
 async def test_concurrent_payload_index_creation_is_rechecked() -> None:
     client = AsyncMock(spec=AsyncQdrantClient)
     existing = set(QdrantGateway.payload_indexes) - {"knowledge_base_id"}

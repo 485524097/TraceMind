@@ -6,6 +6,7 @@ from app.core.config import Settings, get_settings
 from app.db.session import Database
 from app.embedding import SentenceTransformerEmbeddingProvider
 from app.indexing import QdrantGateway
+from app.indexing.factory import build_qdrant_gateway
 from app.integrations.qdrant import QdrantClient
 from app.services.knowledge_entry_indexing import KnowledgeEntryIndexingService
 from app.worker.celery_app import celery_app
@@ -24,19 +25,7 @@ class DeleteKnowledgeEntryIndexTask(Protocol):
 
 
 def _gateway(settings: Settings, qdrant: QdrantClient) -> QdrantGateway:
-    return QdrantGateway(
-        qdrant.client,
-        collection_name=settings.qdrant_collection_name,
-        vector_name=settings.qdrant_dense_vector_name,
-        sparse_vector_name=settings.qdrant_sparse_vector_name,
-        bm25_model=settings.qdrant_bm25_model,
-        bm25_tokenizer=settings.qdrant_bm25_tokenizer,
-        bm25_language=settings.qdrant_bm25_language,
-        dimension=settings.embedding_dimension,
-        upsert_batch_size=settings.qdrant_upsert_batch_size,
-        dense_prefetch_limit=settings.hybrid_dense_prefetch_limit,
-        sparse_prefetch_limit=settings.hybrid_sparse_prefetch_limit,
-    )
+    return build_qdrant_gateway(settings, qdrant.client)
 
 
 def _execute_sync(entry_id: str, force: bool = False) -> bool:

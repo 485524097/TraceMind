@@ -571,3 +571,348 @@ Chunk。沉淀经验无法自动参与后续问答，与“问题 → 方案 →
   升级为事实。
 - 固定 synthetic retrieval corpus 不包含 KnowledgeEntry 来源；需要增加真实、可本地留存的
   问题解决案例评测，分别观察文档与知识来源的召回、引用支持率、延迟和成本。
+
+# 2026-08-14 — Stage 17A 第一阶段：Knowledge Base Export
+
+## 问题与约束
+
+PostgreSQL 业务实体和本地 DocumentVersion 原文件缺少一个可校验、可移植的 Knowledge Base
+备份边界。第一阶段只实现 Export，不实现 Restore、Rebuild、通用 audit/repair、Agent、云同步、
+增量备份、加密归档或 Import as Copy；不修改数据库模型和 migration，不触碰 `.claude/`。
+
+## 采用方案
+
+- 固定 `tracemind.knowledge-base` v1 ZIP 契约，用显式 strict schema 导出 KnowledgeBase、
+  Document、全部 DocumentVersion、Conversation/Message、KnowledgeEntry 和真实 snapshot。
+- 排除 DocumentChunk、storage path、parse/index runtime、Qdrant、Redis/Celery 和 secret；manifest
+  记录实体数量以及每个 data/file entry 的 size、SHA-256 和 record count。
+- Export 使用 Repeatable Read 和 source row 共享锁；原文件先流式复制到随机 staging 并与数据库
+  size/hash 核对，服务端完成 ZIP 后结束事务，下载完成再清理临时 ZIP。
+- 安全写入层只生成固定路径、UUID 目录和受限 extension，拒绝不安全/重复路径、symlink、
+  special/missing source、完整性变化和配置超限。v1 writer 使用 ZIP stored，避免自产归档触发
+  后续 compression-ratio 防护。
+
+## 未采用方案及原因
+
+未使用数据库 dump、ORM 全字段反射、循环 Document import、内存 ZIP、HTTP 长事务或归档
+DocumentChunk/Qdrant。这些方案分别破坏单 KB 边界、泄漏运行态、改变 UUID/原子语义、放大内存、
+长期占锁或恢复陈旧派生状态。
+
+## 验证方法与当前结果
+
+- 新增 Archive storage、repository、service、API 和 settings 专项测试。
+- 当前专项结果：101 passed、1 skipped；skip 是 Windows 主机不允许创建 symlink 时的安全测试。
+- 后端完整门禁通过：Ruff check；Ruff format（178 files）；mypy（104 source files）；pytest
+  收集 486 项，458 passed、28 skipped、1 个既有 Starlette deprecation warning。
+- 新增 PostgreSQL Export 集成测试在一次性 `tracemind_stage17_test` 数据库上实际通过，覆盖迁移、
+  `REPEATABLE READ`、`FOR SHARE` 查询、已提交实体与原文件归档；测试数据库已删除。其余完整套件
+  中的 PostgreSQL/Qdrant 集成项按现有环境变量规则跳过。Qdrant rebuild 不属于 Export 阶段。
+
+## 遗留风险
+
+Restore 不可信 ZIP 读取、UUID/name/path 冲突预检、filesystem journal、单事务插入/原子提升、
+queue failure 状态、历史版本 parse-only、最新版本/verified KnowledgeEntry 重建、PostgreSQL/Qdrant
+集成和固定 24 Case Retrieval 回归尚未实现或验证，必须在 Stage 17A 下一阶段完成。
+
+# 2026-08-14 — Stage 17A 第二阶段：Source of Truth Restore
+
+## 问题与约束
+
+Export v1 已能生成完整归档，但尚不能在空环境中恢复 PostgreSQL 业务实体和全部原文件。本阶段
+只能实现 Source of Truth Restore；不得派发 Document Parse/Index、KnowledgeEntry Index，不接
+Qdrant、不修改前端，也不扩展为 Stage 17B audit/repair。Restore 必须保留 UUID/业务时间，且
+Archive 在任何正式 DB/Storage 写入前必须作为不可信输入完成全部验证。
+
+## 采用方案
+
+- 新增 `POST /api/v1/knowledge-base-archives/restore`。上传先流式写入随机临时文件，central
+  directory、路径、加密/文件类型、compression allowlist/ratio、manifest allowlist、JSON/JSONL、
+  record/entity count、SHA-256、DocumentVersion content hash 和完整引用图验证全部通过后，才做
+  DB conflict preflight。
+- 保留原 UUID，KB UUID/name、Document/Version/Conversation/Message/KnowledgeEntry UUID、当前
+  normalized path 和 Knowledge source assistant 任一冲突都整包 409；不 remap、merge、replace、
+  copy 或自动重命名。
+- 原文件只按 `LocalFileStorage.final_relative_path()` 写入 `.restore-tmp/<operation-id>`；数据库
+  单事务按外键顺序逐层 flush，随后在 commit 前原子提升完整 KB directory。Windows staging I/O
+  使用受控 extended path，解决 UUID 深层目录在长 storage root 下触发传统 MAX_PATH 的问题。
+- Document normalized fields 使用当前逻辑重建；DocumentVersion parse/index runtime 全部重置；
+  verified KnowledgeEntry 为 pending，unverified/outdated 为 not_indexed，Stage 16 runtime 不恢复。
+- 最小 journal 配合 operation marker，只覆盖 filesystem promotion 与 DB commit 窗口。启动恢复
+  根据 DB 是否存在和 final 文件 size/hash 判断清理；没有匹配 marker 时绝不删除普通 final 目录。
+
+## 未采用方案及原因
+
+未调用 `extractall()`、Document import 循环、UUID remap、数据库 upsert、覆盖已有 KB、先 commit
+后移动文件或恢复 DocumentChunk/Qdrant。它们分别引入 Zip Slip、破坏整包原子性/身份、静默合并、
+不可补偿的 DB/file 分裂或陈旧派生状态。
+
+## 遇到的问题与验证
+
+- Windows 专项测试实际触发 staging path 超过传统 MAX_PATH；修复限定在 Archive Storage 的绝对
+  I/O path 转换，没有改变 DB `storage_path` 或 ZIP 路径格式。
+- 首轮 PostgreSQL 往返暴露 KnowledgeEntry provenance 外键不能依赖一次 ORM flush 的隐式排序；
+  Repository 改为每一外键层显式 flush 后，真实事务通过。
+- Restore 安全/事务/journal/API 专项当前通过；真实一次性 PostgreSQL 数据库完成 Export → 删除
+  Source DB/Storage → Restore，验证全部 UUID/时间/snapshot/provenance/file hash、derived reset、
+  duplicate conflict 和 promotion failure rollback。一次性测试数据库已删除。
+- Restore/Archive 专项为 69 passed、4 skipped；其中 3 个 PostgreSQL 项已在一次性真实数据库中
+  单独运行并全部通过，另 1 个是 Windows 无权创建 symlink。完整后端门禁通过：Ruff check；
+  Ruff format（183 files）；mypy（105 source files）；pytest 收集 532 项，502 passed、30 skipped、
+  1 个既有 Starlette deprecation warning。Qdrant/Rebuild 测试按范围明确不运行。
+
+## 遗留风险
+
+Source of Truth 恢复成功后 Retrieval 仍不可用；所有历史 DocumentVersion parse-only、最新版本
+Document Index、verified KnowledgeEntry Index、Celery 部分派发语义、真实 Qdrant 集成和固定
+24 Case Hybrid Regression 留待 Stage 17A 第三阶段。无效或 final 不完整的合法 journal 会保留并
+记录错误，需要后续人工处理或 Stage 17B 专用审计能力。
+
+# 2026-08-14 — Stage 17A 第三阶段：Derived State Rebuild
+
+## 问题与约束
+
+Restore 第二阶段只恢复 PostgreSQL 业务实体和不可变原文件，DocumentChunk、Qdrant 与任务状态按设计
+被清空。第三阶段需要把 Restore 后的 Knowledge Base 确定性恢复到 Retrieval-ready，同时保持
+Source of Truth 与 Derived State 边界；不实现 Stage 17B 通用 audit/repair，不修改前端，不引入 Agent、
+LangChain/Graph 或第二套索引抽象，也不触碰 `.claude/`。
+
+## 采用方案
+
+- migration `20260814_0012` 新增 Knowledge Base 级 rebuild operation 与逐目标 item。operation/item
+  持久化状态、attempt、时间、安全错误、heartbeat 和 `run_generation` worker lease；partial unique
+  index 阻止同一 KB 并发运行两个 rebuild。
+- 新增 start/status/retry 三个 API。创建时快照全部 DocumentVersion parse target、每个 Document 的
+  latest index target 和 verified KnowledgeEntry target；执行固定按 Parse → Document Index →
+  KnowledgeEntry Index 排序。
+- `DocumentParsingService.parse_version()` 新增默认开启的 `enqueue_index` 参数。正常导入行为不变；
+  rebuild 对全部历史版本使用 parse-only，只有 latest 版本显式进入正式 Document indexing pipeline。
+- 复用现有 Document/KnowledgeEntry indexing service、Provider 与 Qdrant gateway。共同 wiring 只抽取到
+  factory，未改变 generation、point id、BM25、Dense、RRF 或 Retrieval 规则。
+- queue failure 持久化为 failed，不撤销 Restore；部分失败保留成功 item 并进入 partially_failed；retry
+  复用同一 operation 且仅重跑 pending/failed item。stale heartbeat 可由新 worker 原子接管。
+
+## 未采用方案及原因
+
+未同步在 Restore HTTP 请求内 Parse/Embedding，避免大文件阻塞和 Source 恢复事务被模型/队列失败
+污染；未索引历史 DocumentVersion，避免旧事实进入 active retrieval；未索引 answer snapshot 或
+unverified/outdated KnowledgeEntry，避免模型回答自我强化；未创建第二个 Qdrant collection 或通用
+orphan cleanup，因为这会扩展到 Stage 17B。
+
+## 遇到的问题
+
+- 真实 Celery worker 在本机能收到 rebuild task 并完成 Parse，但在 worker 进程加载
+  `Qwen/Qwen3-Embedding-0.6B` 时长时间无进展；solo CPU/CUDA、threads=2、online/offline 均复现。
+  同一模型在前台进程可以运行。最终 72 Chunk E2E 使用正式 task 函数前台执行，临时将 embedding
+  batch 调为 2，并限制本机 BLAS 线程；没有改 tracked 默认配置、Provider 或评测资产。该结果证明
+  pipeline 行为，不证明本机 Celery 模型加载兼容性。
+- 首次前台 batch=16 运行触发 Windows native access violation；降低本次隔离运行 batch 后，两轮真实
+  Embedding 均完成。此现象作为部署资源/原生运行时风险保留，不通过修改检索算法掩盖。
+
+## 验证方法与结果
+
+- Rebuild/API/task/解析兼容/配置专项：97 passed。
+- 后端静态门禁：`ruff check .` 通过；`ruff format --check .` 为 197 files already formatted；
+  `mypy app` 为 113 source files、0 issues。
+- 一次性 PostgreSQL 18 + Qdrant 专项：3 passed，覆盖全部版本 Parse、仅 latest active、verified
+  KnowledgeEntry、answer snapshot/unverified/outdated 排除、重复 upsert 幂等和 active generation filter。
+- migration 在一次性数据库完成 `0012 → 0011 → 0012`；测试数据库和临时 collection 已删除。
+- 完整 E2E 完成 Export → 删除 Source DB/Storage/Qdrant → Restore（`rebuild_status=not_started`）→
+  Rebuild → 24 Case Retrieval。冻结质量门禁通过：Hit@5 1.0000、Recall@5 0.8409、MRR@5 0.7424、
+  nDCG@5 0.6623、All-required@5 0.8182；P95 8291.81 ms，比基线增加 7916.42 ms，产生性能 warning。
+- 后端全量 pytest：512 passed、33 skipped、1 个既有 Starlette deprecation warning。跳过项仍由现有
+  外部服务/平台条件控制；上述 PostgreSQL/Qdrant 三项已在显式一次性环境单独实际通过。
+
+## 遗留风险
+
+本机 Celery worker 内真实 Embedding 模型加载仍待环境级定位；当前成功证据来自相同正式 task 函数的
+前台执行。Rebuild 只处理 operation 创建时的目标快照；并发新增版本继续走普通 ingestion。历史/失败
+generation 的 Qdrant orphan point 不会被 active filter 召回，但空间审计、批量修复、journal 异常处理
+与跨 KB consistency report 留待 Stage 17B。
+
+# 2026-08-17 — Stage 17B-1 Read-only Consistency Audit
+
+## 问题与约束
+
+Stage 17A 已能 Export、Restore 和 Rebuild，但缺少一种不改变现场的方式判断 PostgreSQL、原文件、
+DocumentChunk、active generation、Qdrant 和 Restore journal 是否一致。本阶段只允许生成报告：禁止
+Repair、delete point、自动 Parse/Index、startup recovery、Storage 修复、Agent 或 LangChain/LangGraph
+迁移，也不处理 Windows Celery/Qwen compatibility。
+
+## 采用方案
+
+- 新增同步单 KB 与全局 Audit API。报告使用严格 schema，包含 audit id、scope、completed/partial、
+  时间、healthy 与分 severity 计数，以及稳定 finding code 和安全 details；不持久化 operation。
+- Repository 只选择审计需要的列和 count，不读取 DocumentChunk content 或 KnowledgeEntry answer
+  snapshot。latest、Document active 和 Knowledge active 判定与正式 Retrieval repository 保持一致。
+- Storage 按正式路径契约检查普通文件、size，并按配置 chunk 流式 SHA-256。Storage 构造器新增默认兼容
+  的 `create_roots`，Audit 使用 false，确保依赖构造本身不创建目录。
+- QdrantGateway 增加 metadata-only 分页 scroll：payload=true、vectors=false，不调用 ensure/delete。
+  当前 active 与 processing attempt generation 合法，其余 payload 根据实体存在性归类 stale/orphan/
+  invalid；page size 由 Settings 控制。
+- Restore journal 抽取统一 `_read_restore_journal()`，startup recovery 与 Audit 共用同一 Pydantic/path
+  验证。Audit 读取 final completeness，但不调用任何 recovery/cleanup。全局 scan 额外检查未知 Storage
+  entry、未知 KB Qdrant payload、非法 journal 与 staging residue。
+- 任一非 PostgreSQL 子系统不可用时保留已完成 findings，增加 subsystem unavailable finding，并返回
+  partial。PostgreSQL 是建立审计基线所必需的 Source of Truth，数据库查询失败仍由 API 映射为 500。
+
+## 未采用方案及原因
+
+未复用 Rebuild Operation、未新增 migration 或通用 workflow，因为 Audit 没有需要恢复的业务写入；
+未把 Qdrant 作为反向事实来源；未读取 vector、完整文档或 Chunk content；未对 confirmed orphan 调用
+delete；未通过 Audit 自动派发 Rebuild。异步持久化 Audit 可在实际规模证明同步扫描不可接受后再评估。
+
+## 遇到的问题
+
+- 现有 LocalFileStorage/LocalArchiveStorage 构造时会创建目录，会破坏“从构造开始只读”的严格边界；
+  通过 backward-compatible `create_roots=True` 默认值解决，现有上传/归档/恢复行为不变。
+- Restore journal loader 原先会静默跳过非法 journal，无法报告 forged metadata；将解析与路径校验抽为
+  单一 reader 后，recovery 继续忽略非法输入，Audit 则只暴露安全文件名和 stable finding。
+- Document Retrieval 会在查询时排除 heading，但 Document indexing 实际为所有持久化 Chunk 建 point；
+  expected count 因此使用真实全部 Chunk，而不是误套查询过滤规则。
+
+## 验证方法与结果
+
+- Audit Service/API 专项：7 passed，覆盖 healthy 且目录树零变化、同一报告内多类 injected finding、
+  Qdrant unavailable partial、三类 journal/recovery residue，以及两个正常 KB 加一个损坏 KB 的全局聚合。
+- Audit + Archive Storage + Restore journal + Settings 兼容回归：101 passed、1 skipped；skip 为 Windows
+  symlink 权限条件。
+- 一次性 PostgreSQL 18、真实 Storage、真实 Qdrant 集成：先通过 Parse/Document Index/verified
+  Knowledge Index 并得到 healthy 空 finding；随后原文件等长篡改、删除 DocumentChunk、删除 active
+  generation、写入未知 KB orphan point，重新 Audit 准确得到 hash mismatch、missing/mismatched chunks、
+  missing/mismatched active points 和 orphan finding。测试数据库与 collection 已删除，Audit 代码未调用
+  delete 或修复。
+- 完整静态门禁通过：Ruff check；Ruff format 为 204 files already formatted；mypy 为 117 source
+  files、0 issues。后端全量 pytest 为 519 passed、34 skipped、1 个既有 Starlette deprecation warning。
+- 本阶段未改变 Retrieval、Embedding、indexing generation 或 ranking semantics，按范围未重跑 24 Case。
+
+## 遗留风险
+
+Audit 是跨数据库、文件系统和 Qdrant 的无锁观察，并发 Parse/Index 可能产生瞬时 finding；应在正在进行
+的操作结束后重跑。报告 findings 随数据问题数量增长，超大部署的持久化/异步输出只有在真实规模证据
+出现后再设计。Stage 17B-2 Repair 必须独立设计授权、dry-run、前置条件、幂等、补偿与审计记录，本阶段
+没有实现任何 Repair。
+# 2026-08-17 — Stage 17B-2 Safe Derived State Repair
+
+## 问题与约束
+
+Stage 17B-1 只能发现 Derived State 异常，缺少“用户显式选择、执行前重验、使用正式 pipeline 修复、执行后再审计”
+的安全闭环。本阶段禁止 repair-all、Source of Truth 自动修复、Qdrant 反向写 PostgreSQL、第二套 Parser/Index/
+Journal 实现、Stage 18 与 LangChain/LangGraph 迁移。
+
+## 采用方案
+
+- migration `20260817_0013` 增加内容无关的 Audit Snapshot/Finding 与最小 Repair Operation/Item。Audit metadata
+  只用于绑定授权与异步状态，不是通用 Event Store。
+- 新增单 KB plan/execute API 和 operation status API；默认 dry-run，无 operation、commit 或 enqueue。
+- 10 个 allowlist code 各自绑定显式 handler；执行顺序为 Parse、Document Index、Knowledge Index、Qdrant cleanup、
+  Journal cleanup。每项单独持久化结果，支持 succeeded/failed/skipped/not_repairable/verification_failed。
+- 执行前、执行后都运行不持久化的 current-state Audit。旧 finding 消失即跳过；成功返回但 finding 仍在则明确
+  verification_failed。
+- Parse/Index 复用正式 service；Qdrant stale generation 逐 point 验证 ownership，orphan 只按已确认 UUID 删除；
+  Journal 只调用既有 recovery primitive。
+
+## 未采用方案及原因
+
+未提供 repair-all 或 code prefix 匹配，避免未知 finding 获得写权限；未让 dry-run 创建 operation，保证绝对无副作用；
+未在 HTTP 中等待 Embedding/Qdrant；未直接 INSERT Chunk、改 runtime status 或拼装底层 Qdrant filter；未自动处理
+Source 文件损坏、invalid payload、inconsistent journal 或未知 storage residue。
+
+## 遇到的问题
+
+Stage 17B-1 的随机 `audit_id` 和内存 finding 无法为异步 Repair 提供稳定授权证据，因此把“报告不持久化”收敛为
+最小机器元数据持久化。既有 Audit finding 没有独立 ID，且 orphan finding 缺少安全删除所需 ownership 元数据；本阶段
+补充 `finding_id` 与 document/knowledge/generation identity，但仍不保存用户内容。
+
+## 验证方法、结果与遗留风险
+
+已增加 dry-run 零 commit/零 enqueue、全 allowlist planning、Source damage not_repairable、stale finding skipped、
+正式 parse 参数、post-Audit succeeded/verification_failed 与 Qdrant exact-ID delete 单元测试。最终全量、真实
+PostgreSQL/Qdrant fault-injection 和 migration upgrade/downgrade 结果在本任务收口前据实补充；若本机外部服务不可用，
+必须保留为未验证风险，不得宣称通过。
+
+最终验证：Repair/Audit/Qdrant 专项通过；后端全量 529 passed、35 skipped、1 个既有 Starlette
+deprecation warning；真实 PostgreSQL 18 + Qdrant 故障注入 2 passed，覆盖 healthy 构造、missing chunks、
+missing document/knowledge index、两个 stale document generation、精确 orphan point、独立 Source hash damage、
+dry-run、execute、post-Audit 与再次 dry-run idempotence。最终 Derived allowlist findings 全部消失，hash mismatch
+仍为 CRITICAL 且 item 为 not_repairable。migration 已在专用 `tracemind_stage17_test` 数据库完成
+`0013 -> 0012 -> 0013`。本阶段未改变 Embedding/Retrieval/ranking semantics，因此未重跑固定 24 Case。
+
+# 2026-08-17 — Stage 17 Seal Fixes
+
+## 问题与约束
+
+Final Code Review 发现 Restore 在 filesystem promote 与数据库 commit 之间存在跨实例恢复竞态，可能让另一个
+startup recovery 删除正在提交的 Source；Document Index latest 校验仅位于 Repair 外层，无法阻止 claim 后新增
+版本；Document Index Repair 未被 Source damage 统一保护；Repair worker 缺少 lease/takeover/fencing，同一 KB
+也可启动多个 active operation。任务只关闭这些 P0/P1/P2，不扩展 UI、Stage 18、Agent 或检索评分。
+
+## 采用方案与原理
+
+- 新增极薄 `RestoreAdvisoryLock`，以 KB UUID 经 BLAKE2b 稳定派生 signed bigint key，在专用 PostgreSQL
+  connection 上使用 session-level advisory lock。active Restore 的锁覆盖 journal、promote、commit、结果确认和
+  失败补偿；Recovery 使用 try-lock，锁被占用时只 defer。连接死亡后由 PostgreSQL 自动释放。
+- 正式 Document Index pipeline 在 claim 和 final activation 都锁 Document/DocumentVersion 并重新查询最大
+  `version_number`；历史版本不 claim，执行中变为历史的 attempt 不激活且清理新 generation。Rebuild/Repair 只
+  负责把该共同结果映射为安全 skip 语义。
+- Repair 对全部 Document Parse/Index code 在执行前复用 targeted Audit 的路径、regular-file、size、SHA-256
+  结论；执行后若出现 Source CRITICAL/不可验证 finding，结果为 verification_failed。
+- Repair Operation 增加 heartbeat，stale worker takeover 会旋转 run_generation；item claim、item terminal 和
+  operation terminal 都校验 generation。partial unique index 限制同一 KB 最多一个 queued/running Repair。
+- 新增 `0014` migration，保留已完成的 `0013`：增加 heartbeat、active partial unique index，并把 Repair Item →
+  Finding 改为 `ON DELETE CASCADE`，使 KB 删除闭包一致。
+
+## 未采用方案及原因
+
+未实现通用 Distributed Lock/Workflow Engine；lock file 无法随进程死亡可靠释放，因此不采用。未把 latest guard
+只留在 Repair/Rebuild 外层，因为普通 ingestion 也必须共享领域不变量。未拆分第二套 Audit API，只修正文档语义为
+“不修改 Source of Truth/Derived State，仅持久化审计 operational metadata”。P3 的 Qdrant 全量 metadata、Export
+streaming 和 Audit retention 仅登记 Known Follow-up，本轮不重构。
+
+## 验证方法、结果与遗留风险
+
+新增 Restore promote-before-commit 独立连接 recovery、连接失效后 takeover、Document latest 双边界、Repair
+latest/Source TOCTOU、Rebuild stale snapshot、Repair stale worker fencing、同 KB 并发 active unique 和 KB
+cascade 的封板测试。`ruff check`、`ruff format --check` 与 `mypy app` 通过；最终 Stage 17 专项在真实
+PostgreSQL/Qdrant 下为 141 passed、1 skipped（Windows 主机无 symlink 权限）；Restore/Repair 新增真实
+PostgreSQL 封板组为 5 passed；`0014 -> 0013 -> 0014` downgrade/upgrade 通过。
+
+后端 full pytest 连续两次均只有同一个非 Stage 17 失败：最终一次为 576 passed、1 skipped、1 failed；失败是
+既有 `test_reranker_server_not_ready_when_model_load_fails` 的全量顺序相关 `caplog.text` 为空，隔离重跑该测试为
+1 passed。本轮按“只修 Seal findings”约束未修改 Reranker。未改变 Embedding、retrieval scoring 或 ranking，未重跑
+固定 24 Case。
+最终 `git diff --check` 通过，工作区没有 staged change，也未创建 commit。
+
+# 2026-08-17 — Stage 17 Seal Gate Logging Isolation
+
+## 问题与约束
+
+Stage 17 封板项已关闭，但后端全量测试稳定复现
+`test_reranker_server_not_ready_when_model_load_fails` 的 `caplog.text` 为空；同一用例隔离运行通过。本次只定位并
+关闭该工程门禁，不修改 Reranker、Embedding、Retrieval 或 ranking 语义。
+
+## 采用方案
+
+Alembic `env.py` 仍加载既有 `alembic.ini` 日志配置，但显式使用
+`disable_existing_loggers=False`。该参数通过 `app.core.logging.configure_file_logging` 统一封装，并增加回归测试，
+保证 migration 在应用进程或 pytest 进程内执行时不会禁用已创建的应用 logger。
+
+## 未采用方案及原因
+
+未降低或删除 Reranker 日志断言，因为启动失败日志是必要的可诊断证据；未在单个测试里强行重置
+`logger.disabled`，因为那只会掩盖 Alembic 对全局 logging 状态的污染；未修改 Reranker 生产实现，因为其异常日志
+在 logger 未被禁用时行为正确。
+
+## 遇到的问题
+
+Python `logging.config.fileConfig()` 默认 `disable_existing_loggers=True`。全量测试先执行 Alembic migration，
+而 `app.reranker_server` logger 已在测试收集阶段创建，因此会被标记为 disabled；隔离运行未经过 migration，造成表面
+上的顺序相关 flaky。
+
+## 验证方法、结果与遗留风险
+
+通过独立诊断脚本确认修复前 Alembic 配置会把 `app.reranker_server.disabled` 从 `False` 改为 `True`；修复后配置
+前后均为 `False`。Logging/Reranker 回归为 5 passed。`ruff check .`、`ruff format --check .`（218 files）和
+`mypy app`（125 source files）均通过。默认全量为 539 passed、40 skipped；随后显式使用隔离
+`tracemind_stage17_test` PostgreSQL 数据库和本机 Qdrant 重跑全量，最终为 578 passed、1 skipped，唯一 skip 是
+Windows 主机无 symlink 权限；临时数据库在测试后删除。该修改只影响 logging 配置保留策略，不改变 migration、
+数据、模型或检索行为，固定 24 Case 无需重跑。已知的 Starlette `TestClient` deprecation warning 仍保留。

@@ -32,6 +32,66 @@ class KnowledgeBaseNotEmptyError(KnowledgeBaseError):
         self.knowledge_base_id = knowledge_base_id
 
 
+class KnowledgeBaseRebuildAlreadyActiveError(KnowledgeBaseError):
+    def __init__(self, knowledge_base_id: UUID) -> None:
+        super().__init__(f"Knowledge base {knowledge_base_id} already has an active rebuild")
+        self.knowledge_base_id = knowledge_base_id
+
+
+class KnowledgeBaseRebuildNotFoundError(KnowledgeBaseError):
+    def __init__(self, knowledge_base_id: UUID) -> None:
+        super().__init__(f"Knowledge base {knowledge_base_id} has no rebuild operation")
+        self.knowledge_base_id = knowledge_base_id
+
+
+class KnowledgeBaseRebuildNotRetryableError(KnowledgeBaseError):
+    def __init__(self, knowledge_base_id: UUID) -> None:
+        super().__init__(f"Knowledge base {knowledge_base_id} rebuild is not retryable")
+        self.knowledge_base_id = knowledge_base_id
+
+
+class ConsistencyAuditSelectionError(Exception):
+    """Audit or selected findings are missing or outside the requested Knowledge Base."""
+
+
+class ConsistencyRepairNotFoundError(Exception):
+    """The requested repair operation does not exist in the Knowledge Base."""
+
+
+class ConsistencyRepairAlreadyActiveError(Exception):
+    """The Knowledge Base already has a queued or running consistency repair."""
+
+
+class ConsistencyRepairNotRetryableError(Exception):
+    """The requested consistency repair cannot be retried."""
+
+
+class KnowledgeBaseArchiveError(Exception):
+    """Base exception for Knowledge Base archive operations."""
+
+
+class ArchiveStorageError(KnowledgeBaseArchiveError):
+    pass
+
+
+class ArchiveLimitExceededError(KnowledgeBaseArchiveError):
+    pass
+
+
+class ArchiveSourceIntegrityError(KnowledgeBaseArchiveError):
+    pass
+
+
+class ArchiveValidationError(KnowledgeBaseArchiveError):
+    pass
+
+
+class ArchiveConflictError(KnowledgeBaseArchiveError):
+    def __init__(self, conflicts: list[str]) -> None:
+        super().__init__("Archive conflicts with existing data")
+        self.conflicts = tuple(conflicts)
+
+
 class DocumentError(Exception):
     """Base exception for document ingestion business rules."""
 

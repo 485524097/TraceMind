@@ -46,6 +46,18 @@ class HybridSearchBatch:
     sparse_candidate_count: int
 
 
+@dataclass(frozen=True)
+class QdrantAuditPoint:
+    point_id: str
+    payload: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class QdrantAuditPage:
+    points: list[QdrantAuditPoint]
+    next_offset: models.ExtendedPointId | None
+
+
 def stable_payload_key(payload: dict[str, Any], point_id: str) -> tuple[object, ...]:
     """Return a generation-independent ordering key without inspecting content."""
 
@@ -276,6 +288,86 @@ class QdrantGateway:
             return result.count
         except Exception as exc:
             raise VectorIndexError("Qdrant point count could not be verified") from exc
+
+    async def audit_payload_page(
+        self,
+        *,
+        knowledge_base_id: UUID | None,
+        offset: models.ExtendedPointId | None,
+        limit: int,
+    ) -> QdrantAuditPage:
+        """Read one bounded metadata-only page without creating or changing the collection."""
+
+        scroll_filter = (
+            self._equal_filter("knowledge_base_id", knowledge_base_id)
+            if knowledge_base_id is not None
+            else None
+        )
+        try:
+            points, next_offset = await self.client.scroll(
+                self.collection_name,
+                scroll_filter=scroll_filter,
+                limit=limit,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            return QdrantAuditPage(
+                [QdrantAuditPoint(str(point.id), dict(point.payload or {})) for point in points],
+                next_offset,
+            )
+        except Exception as exc:
+            raise VectorIndexError("Qdrant audit scan is unavailable") from exc
+
+    async def audit_generation_payload_page(
+        self,
+        generation: UUID,
+        *,
+        offset: models.ExtendedPointId | None,
+        limit: int,
+    ) -> QdrantAuditPage:
+        """Read one metadata-only page for an exact generation."""
+        try:
+            points, next_offset = await self.client.scroll(
+                self.collection_name,
+                scroll_filter=self._equal_filter("index_generation", generation),
+                limit=limit,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            return QdrantAuditPage(
+                [QdrantAuditPoint(str(point.id), dict(point.payload or {})) for point in points],
+                next_offset,
+            )
+        except Exception as exc:
+            raise VectorIndexError("Qdrant generation metadata is unavailable") from exc
+
+    async def audit_points(self, point_ids: list[UUID]) -> list[QdrantAuditPoint]:
+        """Retrieve exact point IDs with payload only."""
+        try:
+            points = await self.client.retrieve(
+                self.collection_name,
+                ids=point_ids,
+                with_payload=True,
+                with_vectors=False,
+            )
+            return [QdrantAuditPoint(str(point.id), dict(point.payload or {})) for point in points]
+        except Exception as exc:
+            raise VectorIndexError("Qdrant point metadata is unavailable") from exc
+
+    async def delete_points(self, point_ids: list[UUID]) -> None:
+        """Delete only caller-verified point IDs."""
+        if not point_ids:
+            return
+        try:
+            await self.client.delete(
+                self.collection_name,
+                points_selector=models.PointIdsList(points=[str(item) for item in point_ids]),
+                wait=True,
+            )
+        except Exception as exc:
+            raise VectorIndexError("Qdrant points could not be deleted") from exc
 
     async def delete_generation(self, generation: UUID) -> None:
         await self._delete_by_filter(self._equal_filter("index_generation", generation))
