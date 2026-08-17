@@ -882,6 +882,60 @@ PostgreSQL 封板组为 5 passed；`0014 -> 0013 -> 0014` downgrade/upgrade 通�
 固定 24 Case。
 最终 `git diff --check` 通过，工作区没有 staged change，也未创建 commit。
 
+# 2026-08-17 — Stage 17.5 LangChain / LangGraph Architecture Migration Review
+
+## 问题与约束
+
+Stage 17 已完成本地数据耐久性并合入 `origin/develop@8262a989`。当前自研 RAG 能完整运行，但
+`RagService` 同时承担路由、改写、检索、重排、上下文、生成、Citation Guard、事件和指标，需要判断哪些通用
+编排/模型能力适合迁移到 LangChain/LangGraph，哪些 TraceMind 领域语义必须保留。本轮只允许设计文档，不修改
+backend、frontend、依赖、lock、`.claude/`，不实现迁移、不暂存、不提交，也不开始 Stage 18。
+
+## 官方调研方法
+
+调研日期为 2026-08-17。只核对 LangChain/LangGraph 官方 docs、GitHub releases 和 monorepo source。确认的稳定
+版本为 LangChain 1.3.15、langchain-core 1.5.5、langchain-openai 1.5.1、LangGraph 1.2.11 和仅用于对比的
+langchain-qdrant 1.1.0。重点检查了 BaseChatModel/messages/streaming/structured output、StateGraph/runtime
+context/conditional edges/custom streaming、checkpointer，以及 ChatOpenAI custom base URL 与 Qdrant integration。
+
+## 采用方案
+
+- 建议用无循环、无 Agent 的 compiled StateGraph 替换 RagService orchestration；graph 在 FastAPI lifespan 初始化
+  阶段只 compile 一次，请求级 model/service 通过 runtime context 传入，不进入 RagState。
+- BaseChatModel、LangChain messages 和 ChatOpenAI 替换自研 LLMProvider/message/delta 通用 plumbing；custom
+  endpoint 明确 `use_responses_api=False`，非标准 request 参数走 `extra_body`，能力必须由真实 provider smoke
+  test 证明。
+- Query Rewrite 改为 `ainvoke` + extra-forbid Pydantic JSON validation，但保留 heuristic、timeout、当前输出长度
+  上限、code fence 拒绝、语义校验、history/prompt-injection 边界和原 query fallback。第一版不使用
+  `with_structured_output`。
+- FastAPI 只消费 TraceMind custom events。LangGraph messages/updates/values 不得直接成为产品事件；grounded token
+  必须先经过现有 StreamingCitationGuard。
+- PostgreSQL Conversation 继续是唯一 Conversation Source of Truth；第一版 graph 不配置 checkpointer/store。
+- 保留 RagRetrievalService、Embedding、QdrantGateway、Dense + Qdrant BM25 + deterministic RRF、active
+  generation/filter/diagnostics、Cross-Encoder、Context、Citation 和 verified KnowledgeEntry retrieval。
+
+## 未采用方案及原因
+
+未建议使用 langchain-qdrant，因为其通用 Hybrid wrapper 不能低成本等价保留 Dense-only threshold、独立 branch
+limit、Qdrant server-side BM25 Document/IDF、应用侧稳定 RRF、typed payload 和完整 diagnostics。未引入 Agent、
+Tool calling、Planner、Multi-Agent、GraphRAG、HyDE、Step-Back 或 relevance grader，因为当前流程是确定性 RAG，
+不存在工具选择或自主循环需求。未使用 checkpointer 替代 Conversation，也未设计永久 feature flag/双引擎；迁移
+只允许 test-only parity harness 和分阶段 commit/revert。
+
+## 验证方法与结果
+
+本轮为 docs-only Architecture Review，没有运行或声称代码测试、provider smoke、真实 PostgreSQL/Qdrant 或
+24 Case 结果。设计依据已逐项对照 `origin/develop@8262a989` 的实际 service、API、Provider、QdrantGateway、
+Conversation/Citation 实现和现有测试。最终只运行 `git diff --check`、`git diff --stat` 和
+`git status --short` 验证文档范围；结果在任务收口时据实报告。
+
+## 遗留风险与下一步
+
+主要风险是 framework API churn、OpenAI-compatible capability 差异、raw token 绕过 Citation Guard、取消被
+转换为普通 error、observability/persistence 重复、依赖面与性能回退。设计通过 `<1.6`/`<1.3` minor 上界、
+custom-only SSE、显式 CancelledError propagation、无 checkpointer、保留 QdrantGateway 和冻结 24 Case gate
+控制风险。建议文档评审通过后才开始独立的分阶段迁移；每个 phase 必须可测试、可 revert，不允许 Big Bang。
+
 # 2026-08-17 — Stage 17 Seal Gate Logging Isolation
 
 ## 问题与约束
@@ -916,3 +970,33 @@ Python `logging.config.fileConfig()` 默认 `disable_existing_loggers=True`。�
 `tracemind_stage17_test` PostgreSQL 数据库和本机 Qdrant 重跑全量，最终为 578 passed、1 skipped，唯一 skip 是
 Windows 主机无 symlink 权限；临时数据库在测试后删除。该修改只影响 logging 配置保留策略，不改变 migration、
 数据、模型或检索行为，固定 24 Case 无需重跑。已知的 Starlette `TestClient` deprecation warning 仍保留。
+
+# 2026-08-17 — Stage 17.5 Final Architecture Review
+
+## 复核范围与结论
+
+完整复读 `docs/design/langchain-langgraph-migration.md`，并重新以 `origin/develop@8262a989` 核对 RagService、
+FastAPI SSE/Conversation 补偿、Query Rewrite、RagRetrievalService、QdrantGateway、Context/Citation、LLM Provider、
+lifespan 和冻结 24 Case 契约。最终结论为 APPROVE；该批准只覆盖架构文档，不代表 provider smoke、依赖解析或代码
+迁移已通过。
+
+## 发现的问题与修正
+
+- 原文没有清楚区分当前 Rewrite 的 `json.loads` + 精确键/语义校验与目标 Pydantic extra-forbid model，现已明确
+  Pydantic 是迁移目标，并限制 node 只能捕获已知 parse/schema/provider exception。
+- `ainvoke()` 会失去当前 streaming collect 按字符越界后提前关闭流的行为，现补充不宽于当前 provider 的上游
+  completion-token budget、allowlist 式 text-only extraction 和解析前精确字符上限；若真实 endpoint 不接受最终
+  token 参数，Phase 2 不得 cutover。
+- RagState 禁止项补齐 Repository 与 infrastructure client；直接 client 如确有需要也只能通过 runtime context，
+  但优先注入 TraceMind domain service。
+- Qdrant KEEP 证据补齐 named dense/sparse vectors、active `index_generation` MatchAny、optional document/language
+  filters 和 excluded chunk type `must_not`，避免用“支持 Hybrid”误判为语义等价。
+- 迁移阶段补充生产路径持续可用与 test-only parity harness 不接产品流量的硬约束；普通 node 不允许用
+  `except Exception` 把 programming error 伪装成业务 unavailable。
+
+## 验证边界与遗留风险
+
+本轮仍是 docs-only review，没有修改或测试产品代码，也没有新增依赖、暂存或提交。官方 streaming 文档和 API
+reference 再次确认 `astream(stream_mode="custom", version="v2")`、runtime `context` 与 custom writer 是可用能力；
+但最终精确版本仍由未来 `uv.lock` 决定。遗留风险集中在 custom provider 的 token 参数/非标准能力、消息 content
+shape、取消传播、事件顺序和 graph overhead，均已纳入 Phase gates；文档评审通过后才建议进入独立的代码迁移任务。
