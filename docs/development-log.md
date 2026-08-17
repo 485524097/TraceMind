@@ -1000,3 +1000,19 @@ lifespan 和冻结 24 Case 契约。最终结论为 APPROVE；该批准只覆盖
 reference 再次确认 `astream(stream_mode="custom", version="v2")`、runtime `context` 与 custom writer 是可用能力；
 但最终精确版本仍由未来 `uv.lock` 决定。遗留风险集中在 custom provider 的 token 参数/非标准能力、消息 content
 shape、取消传播、事件顺序和 graph overhead，均已纳入 Phase gates；文档评审通过后才建议进入独立的代码迁移任务。
+
+# 2026-08-17 — RAG V2 Step 1 LangChain ChatModel Foundation
+
+在不切换现有生产 RAG 路径的前提下，新增 `langchain-core>=1.5.5,<1.6`、
+`langchain-openai>=1.5.1,<1.6` 和 `langgraph>=1.2.11,<1.3`。`uv.lock` 实际解析为
+langchain-core 1.5.5、langchain-openai 1.5.1、langgraph 1.2.11；langgraph 自身带入核心传递依赖
+langgraph-checkpoint 4.2.0，但本项目没有直接声明、配置或使用 checkpointer/store。
+
+新增单函数 `create_chat_model(settings)`，直接把现有 Settings 映射为官方 `ChatOpenAI`：固定
+`use_responses_api=False`，并仅在 `llm_enable_thinking` 非空时通过 `extra_body` 传递。没有新增 Provider hierarchy、
+wrapper class、adapter 或 message 类型；`main.py` 和旧 `OpenAICompatibleLLMProvider` 生产路径保持不变。
+
+离线 factory 专项为 5 passed。`ruff check app tests`、`ruff format --check app tests`（195 files）和
+`mypy app`（126 source files）通过；默认全量 pytest 为 544 passed、40 skipped，skip 为现有外部集成门禁，保留
+既有 Starlette TestClient deprecation warning。真实 provider 的 `ainvoke`/`astream` 能力不属于本 Step，仍待后续
+显式 smoke test，不能仅凭参数可构造推断 endpoint 支持。
