@@ -5,7 +5,9 @@ from app.rag.graph.nodes import (
     finalize_node,
     generate_direct_node,
     rag_not_implemented_node,
+    rerank_node,
     resolve_scope_node,
+    retrieve_node,
     rewrite_node,
     route_node,
     select_route,
@@ -25,6 +27,8 @@ def build_rag_graph() -> CompiledStateGraph[
     builder.add_node("finalize", finalize_node)
     builder.add_node("resolve_scope", resolve_scope_node)
     builder.add_node("rewrite", rewrite_node)
+    builder.add_node("retrieve", retrieve_node)
+    builder.add_node("rerank", rerank_node)
     builder.add_node("rag_not_implemented", rag_not_implemented_node)
 
     builder.add_edge(START, "route")
@@ -39,6 +43,8 @@ def build_rag_graph() -> CompiledStateGraph[
     builder.add_edge("generate_direct", "finalize")
     builder.add_edge("finalize", END)
     builder.add_edge("resolve_scope", "rewrite")
-    builder.add_edge("rewrite", "rag_not_implemented")
+    builder.add_edge("rewrite", "retrieve")
+    builder.add_edge("retrieve", "rerank")
+    builder.add_edge("rerank", "rag_not_implemented")
     builder.add_edge("rag_not_implemented", END)
     return builder.compile()

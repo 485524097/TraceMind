@@ -1,5 +1,6 @@
 import asyncio
 import json
+from dataclasses import replace
 from time import perf_counter
 from typing import Literal
 
@@ -11,6 +12,7 @@ from langgraph.runtime import Runtime
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.rag.graph.state import QueryRewriteFallbackReason, RagRuntimeContext, RagState
+from app.reranker import RerankerError, RerankerUnavailableError
 from app.services.query_router import RouteMode, route_query
 
 DIRECT_SYSTEM_PROMPT = """你是 TraceMind，一个本地优先的个人工程知识助手。
@@ -125,6 +127,78 @@ async def rewrite_node(
         "query_rewrite_mode": "skipped" if decision.action == "keep" else "rewritten",
         "query_rewrite_latency_ms": _elapsed_ms(started_at),
         "query_rewrite_fallback_reason": None,
+    }
+
+
+async def retrieve_node(
+    state: RagState,
+    runtime: Runtime[RagRuntimeContext],
+) -> dict[str, object]:
+    retrieval_scope = replace(
+        state["prepared_retrieval_query"],
+        semantic_query=state["retrieval_query"],
+    )
+    prepared = await runtime.context.retrieval_service.prepare_hybrid_search(
+        state["knowledge_base_id"],
+        query=state["retrieval_query"],
+        limit=runtime.context.settings.rag_rerank_candidate_limit,
+        language=state["language"],
+        document_id=state["document_id"],
+        prepared_query=retrieval_scope,
+    )
+    result = await runtime.context.retrieval_service.execute_hybrid_search(prepared)
+    return {
+        "retrieval_candidates": result.items,
+        "embedding_latency_ms": result.embedding_latency_ms,
+        "qdrant_latency_ms": result.qdrant_latency_ms,
+        "fusion_latency_ms": result.fusion_latency_ms,
+        "dense_candidate_count": result.dense_candidate_count,
+        "sparse_candidate_count": result.sparse_candidate_count,
+    }
+
+
+async def rerank_node(
+    state: RagState,
+    runtime: Runtime[RagRuntimeContext],
+) -> dict[str, object]:
+    candidates = state["retrieval_candidates"]
+    settings = runtime.context.settings
+    hybrid_results = candidates[: settings.rag_retrieval_limit]
+    if not candidates or not settings.reranker_enabled:
+        return {
+            "ranked_results": hybrid_results,
+            "retrieval_mode": "hybrid",
+            "rerank_latency_ms": 0,
+            "reranker_fallback": False,
+            "reranker_fallback_reason": None,
+        }
+
+    started_at = perf_counter()
+    try:
+        if runtime.context.reranking_service is None:
+            raise RerankerUnavailableError(reason="unavailable")
+        results = await runtime.context.reranking_service.rerank(
+            state["retrieval_query"],
+            candidates,
+            limit=min(settings.rag_retrieval_limit, len(candidates)),
+        )
+        return {
+            "ranked_results": results,
+            "retrieval_mode": "hybrid_reranker",
+            "rerank_latency_ms": _elapsed_ms(started_at),
+            "reranker_fallback": False,
+            "reranker_fallback_reason": None,
+        }
+    except RerankerUnavailableError as exc:
+        fallback_reason = exc.reason
+    except RerankerError:
+        fallback_reason = "internal_error"
+    return {
+        "ranked_results": hybrid_results,
+        "retrieval_mode": "hybrid_fallback",
+        "rerank_latency_ms": _elapsed_ms(started_at),
+        "reranker_fallback": True,
+        "reranker_fallback_reason": fallback_reason,
     }
 
 

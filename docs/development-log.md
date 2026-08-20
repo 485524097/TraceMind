@@ -1047,3 +1047,14 @@ V2 有意不复用旧 context-dependent regex classifier、自研 LLM message/st
 也未使用尚无真实 provider 能力证据的 `with_structured_output`。该取舍简化了架构，但 conversational RAG 可能多一次
 模型调用。定向测试为 35 passed；`ruff check app tests`、`ruff format --check app tests` 和 `mypy app`（130 source
 files）通过；默认全量 pytest 为 561 passed、40 skipped，并保留既有 Starlette TestClient deprecation warning。
+
+# 2026-08-20 — RAG V2 Step 4 Retrieve + Rerank
+
+LangGraph RAG 路径扩展为 `route -> resolve_scope -> rewrite -> retrieve -> rerank -> rag_not_implemented`。`retrieve`
+直接复用 `RagRetrievalServiceProtocol.prepare_hybrid_search()` 与 `execute_hybrid_search()`，以
+`rag_rerank_candidate_limit` 获取候选并保存完整 Hybrid diagnostics；`rerank` 直接复用现有
+`DocumentRerankingService`，disabled 时取 Hybrid top N，`RerankerUnavailableError`/`RerankerError` 时按既有产品规则
+安全回退，取消继续传播。未新增 Retriever/Reranker wrapper、协议或 orchestration DTO，也未接入生产路径。
+
+Graph 定向测试为 26 passed；`ruff check app tests`、`ruff format --check app tests` 和 `mypy app`（130 source files）
+通过；默认全量 pytest 为 570 passed、40 skipped，并保留既有 Starlette TestClient deprecation warning。

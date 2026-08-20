@@ -16,9 +16,17 @@ from pydantic import Field
 
 from app.core.config import Settings
 from app.rag.graph import RagRuntimeContext, RagState, build_rag_graph, nodes
+from app.reranker import RerankerError, RerankerUnavailableError
 from app.services import query_router
 from app.services.conversation import ConversationTurn
-from app.services.rag_retrieval import RagRetrievalServiceProtocol
+from app.services.document_indexing import PreparedHybridSearch, SemanticSearchResult
+from app.services.document_reranking import DocumentRerankingService
+from app.services.exceptions import HybridSearchUnavailableError
+from app.services.rag_retrieval import (
+    RagHybridRetrievalResult,
+    RagRetrievalServiceProtocol,
+    RetrievalSearchResult,
+)
 from app.services.retrieval_query import PreparedRetrievalQuery
 
 HISTORY = (ConversationTurn("Nacos 有什么作用？", "它提供配置管理和服务发现。"),)
@@ -64,9 +72,22 @@ class RecordingChatModel(BaseChatModel):
 
 
 class RecordingRetrievalService:
-    def __init__(self, prepared: PreparedRetrievalQuery | None = None) -> None:
+    def __init__(
+        self,
+        prepared: PreparedRetrievalQuery | None = None,
+        result: RagHybridRetrievalResult | None = None,
+        *,
+        error: Exception | None = None,
+        delay: float = 0,
+    ) -> None:
         self.prepared = prepared
+        self.result = result or RagHybridRetrievalResult([], 0, 0, 0, 0, 0)
+        self.error = error
+        self.delay = delay
         self.calls: list[tuple[UUID, str, UUID | None]] = []
+        self.hybrid_calls: list[dict[str, object]] = []
+        self.execute_calls: list[PreparedHybridSearch] = []
+        self.started = asyncio.Event()
 
     async def prepare_retrieval_query(
         self,
@@ -81,6 +102,104 @@ class RecordingRetrievalService:
             semantic_query=query,
             scoped_document_id=document_id,
         )
+
+    async def prepare_hybrid_search(
+        self,
+        knowledge_base_id: UUID,
+        *,
+        query: str,
+        limit: int,
+        language: str | None,
+        document_id: UUID | None,
+        prepared_query: PreparedRetrievalQuery | None = None,
+    ) -> PreparedHybridSearch:
+        self.hybrid_calls.append(
+            {
+                "knowledge_base_id": knowledge_base_id,
+                "query": query,
+                "limit": limit,
+                "language": language,
+                "document_id": document_id,
+                "prepared_query": prepared_query,
+            }
+        )
+        return PreparedHybridSearch(
+            knowledge_base_id,
+            prepared_query or PreparedRetrievalQuery(query, query, document_id),
+            language,
+            limit,
+            (),
+            None,
+            0,
+        )
+
+    async def execute_hybrid_search(
+        self,
+        prepared: PreparedHybridSearch,
+    ) -> RagHybridRetrievalResult:
+        self.execute_calls.append(prepared)
+        self.started.set()
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+class RecordingRerankingService(DocumentRerankingService):
+    def __init__(
+        self,
+        results: list[RetrievalSearchResult] | None = None,
+        *,
+        error: RerankerError | None = None,
+        delay: float = 0,
+    ) -> None:
+        self.results = results
+        self.error = error
+        self.delay = delay
+        self.calls: list[tuple[str, list[RetrievalSearchResult], int]] = []
+        self.started = asyncio.Event()
+
+    async def rerank(
+        self,
+        query: str,
+        candidates: list[RetrievalSearchResult],
+        *,
+        limit: int,
+    ) -> list[RetrievalSearchResult]:
+        self.calls.append((query, candidates, limit))
+        self.started.set()
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        if self.error is not None:
+            raise self.error
+        return self.results if self.results is not None else candidates[:limit]
+
+
+def search_result(content: str, *, score: float, rank: int) -> SemanticSearchResult:
+    return SemanticSearchResult(
+        score=score,
+        content=content,
+        knowledge_base_id=uuid4(),
+        document_id=uuid4(),
+        document_version_id=uuid4(),
+        chunk_id=uuid4(),
+        index_generation=uuid4(),
+        document_name="guide.md",
+        relative_path="docs/guide.md",
+        version_number=1,
+        chunk_index=rank,
+        content_hash="a" * 64,
+        chunk_type="paragraph",
+        language="markdown",
+        section_title=None,
+        page_number=None,
+        start_line=None,
+        end_line=None,
+        ranking_mode="hybrid",
+        retrieval_score=score,
+        retrieval_rank=rank,
+    )
 
 
 def graph_input(
@@ -100,12 +219,14 @@ def graph_input(
 def runtime_context(
     model: BaseChatModel,
     retrieval_service: RagRetrievalServiceProtocol | None = None,
+    reranking_service: DocumentRerankingService | None = None,
     **settings: object,
 ) -> RagRuntimeContext:
     return RagRuntimeContext(
         model=model,
         settings=Settings(_env_file=None, **settings),
         retrieval_service=retrieval_service or RecordingRetrievalService(),
+        reranking_service=reranking_service,
     )
 
 
@@ -372,6 +493,8 @@ async def test_direct_route_does_not_execute_rewrite() -> None:
     assert "query_rewrite_mode" not in result
     assert len(model.calls) == 1
     assert retrieval_service.calls == []
+    assert retrieval_service.hybrid_calls == []
+    assert retrieval_service.execute_calls == []
 
 
 async def test_rag_path_runs_route_then_rewrite_then_placeholder() -> None:
@@ -391,8 +514,248 @@ async def test_rag_path_runs_route_then_rewrite_then_placeholder() -> None:
         "route",
         "resolve_scope",
         "rewrite",
+        "retrieve",
+        "rerank",
         "rag_not_implemented",
     ]
+
+
+async def test_retrieve_uses_rewritten_query_scope_candidate_limit_and_diagnostics() -> None:
+    original_query = "src/main/java/demo/UserService.java 中它返回什么？"
+    scoped_document_id = uuid4()
+    prepared_scope = PreparedRetrievalQuery(
+        original_query=original_query,
+        semantic_query="它返回什么？",
+        scoped_document_id=scoped_document_id,
+        path_scope_mode="exact",
+        explicit_relative_path="src/main/java/demo/UserService.java",
+    )
+    candidates = [
+        search_result("first", score=0.8, rank=1),
+        search_result("second", score=0.7, rank=2),
+    ]
+    retrieval_service = RecordingRetrievalService(
+        prepared_scope,
+        RagHybridRetrievalResult(candidates, 11, 22, 33, 7, 5),
+    )
+    model = RecordingChatModel(
+        response=AIMessage(
+            content='{"action":"rewrite","query":"UserService source 方法返回什么？"}'
+        )
+    )
+
+    result = await build_rag_graph().ainvoke(
+        graph_input(original_query, HISTORY),
+        context=runtime_context(
+            model,
+            retrieval_service,
+            rag_retrieval_limit=2,
+            rag_rerank_candidate_limit=3,
+        ),
+    )
+
+    assert result["query"] == original_query
+    assert result["prepared_retrieval_query"] == prepared_scope
+    assert result["retrieval_candidates"] == candidates
+    assert result["embedding_latency_ms"] == 11
+    assert result["qdrant_latency_ms"] == 22
+    assert result["fusion_latency_ms"] == 33
+    assert result["dense_candidate_count"] == 7
+    assert result["sparse_candidate_count"] == 5
+    assert len(retrieval_service.hybrid_calls) == 1
+    call = retrieval_service.hybrid_calls[0]
+    assert call["query"] == "UserService source 方法返回什么？"
+    assert call["query"] != original_query
+    assert call["limit"] == 3
+    retrieval_scope = call["prepared_query"]
+    assert isinstance(retrieval_scope, PreparedRetrievalQuery)
+    assert retrieval_scope.semantic_query == "UserService source 方法返回什么？"
+    assert retrieval_scope.scoped_document_id == scoped_document_id
+    assert retrieval_scope.path_scope_mode == "exact"
+    assert retrieval_scope.explicit_relative_path == "src/main/java/demo/UserService.java"
+
+
+async def test_hybrid_search_unavailable_propagates_from_graph() -> None:
+    retrieval_service = RecordingRetrievalService(
+        error=HybridSearchUnavailableError("Hybrid search is unavailable")
+    )
+
+    with pytest.raises(HybridSearchUnavailableError):
+        await build_rag_graph().ainvoke(
+            graph_input("如何配置 Nacos？"),
+            context=runtime_context(
+                RecordingChatModel(response=AIMessage(content="unused")),
+                retrieval_service,
+            ),
+        )
+
+
+async def test_retrieval_cancellation_propagates() -> None:
+    retrieval_service = RecordingRetrievalService(delay=10)
+    task = asyncio.create_task(
+        build_rag_graph().ainvoke(
+            graph_input("如何配置 Nacos？"),
+            context=runtime_context(
+                RecordingChatModel(response=AIMessage(content="unused")),
+                retrieval_service,
+            ),
+        )
+    )
+
+    async with asyncio.timeout(1):
+        await retrieval_service.started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+async def test_empty_candidates_skip_reranker() -> None:
+    retrieval_service = RecordingRetrievalService()
+    reranking_service = RecordingRerankingService()
+
+    result = await build_rag_graph().ainvoke(
+        graph_input("如何配置 Nacos？"),
+        context=runtime_context(
+            RecordingChatModel(response=AIMessage(content="unused")),
+            retrieval_service,
+            reranking_service,
+            reranker_enabled=True,
+        ),
+    )
+
+    assert result["ranked_results"] == []
+    assert result["retrieval_mode"] == "hybrid"
+    assert result["rerank_latency_ms"] == 0
+    assert result["reranker_fallback"] is False
+    assert result["reranker_fallback_reason"] is None
+    assert reranking_service.calls == []
+
+
+async def test_disabled_reranker_uses_hybrid_top_n_without_calling_service() -> None:
+    candidates = [
+        search_result("first", score=0.8, rank=1),
+        search_result("second", score=0.7, rank=2),
+        search_result("third", score=0.6, rank=3),
+    ]
+    retrieval_service = RecordingRetrievalService(
+        result=RagHybridRetrievalResult(candidates, 1, 2, 3, 3, 2)
+    )
+    reranking_service = RecordingRerankingService()
+
+    result = await build_rag_graph().ainvoke(
+        graph_input("如何配置 Nacos？"),
+        context=runtime_context(
+            RecordingChatModel(response=AIMessage(content="unused")),
+            retrieval_service,
+            reranking_service,
+            reranker_enabled=False,
+            rag_retrieval_limit=2,
+        ),
+    )
+
+    assert result["retrieval_candidates"] == candidates
+    assert result["ranked_results"] == candidates[:2]
+    assert result["retrieval_mode"] == "hybrid"
+    assert result["reranker_fallback"] is False
+    assert reranking_service.calls == []
+
+
+async def test_enabled_reranker_receives_retrieval_query_and_final_limit() -> None:
+    candidates = [
+        search_result("first", score=0.8, rank=1),
+        search_result("second", score=0.7, rank=2),
+        search_result("third", score=0.6, rank=3),
+    ]
+    reranked = [candidates[1], candidates[0]]
+    retrieval_service = RecordingRetrievalService(
+        result=RagHybridRetrievalResult(candidates, 1, 2, 3, 3, 2)
+    )
+    reranking_service = RecordingRerankingService(reranked)
+    model = RecordingChatModel(
+        response=AIMessage(content='{"action":"rewrite","query":"Nacos 服务发现配置"}')
+    )
+
+    result = await build_rag_graph().ainvoke(
+        graph_input("它如何配置？", HISTORY),
+        context=runtime_context(
+            model,
+            retrieval_service,
+            reranking_service,
+            reranker_enabled=True,
+            rag_retrieval_limit=2,
+        ),
+    )
+
+    assert reranking_service.calls == [("Nacos 服务发现配置", candidates, 2)]
+    assert result["ranked_results"] == reranked
+    assert result["retrieval_mode"] == "hybrid_reranker"
+    assert result["reranker_fallback"] is False
+    assert result["reranker_fallback_reason"] is None
+
+
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [
+        (RerankerUnavailableError(reason="timeout"), "timeout"),
+        (RerankerError("internal detail"), "internal_error"),
+    ],
+)
+async def test_reranker_error_falls_back_to_hybrid_top_n(
+    error: RerankerError,
+    reason: str,
+) -> None:
+    candidates = [
+        search_result("first", score=0.8, rank=1),
+        search_result("second", score=0.7, rank=2),
+        search_result("third", score=0.6, rank=3),
+    ]
+    retrieval_service = RecordingRetrievalService(
+        result=RagHybridRetrievalResult(candidates, 1, 2, 3, 3, 2)
+    )
+    reranking_service = RecordingRerankingService(error=error)
+
+    result = await build_rag_graph().ainvoke(
+        graph_input("如何配置 Nacos？"),
+        context=runtime_context(
+            RecordingChatModel(response=AIMessage(content="unused")),
+            retrieval_service,
+            reranking_service,
+            reranker_enabled=True,
+            rag_retrieval_limit=2,
+        ),
+    )
+
+    assert result["ranked_results"] == candidates[:2]
+    assert result["retrieval_mode"] == "hybrid_fallback"
+    assert result["reranker_fallback"] is True
+    assert result["reranker_fallback_reason"] == reason
+
+
+async def test_reranker_cancellation_propagates() -> None:
+    candidates = [search_result("first", score=0.8, rank=1)]
+    retrieval_service = RecordingRetrievalService(
+        result=RagHybridRetrievalResult(candidates, 1, 2, 3, 1, 1)
+    )
+    reranking_service = RecordingRerankingService(delay=10)
+    task = asyncio.create_task(
+        build_rag_graph().ainvoke(
+            graph_input("如何配置 Nacos？"),
+            context=runtime_context(
+                RecordingChatModel(response=AIMessage(content="unused")),
+                retrieval_service,
+                reranking_service,
+                reranker_enabled=True,
+            ),
+        )
+    )
+
+    async with asyncio.timeout(1):
+        await reranking_service.started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
 
 def test_state_contains_only_workflow_data_and_router_is_reused() -> None:
@@ -400,8 +763,12 @@ def test_state_contains_only_workflow_data_and_router_is_reused() -> None:
         "settings",
         "model",
         "retrieval_service",
+        "reranking_service",
         "session",
         "repository",
+        "provider",
+        "qdrant",
+        "client",
         "qdrant_client",
         "embedding_provider",
         "reranker_provider",
@@ -410,4 +777,5 @@ def test_state_contains_only_workflow_data_and_router_is_reused() -> None:
     }
 
     assert dependency_fields.isdisjoint(RagState.__annotations__)
+    assert "PreparedHybridSearch" not in RagState.__annotations__
     assert nodes.route_query is query_router.route_query

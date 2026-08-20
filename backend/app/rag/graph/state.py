@@ -6,8 +6,12 @@ from langchain_core.language_models.chat_models import BaseChatModel
 
 from app.core.config import Settings
 from app.services.conversation import ConversationTurn
+from app.services.document_reranking import DocumentRerankingService
 from app.services.query_router import RouteMode
-from app.services.rag_retrieval import RagRetrievalServiceProtocol
+from app.services.rag_retrieval import (
+    RagRetrievalServiceProtocol,
+    RetrievalSearchResult,
+)
 from app.services.retrieval_query import PreparedRetrievalQuery
 
 TerminalStatus = Literal["completed", "rag_pending"]
@@ -28,6 +32,17 @@ class RagState(TypedDict):
     query_rewrite_mode: NotRequired[QueryRewriteMode]
     query_rewrite_latency_ms: NotRequired[int]
     query_rewrite_fallback_reason: NotRequired[QueryRewriteFallbackReason | None]
+    retrieval_candidates: NotRequired[list[RetrievalSearchResult]]
+    embedding_latency_ms: NotRequired[int]
+    qdrant_latency_ms: NotRequired[int]
+    fusion_latency_ms: NotRequired[int]
+    dense_candidate_count: NotRequired[int]
+    sparse_candidate_count: NotRequired[int]
+    ranked_results: NotRequired[list[RetrievalSearchResult]]
+    retrieval_mode: NotRequired[str]
+    rerank_latency_ms: NotRequired[int]
+    reranker_fallback: NotRequired[bool]
+    reranker_fallback_reason: NotRequired[str | None]
     answer: NotRequired[str]
     terminal_status: NotRequired[TerminalStatus]
 
@@ -37,3 +52,4 @@ class RagRuntimeContext:
     model: BaseChatModel
     settings: Settings
     retrieval_service: RagRetrievalServiceProtocol
+    reranking_service: DocumentRerankingService | None
