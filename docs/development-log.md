@@ -1071,3 +1071,8 @@ Sources 进入 no-answer 且不调用模型；非空 Sources 使用 LangChain `S
 grounded/valid/invalid 指标；模型错误与取消继续向外传播。Graph + 旧 RAG 定向测试为 57 passed；`ruff check app
 tests`、`ruff format --check app tests` 和 `mypy app`（130 source files）通过；默认全量 pytest 为 581 passed、40
 skipped，并保留既有 Starlette TestClient deprecation warning。
+
+# 2026-08-20 — CitationGuard Incomplete Citation Safety Fix
+
+`StreamingCitationGuard.finish()` 现在丢弃并单次计数未闭合的 Citation-like tail，避免未经验证的 `[S`/`[S1` 泄露；
+普通 bracket、完整 Citation 与跨 chunk 验证行为保持不变。Citation 专项为 7 passed，全量为 586 passed、40 skipped。

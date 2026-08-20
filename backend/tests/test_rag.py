@@ -187,11 +187,39 @@ def test_citation_guard_handles_split_valid_and_invalid_references() -> None:
     assert guard.grounded is True
 
 
-def test_citation_guard_preserves_normal_brackets_and_flushes_incomplete() -> None:
+def test_citation_guard_preserves_normal_brackets() -> None:
     guard = StreamingCitationGuard({"S1"})
-    output = guard.push("array[0] and [S") + guard.finish()
-    assert output == "array[0] and [S"
+    text = "[SQL] [array] [0] 普通 [文本]"
+    output = guard.push(text) + guard.finish()
+    assert output == text
+    assert guard.invalid_citation_count == 0
     assert guard.grounded is False
+
+
+@pytest.mark.parametrize("incomplete", ["[S", "[S1", "[S999"])
+def test_citation_guard_discards_incomplete_citation_on_finish(incomplete: str) -> None:
+    guard = StreamingCitationGuard({"S1"})
+    assert guard.push(f"答案 {incomplete}") == "答案 "
+    assert guard.finish() == ""
+    assert guard.valid_citation_count == 0
+    assert guard.invalid_citation_count == 1
+    assert guard.grounded is False
+
+
+def test_citation_guard_counts_incomplete_tail_only_once() -> None:
+    guard = StreamingCitationGuard({"S1"})
+    assert guard.push("答案 [S1") == "答案 "
+    assert guard.finish() == ""
+    assert guard.finish() == ""
+    assert guard.invalid_citation_count == 1
+
+
+def test_citation_guard_handles_split_invalid_reference() -> None:
+    guard = StreamingCitationGuard({"S1"})
+    output = guard.push("答案 [S") + guard.push("999]") + guard.finish()
+    assert output == "答案 "
+    assert guard.valid_citation_count == 0
+    assert guard.invalid_citation_count == 1
 
 
 class FakeProvider:

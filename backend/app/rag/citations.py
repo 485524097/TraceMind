@@ -26,7 +26,9 @@ class StreamingCitationGuard:
 
     def finish(self) -> str:
         tail, self._tail = self._tail, ""
-        return _CITATION.sub(self._replace, tail)
+        if tail:
+            self.invalid_citation_count += 1
+        return ""
 
     def _replace(self, match: re.Match[str]) -> str:
         citation = f"S{match.group(1)}"
