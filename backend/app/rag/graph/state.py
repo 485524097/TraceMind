@@ -5,6 +5,7 @@ from uuid import UUID
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from app.core.config import Settings
+from app.rag.context import RagContext
 from app.services.conversation import ConversationTurn
 from app.services.document_reranking import DocumentRerankingService
 from app.services.query_router import RouteMode
@@ -14,7 +15,7 @@ from app.services.rag_retrieval import (
 )
 from app.services.retrieval_query import PreparedRetrievalQuery
 
-TerminalStatus = Literal["completed", "rag_pending"]
+TerminalStatus = Literal["completed", "no_answer"]
 QueryRewriteMode = Literal["not_applicable", "skipped", "rewritten", "fallback"]
 QueryRewriteFallbackReason = Literal["timeout", "model_error", "invalid_response"]
 
@@ -43,6 +44,10 @@ class RagState(TypedDict):
     rerank_latency_ms: NotRequired[int]
     reranker_fallback: NotRequired[bool]
     reranker_fallback_reason: NotRequired[str | None]
+    rag_context: NotRequired[RagContext]
+    grounded: NotRequired[bool]
+    valid_citation_count: NotRequired[int]
+    invalid_citation_count: NotRequired[int]
     answer: NotRequired[str]
     terminal_status: NotRequired[TerminalStatus]
 

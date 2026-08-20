@@ -4,12 +4,15 @@ from langgraph.graph.state import CompiledStateGraph
 from app.rag.graph.nodes import (
     finalize_node,
     generate_direct_node,
-    rag_not_implemented_node,
+    generate_grounded_node,
+    no_answer_node,
+    prepare_context_node,
     rerank_node,
     resolve_scope_node,
     retrieve_node,
     rewrite_node,
     route_node,
+    select_context_path,
     select_route,
 )
 from app.rag.graph.state import RagRuntimeContext, RagState
@@ -29,7 +32,9 @@ def build_rag_graph() -> CompiledStateGraph[
     builder.add_node("rewrite", rewrite_node)
     builder.add_node("retrieve", retrieve_node)
     builder.add_node("rerank", rerank_node)
-    builder.add_node("rag_not_implemented", rag_not_implemented_node)
+    builder.add_node("prepare_context", prepare_context_node)
+    builder.add_node("no_answer", no_answer_node)
+    builder.add_node("generate_grounded", generate_grounded_node)
 
     builder.add_edge(START, "route")
     builder.add_conditional_edges(
@@ -45,6 +50,15 @@ def build_rag_graph() -> CompiledStateGraph[
     builder.add_edge("resolve_scope", "rewrite")
     builder.add_edge("rewrite", "retrieve")
     builder.add_edge("retrieve", "rerank")
-    builder.add_edge("rerank", "rag_not_implemented")
-    builder.add_edge("rag_not_implemented", END)
+    builder.add_edge("rerank", "prepare_context")
+    builder.add_conditional_edges(
+        "prepare_context",
+        select_context_path,
+        {
+            "no_answer": "no_answer",
+            "generate_grounded": "generate_grounded",
+        },
+    )
+    builder.add_edge("no_answer", "finalize")
+    builder.add_edge("generate_grounded", "finalize")
     return builder.compile()

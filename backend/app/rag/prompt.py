@@ -46,14 +46,12 @@ def build_rag_messages(
     *,
     scoped_relative_path: str | None = None,
 ) -> list[LLMMessage]:
-    payload = {
-        "question": query,
-        "conversation_history": [
-            {"user": turn.user, "assistant": turn.assistant} for turn in history
-        ],
-        "scoped_relative_path": scoped_relative_path,
-        "sources": [_source_payload(source) for source in context.sources],
-    }
+    payload = build_rag_payload(
+        query,
+        context,
+        history,
+        scoped_relative_path=scoped_relative_path,
+    )
     return [
         LLMMessage(role="system", content=SYSTEM_PROMPT),
         LLMMessage(
@@ -61,6 +59,23 @@ def build_rag_messages(
             content=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
         ),
     ]
+
+
+def build_rag_payload(
+    query: str,
+    context: RagContext,
+    history: tuple[ConversationTurn, ...] = (),
+    *,
+    scoped_relative_path: str | None = None,
+) -> dict[str, object]:
+    return {
+        "question": query,
+        "conversation_history": [
+            {"user": turn.user, "assistant": turn.assistant} for turn in history
+        ],
+        "scoped_relative_path": scoped_relative_path,
+        "sources": [_source_payload(source) for source in context.sources],
+    }
 
 
 def _source_payload(source: RagSource) -> dict[str, object]:

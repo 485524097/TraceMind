@@ -1058,3 +1058,16 @@ LangGraph RAG 路径扩展为 `route -> resolve_scope -> rewrite -> retrieve -> 
 
 Graph 定向测试为 26 passed；`ruff check app tests`、`ruff format --check app tests` 和 `mypy app`（130 source files）
 通过；默认全量 pytest 为 570 passed、40 skipped，并保留既有 Starlette TestClient deprecation warning。
+
+# 2026-08-20 — RAG V2 Step 5 Context + Citation + Grounded Generation
+
+移除 `rag_not_implemented`，RAG 路径在 rerank 后直接复用 `build_rag_context()` 构造现有 `RagContext/RagSource`，空
+Sources 进入 no-answer 且不调用模型；非空 Sources 使用 LangChain `SystemMessage/HumanMessage` 与
+`BaseChatModel.ainvoke()` 完整生成答案。`build_rag_messages()` 的既有产品数据逻辑仅抽取为共享纯函数
+`build_rag_payload()`，旧生产消息行为保持不变；Graph 继续传递原始问题、受规则约束的 conversation history 与
+`scoped_relative_path`。
+
+完整答案直接经过现有 `StreamingCitationGuard.push() + finish()`，保留合法 Citation、删除非法 Citation，并记录
+grounded/valid/invalid 指标；模型错误与取消继续向外传播。Graph + 旧 RAG 定向测试为 57 passed；`ruff check app
+tests`、`ruff format --check app tests` 和 `mypy app`（130 source files）通过；默认全量 pytest 为 581 passed、40
+skipped，并保留既有 Starlette TestClient deprecation warning。

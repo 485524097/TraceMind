@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -16,6 +17,7 @@ from pydantic import Field
 
 from app.core.config import Settings
 from app.rag.graph import RagRuntimeContext, RagState, build_rag_graph, nodes
+from app.rag.prompt import SYSTEM_PROMPT
 from app.reranker import RerankerError, RerankerUnavailableError
 from app.services import query_router
 from app.services.conversation import ConversationTurn
@@ -23,6 +25,7 @@ from app.services.document_indexing import PreparedHybridSearch, SemanticSearchR
 from app.services.document_reranking import DocumentRerankingService
 from app.services.exceptions import HybridSearchUnavailableError
 from app.services.rag_retrieval import (
+    KnowledgeSearchResult,
     RagHybridRetrievalResult,
     RagRetrievalServiceProtocol,
     RetrievalSearchResult,
@@ -34,6 +37,7 @@ HISTORY = (ConversationTurn("Nacos 有什么作用？", "它提供配置管理�
 
 class RecordingChatModel(BaseChatModel):
     response: AIMessage
+    responses: list[AIMessage] = Field(default_factory=list)
     delay: float = 0
     error: str | None = None
     calls: list[list[BaseMessage]] = Field(default_factory=list)
@@ -53,7 +57,7 @@ class RecordingChatModel(BaseChatModel):
         self.calls.append(messages)
         if self.error is not None:
             raise RuntimeError(self.error)
-        return ChatResult(generations=[ChatGeneration(message=self.response)])
+        return ChatResult(generations=[ChatGeneration(message=self._next_response())])
 
     async def _agenerate(
         self,
@@ -68,7 +72,10 @@ class RecordingChatModel(BaseChatModel):
             await asyncio.sleep(self.delay)
         if self.error is not None:
             raise RuntimeError(self.error)
-        return ChatResult(generations=[ChatGeneration(message=self.response)])
+        return ChatResult(generations=[ChatGeneration(message=self._next_response())])
+
+    def _next_response(self) -> AIMessage:
+        return self.responses.pop(0) if self.responses else self.response
 
 
 class RecordingRetrievalService:
@@ -202,6 +209,31 @@ def search_result(content: str, *, score: float, rank: int) -> SemanticSearchRes
     )
 
 
+def knowledge_search_result(
+    content: str,
+    *,
+    score: float,
+    rank: int,
+) -> KnowledgeSearchResult:
+    return KnowledgeSearchResult(
+        score=score,
+        content=content,
+        knowledge_base_id=uuid4(),
+        knowledge_entry_id=uuid4(),
+        chunk_id=uuid4(),
+        index_generation=uuid4(),
+        knowledge_question="事务为什么失败？",
+        knowledge_updated_at=datetime.now(UTC),
+        chunk_index=rank,
+        content_hash="b" * 64,
+        chunk_type="knowledge_entry",
+        section_title="Solution",
+        ranking_mode="hybrid",
+        retrieval_score=score,
+        retrieval_rank=rank,
+    )
+
+
 def graph_input(
     query: str,
     history: tuple[ConversationTurn, ...] = (),
@@ -286,8 +318,11 @@ async def test_rag_route_without_history_skips_model_and_uses_original_query() -
     assert result["query_rewrite_mode"] == "not_applicable"
     assert result["query_rewrite_latency_ms"] == 0
     assert result["query_rewrite_fallback_reason"] is None
-    assert result["terminal_status"] == "rag_pending"
-    assert "answer" not in result
+    assert result["terminal_status"] == "no_answer"
+    assert result["answer"] == "知识库中未找到足够相关的信息。"
+    assert result["grounded"] is False
+    assert result["valid_citation_count"] == 0
+    assert result["invalid_citation_count"] == 0
     assert model.calls == []
     assert retrieval_service.calls == [(result["knowledge_base_id"], original_query, None)]
     prepared = result["prepared_retrieval_query"]
@@ -491,6 +526,7 @@ async def test_direct_route_does_not_execute_rewrite() -> None:
     assert "retrieval_query" not in result
     assert "prepared_retrieval_query" not in result
     assert "query_rewrite_mode" not in result
+    assert "rag_context" not in result
     assert len(model.calls) == 1
     assert retrieval_service.calls == []
     assert retrieval_service.hybrid_calls == []
@@ -516,7 +552,9 @@ async def test_rag_path_runs_route_then_rewrite_then_placeholder() -> None:
         "rewrite",
         "retrieve",
         "rerank",
-        "rag_not_implemented",
+        "prepare_context",
+        "no_answer",
+        "finalize",
     ]
 
 
@@ -630,6 +668,8 @@ async def test_empty_candidates_skip_reranker() -> None:
     assert result["reranker_fallback"] is False
     assert result["reranker_fallback_reason"] is None
     assert reranking_service.calls == []
+    assert result["answer"] == "知识库中未找到足够相关的信息。"
+    assert result["terminal_status"] == "no_answer"
 
 
 async def test_disabled_reranker_uses_hybrid_top_n_without_calling_service() -> None:
@@ -752,6 +792,201 @@ async def test_reranker_cancellation_propagates() -> None:
 
     async with asyncio.timeout(1):
         await reranking_service.started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+async def test_prepare_context_uses_ranked_results_and_context_budget() -> None:
+    first = search_result("a" * 600, score=0.9, rank=1)
+    second = search_result("b" * 600, score=0.8, rank=2)
+    retrieval_service = RecordingRetrievalService(
+        result=RagHybridRetrievalResult([first, second], 1, 2, 3, 2, 2)
+    )
+    reranking_service = RecordingRerankingService([second, first])
+
+    result = await build_rag_graph().ainvoke(
+        graph_input("哪个片段相关？"),
+        context=runtime_context(
+            RecordingChatModel(response=AIMessage(content="第二个片段相关 [S1]")),
+            retrieval_service,
+            reranking_service,
+            reranker_enabled=True,
+            rag_max_context_chars=1_000,
+        ),
+    )
+
+    assert result["retrieval_candidates"] == [first, second]
+    assert result["ranked_results"] == [second, first]
+    assert [source.content for source in result["rag_context"].sources] == [second.content]
+    assert [source.source_id for source in result["rag_context"].sources] == ["S1"]
+
+
+async def test_grounded_prompt_preserves_document_knowledge_and_scope_payload() -> None:
+    original_query = "docs/guide.md 中事务为什么失败？"
+    document = search_result("Document answer", score=0.9, rank=1)
+    knowledge = knowledge_search_result("Maintained answer", score=0.8, rank=2)
+    prepared_scope = PreparedRetrievalQuery(
+        original_query=original_query,
+        semantic_query="事务为什么失败？",
+        scoped_document_id=document.document_id,
+        path_scope_mode="exact",
+        explicit_relative_path="docs/guide.md",
+    )
+    retrieval_service = RecordingRetrievalService(
+        prepared_scope,
+        RagHybridRetrievalResult([document, knowledge], 1, 2, 3, 2, 2),
+    )
+    model = RecordingChatModel(response=AIMessage(content="文档结论 [S1]，知识条目 [S2]"))
+
+    result = await build_rag_graph().ainvoke(
+        graph_input(original_query),
+        context=runtime_context(model, retrieval_service),
+    )
+
+    context = result["rag_context"]
+    assert [source.source_id for source in context.sources] == ["S1", "S2"]
+    assert context.sources[0].source_type == "document"
+    assert context.sources[0].document_id == document.document_id
+    assert context.sources[0].document_version_id == document.document_version_id
+    assert context.sources[0].relative_path == document.relative_path
+    assert context.sources[1].source_type == "knowledge_entry"
+    assert context.sources[1].knowledge_entry_id == knowledge.knowledge_entry_id
+    assert len(model.calls) == 1
+    system, human = model.calls[0]
+    assert isinstance(system, SystemMessage)
+    assert system.content == SYSTEM_PROMPT
+    assert isinstance(human, HumanMessage)
+    payload = json.loads(str(human.content))
+    assert payload["question"] == original_query
+    assert payload["conversation_history"] == []
+    assert payload["scoped_relative_path"] == "docs/guide.md"
+    document_payload, knowledge_payload = payload["sources"]
+    assert document_payload["source_id"] == "S1"
+    assert document_payload["document_id"] == str(document.document_id)
+    assert document_payload["relative_path"] == document.relative_path
+    assert document_payload["content"] == document.content
+    assert knowledge_payload["source_id"] == "S2"
+    assert knowledge_payload["knowledge_entry_id"] == str(knowledge.knowledge_entry_id)
+    assert knowledge_payload["validation_status"] == "verified"
+    assert knowledge_payload["content"] == knowledge.content
+    assert result["answer"] == "文档结论 [S1]，知识条目 [S2]"
+    assert result["grounded"] is True
+    assert result["valid_citation_count"] == 2
+    assert result["invalid_citation_count"] == 0
+    assert result["terminal_status"] == "completed"
+
+
+@pytest.mark.parametrize(
+    ("rewrite_output", "expected_mode", "history_in_payload"),
+    [
+        ('{"action":"rewrite","query":"Nacos 服务发现配置"}', "rewritten", True),
+        ("invalid", "fallback", True),
+        ('{"action":"keep","query":"它如何配置？"}', "skipped", False),
+    ],
+)
+async def test_grounded_history_depends_on_query_rewrite_mode(
+    rewrite_output: str,
+    expected_mode: str,
+    history_in_payload: bool,
+) -> None:
+    candidate = search_result("Nacos configuration", score=0.9, rank=1)
+    retrieval_service = RecordingRetrievalService(
+        result=RagHybridRetrievalResult([candidate], 1, 2, 3, 1, 1)
+    )
+    model = RecordingChatModel(
+        response=AIMessage(content="unused"),
+        responses=[
+            AIMessage(content=rewrite_output),
+            AIMessage(content="配置方法 [S1]"),
+        ],
+    )
+
+    result = await build_rag_graph().ainvoke(
+        graph_input("它如何配置？", HISTORY),
+        context=runtime_context(model, retrieval_service),
+    )
+
+    assert result["query_rewrite_mode"] == expected_mode
+    assert len(model.calls) == 2
+    payload = json.loads(str(model.calls[1][1].content))
+    expected_history = (
+        [{"user": HISTORY[0].user, "assistant": HISTORY[0].assistant}] if history_in_payload else []
+    )
+    assert payload["conversation_history"] == expected_history
+
+
+@pytest.mark.parametrize(
+    ("model_answer", "safe_answer", "grounded", "valid_count", "invalid_count"),
+    [
+        ("有效 [S1]", "有效 [S1]", True, 1, 0),
+        ("非法 [S999]", "非法 ", False, 0, 1),
+        ("混合 [S1] [S999]", "混合 [S1] ", True, 1, 1),
+        ("没有引用", "没有引用", False, 0, 0),
+    ],
+)
+async def test_grounded_generation_filters_and_counts_citations(
+    model_answer: str,
+    safe_answer: str,
+    grounded: bool,
+    valid_count: int,
+    invalid_count: int,
+) -> None:
+    candidate = search_result("source", score=0.9, rank=1)
+    retrieval_service = RecordingRetrievalService(
+        result=RagHybridRetrievalResult([candidate], 1, 2, 3, 1, 1)
+    )
+
+    result = await build_rag_graph().ainvoke(
+        graph_input("来源是什么？"),
+        context=runtime_context(
+            RecordingChatModel(response=AIMessage(content=model_answer)),
+            retrieval_service,
+        ),
+    )
+
+    assert result["answer"] == safe_answer
+    assert result["grounded"] is grounded
+    assert result["valid_citation_count"] == valid_count
+    assert result["invalid_citation_count"] == invalid_count
+    assert result["terminal_status"] == "completed"
+
+
+async def test_grounded_model_error_propagates() -> None:
+    candidate = search_result("source", score=0.9, rank=1)
+    retrieval_service = RecordingRetrievalService(
+        result=RagHybridRetrievalResult([candidate], 1, 2, 3, 1, 1)
+    )
+
+    with pytest.raises(RuntimeError, match="private model detail"):
+        await build_rag_graph().ainvoke(
+            graph_input("来源是什么？"),
+            context=runtime_context(
+                RecordingChatModel(
+                    response=AIMessage(content="unused"),
+                    error="private model detail",
+                ),
+                retrieval_service,
+            ),
+        )
+
+
+async def test_grounded_generation_cancellation_propagates() -> None:
+    candidate = search_result("source", score=0.9, rank=1)
+    retrieval_service = RecordingRetrievalService(
+        result=RagHybridRetrievalResult([candidate], 1, 2, 3, 1, 1)
+    )
+    model = RecordingChatModel(response=AIMessage(content="unused"), delay=10)
+    task = asyncio.create_task(
+        build_rag_graph().ainvoke(
+            graph_input("来源是什么？"),
+            context=runtime_context(model, retrieval_service),
+        )
+    )
+
+    async with asyncio.timeout(1):
+        await model.started.wait()
     task.cancel()
 
     with pytest.raises(asyncio.CancelledError):
