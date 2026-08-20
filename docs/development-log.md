@@ -1032,3 +1032,18 @@ HTTP、SSE、Conversation persistence、checkpointer 或 store。生产 `main.py
 边界、router 复用以及无 checkpointer/store。targeted tests 为 21 passed；`ruff check app tests`、
 `ruff format --check app tests` 和 `mypy app`（130 source files）通过；默认全量 pytest 为 548 passed、40 skipped，
 保留既有 Starlette TestClient deprecation warning。
+
+# 2026-08-17 — RAG V2 Step 3 Query Rewrite
+
+在隔离的 LangGraph RAG 路径加入 `resolve_scope` 与 `rewrite` node，使流程变为
+`route -> resolve_scope -> rewrite -> rag_not_implemented`；未接入真正 Retrieval 或生产路径。`resolve_scope` 直接复用
+`RagRetrievalServiceProtocol.prepare_retrieval_query()` 保存现有 `PreparedRetrievalQuery`，确保 explicit document path
+先转换为 semantic query，同时保留用户原始 query。无 conversation history 时不调用模型并使用 semantic query，存在 history 时由
+`ChatPromptTemplate -> BaseChatModel.ainvoke -> PydanticOutputParser` 决定 `keep` 或 `rewrite`。解析结构使用
+extra-forbid Pydantic model，保留 timeout、最大 query 长度与原 query fallback；fallback 原因为 `timeout`、
+`model_error` 或 `invalid_response`，`asyncio.CancelledError` 继续传播。
+
+V2 有意不复用旧 context-dependent regex classifier、自研 LLM message/stream collector 或 `json.loads` 模型输出解析，
+也未使用尚无真实 provider 能力证据的 `with_structured_output`。该取舍简化了架构，但 conversational RAG 可能多一次
+模型调用。定向测试为 35 passed；`ruff check app tests`、`ruff format --check app tests` 和 `mypy app`（130 source
+files）通过；默认全量 pytest 为 561 passed、40 skipped，并保留既有 Starlette TestClient deprecation warning。
