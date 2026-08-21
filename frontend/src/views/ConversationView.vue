@@ -72,7 +72,6 @@ type ProgressState =
 const progressState = ref<ProgressState | null>(null)
 const elapsedSeconds = ref(0)
 const activeSourceCount = ref(0)
-const pipelineMessage = ref('正在分析问题…')
 const evidenceVisible = ref(true)
 const evidenceMessageId = ref<string | null>(null)
 const knowledgeDialogVisible = ref(false)
@@ -106,11 +105,11 @@ const evidenceMetadata = computed(() => evidenceMessage.value?.generation_metada
 const progressMessage = computed(() => {
   switch (progressState.value) {
     case 'preparing':
-      return pipelineMessage.value
+      return '正在检索与分析…'
     case 'retrieved':
       return activeSourceCount.value
         ? `找到 ${activeSourceCount.value} 条来源`
-        : pipelineMessage.value
+        : '已完成检索'
     case 'generating':
       return '正在生成回答…'
     case 'finalizing':
@@ -362,25 +361,7 @@ async function generate(): Promise<void> {
       knowledgeBaseId,
       { query: prompt, language: language.value.trim() || null, conversation_id: cid },
       {
-        onPipeline(event) {
-          if (selectedId.value !== cid || cv !== streamVersion) return
-          const labels: Record<typeof event.phase, string> = {
-            analyzing: '正在分析问题…',
-            routing: '正在选择回答方式…',
-            query_rewrite: '正在理解上下文…',
-            query_embedding: '正在生成查询向量…',
-            hybrid_retrieval: '正在检索知识库…',
-            candidates: `找到 ${event.candidate_count ?? 0} 条候选内容`,
-            reranking: event.status === 'fallback' ? '重排不可用，使用检索结果…' : '正在重排结果…',
-            generating: '正在生成回答…',
-            completed: '已完成',
-          }
-          pipelineMessage.value = labels[event.phase]
-          if (event.phase === 'generating') progressState.value = 'generating'
-          else if (event.phase === 'completed') progressState.value = 'finalizing'
-          else progressState.value = 'preparing'
-        },
-        onRetrieval(event) {
+        onSources(event) {
           if (selectedId.value !== cid || cv !== streamVersion) return
           const previousMessageId = assistant.id
           assistant.trace_id = event.trace_id
@@ -404,7 +385,7 @@ async function generate(): Promise<void> {
           if (selectedId.value !== cid || cv !== streamVersion) return
           receivedDone = true
           progressState.value = 'finalizing'
-          assistant.status = event.finish_reason === 'no_answer' ? 'no_answer' : 'completed'
+          assistant.status = event.terminal_status
           assistant.generation_metadata = event
         },
         onError(event) {
@@ -629,21 +610,12 @@ onBeforeUnmount(() => {
                 <dt>检索</dt>
                 <dd>
                   {{ doneMetadata(msg)?.retrieval_mode ?? '—' }} ·
-                  {{ formatLatency(doneMetadata(msg)?.retrieval_latency_ms) }}
+                  {{ formatLatency(doneMetadata(msg)?.qdrant_latency_ms) }}
                 </dd>
                 <dt>重排</dt>
                 <dd>
                   {{ doneMetadata(msg)?.reranker_fallback ? '已降级' : '正常' }} ·
                   {{ formatLatency(doneMetadata(msg)?.rerank_latency_ms) }}
-                </dd>
-                <dt>LLM</dt>
-                <dd>
-                  {{ formatLatency(doneMetadata(msg)?.llm_latency_ms) }} ·
-                  {{
-                    doneMetadata(msg)?.llm_first_token_latency_ms
-                      ? doneMetadata(msg)?.llm_first_token_latency_ms + ' ms 首字延迟'
-                      : '—'
-                  }}
                 </dd>
                 <template v-if="doneMetadata(msg)?.path_scope_mode === 'exact'">
                   <dt>路径范围</dt>
@@ -723,12 +695,10 @@ onBeforeUnmount(() => {
             <dt>检索</dt>
             <dd>
               {{ evidenceMetadata.retrieval_mode ?? '—' }} ·
-              {{ formatLatency(evidenceMetadata.retrieval_latency_ms) }}
+              {{ formatLatency(evidenceMetadata.qdrant_latency_ms) }}
             </dd>
             <dt>重排</dt>
             <dd>{{ evidenceMetadata.reranker_fallback ? '已降级' : '正常' }}</dd>
-            <dt>LLM</dt>
-            <dd>{{ formatLatency(evidenceMetadata.llm_latency_ms) }}</dd>
             <template v-if="evidenceMetadata.path_scope_mode === 'exact'">
               <dt>路径范围</dt>
               <dd>{{ evidenceMetadata.scoped_relative_path }}</dd>

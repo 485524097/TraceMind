@@ -359,6 +359,7 @@ async def test_direct_event_stream_emits_tokens_then_completed_done() -> None:
     done = product_events[-1]
     assert done == {
         "type": "done",
+        "route_mode": "direct",
         "terminal_status": "completed",
         "grounded": False,
         "valid_citation_count": 0,
@@ -1086,6 +1087,12 @@ async def test_grounded_event_stream_is_citation_safe_across_chunks_and_eof(
     assert done["grounded"] is grounded
     assert done["valid_citation_count"] == valid_count
     assert done["invalid_citation_count"] == invalid_count
+    assert done["route_mode"] == "rag"
+    assert done["query_rewrite_mode"] == "not_applicable"
+    assert done["retrieval_query"] == "来源是什么？"
+    assert done["retrieval_mode"] == "hybrid"
+    assert done["source_count"] == 1
+    assert done["path_scope_mode"] == "none"
 
 
 async def test_no_answer_event_stream_emits_no_answer_then_done_without_model() -> None:
@@ -1104,19 +1111,18 @@ async def test_no_answer_event_stream_emits_no_answer_then_done_without_model() 
         context=context,
     )
 
-    assert product_events == [
-        {
-            "type": "no_answer",
-            "message": "知识库中未找到足够相关的信息。",
-        },
-        {
-            "type": "done",
-            "terminal_status": "no_answer",
-            "grounded": False,
-            "valid_citation_count": 0,
-            "invalid_citation_count": 0,
-        },
-    ]
+    assert product_events[0] == {
+        "type": "no_answer",
+        "message": "知识库中未找到足够相关的信息。",
+    }
+    done = product_events[1]
+    assert done["type"] == "done"
+    assert done["terminal_status"] == "no_answer"
+    assert done["route_mode"] == "rag"
+    assert done["source_count"] == 0
+    assert done["grounded"] is False
+    assert done["valid_citation_count"] == 0
+    assert done["invalid_citation_count"] == 0
     assert model.calls == []
     assert output["answer"] == "知识库中未找到足够相关的信息。"
     assert output["terminal_status"] == "no_answer"

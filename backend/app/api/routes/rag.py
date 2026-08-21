@@ -10,11 +10,13 @@ from uuid import UUID, uuid4
 from anyio import CancelScope
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.sse import EventSourceResponse, ServerSentEvent
+from langchain_core.language_models.chat_models import BaseChatModel
+from langgraph.graph.state import CompiledStateGraph
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.routes.conversations import ConversationServiceDependency
 from app.api.routes.indexing import IndexingServiceDependency
-from app.llm import LLMProvider
+from app.rag.graph import RagRuntimeContext, RagState
 from app.repositories.knowledge_entry_indexing import KnowledgeEntryIndexingRepository
 from app.schemas.rag import RagStreamRequest
 from app.services.conversation import (
@@ -23,20 +25,33 @@ from app.services.conversation import (
     ConversationTurn,
 )
 from app.services.document_reranking import DocumentRerankingService
-from app.services.exceptions import ConversationNotFoundError
-from app.services.rag import RagService
+from app.services.exceptions import (
+    ConversationNotFoundError,
+    HybridSearchUnavailableError,
+    SemanticSearchUnavailableError,
+)
 from app.services.rag_retrieval import RagRetrievalService
 
 router = APIRouter(prefix="/knowledge-bases/{knowledge_base_id}/rag", tags=["rag"])
 logger = logging.getLogger(__name__)
 
+SAFE_GENERATION_ERROR_MESSAGE = "回答生成服务暂时不可用，请稍后重试。"
+PRODUCT_EVENT_TYPES = frozenset({"sources", "token", "no_answer", "done"})
 
-def get_rag_service(
+RagGraph = CompiledStateGraph[
+    RagState,
+    RagRuntimeContext,
+    RagState,
+    RagState,
+]
+
+
+def get_rag_runtime_context(
     request: Request,
     indexing_service: IndexingServiceDependency,
-) -> RagService:
-    provider = request.app.state.llm_provider
-    if provider is None:
+) -> RagRuntimeContext:
+    model = request.app.state.chat_model
+    if model is None:
         raise HTTPException(status_code=503, detail="RAG answer generation is not configured")
     retrieval_service = RagRetrievalService(
         indexing_service,
@@ -45,24 +60,27 @@ def get_rag_service(
         indexing_service.gateway,
         KnowledgeEntryIndexingRepository(indexing_service.session),
     )
-    return RagService(
-        retrieval_service,
-        cast(LLMProvider, provider),
-        request.app.state.settings,
-        (
-            DocumentRerankingService(request.app.state.reranker_provider)
-            if request.app.state.reranker_provider is not None
-            else None
+    reranker_provider = request.app.state.reranker_provider
+    return RagRuntimeContext(
+        model=cast(BaseChatModel, model),
+        settings=request.app.state.settings,
+        retrieval_service=retrieval_service,
+        reranking_service=(
+            DocumentRerankingService(reranker_provider) if reranker_provider is not None else None
         ),
     )
 
 
-RagServiceDependency = Annotated[RagService, Depends(get_rag_service)]
+RagRuntimeContextDependency = Annotated[
+    RagRuntimeContext,
+    Depends(get_rag_runtime_context),
+]
 
 
 @dataclass(frozen=True)
 class PreparedRagStream:
-    rag_service: RagService
+    graph: RagGraph
+    runtime_context: RagRuntimeContext
     knowledge_base_id: UUID
     body: RagStreamRequest
     trace_id: UUID
@@ -73,9 +91,10 @@ class PreparedRagStream:
 
 
 async def prepare_rag_stream(
+    request: Request,
     knowledge_base_id: UUID,
     body: RagStreamRequest,
-    service: RagServiceDependency,
+    runtime_context: RagRuntimeContextDependency,
     conversation_service: ConversationServiceDependency,
 ) -> PreparedRagStream:
     request_started_at = perf_counter()
@@ -89,8 +108,8 @@ async def prepare_rag_stream(
                 body.conversation_id,
                 query=body.query,
                 trace_id=trace_id,
-                history_max_turns=service.settings.query_rewrite_history_max_turns,
-                history_max_chars=service.settings.query_rewrite_history_max_chars,
+                history_max_turns=runtime_context.settings.query_rewrite_history_max_turns,
+                history_max_chars=runtime_context.settings.query_rewrite_history_max_chars,
             )
             history = exchange.history
         except ConversationNotFoundError as exc:
@@ -98,17 +117,19 @@ async def prepare_rag_stream(
         except SQLAlchemyError as exc:
             logger.exception("Conversation message could not be persisted")
             raise HTTPException(
-                status_code=500, detail="The conversation operation could not be completed"
+                status_code=500,
+                detail="The conversation operation could not be completed",
             ) from exc
     return PreparedRagStream(
-        service,
-        knowledge_base_id,
-        body,
-        trace_id,
-        history,
-        conversation_service if exchange is not None else None,
-        exchange,
-        request_started_at,
+        graph=cast(RagGraph, request.app.state.rag_graph),
+        runtime_context=runtime_context,
+        knowledge_base_id=knowledge_base_id,
+        body=body,
+        trace_id=trace_id,
+        conversation_history=history,
+        conversation_service=conversation_service if exchange is not None else None,
+        exchange=exchange,
+        request_started_at=request_started_at,
     )
 
 
@@ -120,23 +141,30 @@ async def stream_rag_answer(
     request: Request,
     prepared_stream: PreparedStreamDependency,
 ) -> AsyncGenerator[ServerSentEvent]:
-    service = prepared_stream.rag_service
     body = prepared_stream.body
     conversation_service = prepared_stream.conversation_service
     exchange = prepared_stream.exchange
-    stream = service.stream_query(
-        prepared_stream.knowledge_base_id,
-        query=body.query,
-        language=body.language,
-        document_id=body.document_id,
-        trace_id=prepared_stream.trace_id,
-        conversation_id=exchange.conversation_id if exchange is not None else None,
-        conversation_history=prepared_stream.conversation_history if exchange is not None else None,
+    graph_input: RagState = {
+        "trace_id": prepared_stream.trace_id,
+        "knowledge_base_id": prepared_stream.knowledge_base_id,
+        "query": body.query,
+        "language": body.language,
+        "document_id": body.document_id,
+        "conversation_history": prepared_stream.conversation_history,
+    }
+    stream = cast(
+        AsyncGenerator[dict[str, Any]],
+        prepared_stream.graph.astream(
+            graph_input,
+            context=prepared_stream.runtime_context,
+            stream_mode="custom",
+        ),
     )
     answer_parts: list[str] = []
     sources: list[dict[str, Any]] | None = None
     no_answer_content: str | None = None
-    llm_first_token_latency_ms = 0
+    received_done = False
+    disconnected = False
     execution: dict[str, Any] = {
         "trace_id": str(prepared_stream.trace_id),
         "history_turn_count": len(prepared_stream.conversation_history),
@@ -165,73 +193,79 @@ async def stream_rag_answer(
         content: str,
         metadata: dict[str, Any] | None,
     ) -> None:
-        # Client disconnect cancellation is level-triggered by AnyIO. Shield the short
-        # terminal transaction so a persisted user message never leaves a pending answer.
+        # AnyIO cancellation is level-triggered. Shield only the short terminal
+        # transaction so a persisted user message never leaves a pending answer.
         with CancelScope(shield=True):
             await finish(status, content, metadata)
 
+    def sse_payload(data: dict[str, Any]) -> dict[str, Any]:
+        payload = {key: value for key, value in data.items() if key != "type"}
+        payload["trace_id"] = str(prepared_stream.trace_id)
+        if exchange is not None:
+            payload["conversation_id"] = str(exchange.conversation_id)
+            payload["message_id"] = str(exchange.assistant_message_id)
+        return payload
+
+    async def persist_failure(code: str) -> None:
+        try:
+            await finish(
+                "failed",
+                SAFE_GENERATION_ERROR_MESSAGE,
+                {
+                    **execution,
+                    "error_code": code,
+                    "response_total_latency_ms": round(
+                        (perf_counter() - prepared_stream.request_started_at) * 1_000
+                    ),
+                },
+            )
+        except SQLAlchemyError:
+            logger.exception("Failed conversation response could not be persisted")
+
     try:
         async with aclosing(stream):
-            async for event, data in stream:
-                if event == "retrieval":
-                    execution.update(
-                        {
-                            key: value
-                            for key, value in data.items()
-                            if key not in {"sources", "message", "text"}
-                        }
-                    )
-                    raw_sources = data.get("sources")
+            async for product_event in stream:
+                if not isinstance(product_event, dict):
+                    raise TypeError("LangGraph custom stream returned a non-dict event")
+                event_type = product_event.get("type")
+                if event_type not in PRODUCT_EVENT_TYPES:
+                    raise ValueError("LangGraph custom stream returned an unsupported event")
+
+                if event_type == "sources":
+                    raw_sources = product_event.get("sources")
                     if isinstance(raw_sources, list):
                         sources = [dict(item) for item in raw_sources if isinstance(item, dict)]
-                elif event == "pipeline":
-                    if data.get("phase") == "routing" and data.get("status") == "completed":
-                        execution["route_mode"] = data.get("route_mode")
-                        execution["routing_latency_ms"] = data.get("elapsed_ms", 0)
-                elif event == "token":
-                    text = data.get("text")
+                elif event_type == "token":
+                    text = product_event.get("text")
                     if isinstance(text, str):
                         answer_parts.append(text)
-                    raw_first_token_latency = data.get("llm_first_token_latency_ms")
-                    if isinstance(raw_first_token_latency, int):
-                        llm_first_token_latency_ms = raw_first_token_latency
-                elif event == "no_answer":
-                    message = data.get("message")
+                elif event_type == "no_answer":
+                    message = product_event.get("message")
                     if isinstance(message, str):
                         no_answer_content = message
-                elif event == "error":
-                    raw_first_token_latency = data.get("llm_first_token_latency_ms")
-                    if isinstance(raw_first_token_latency, int):
-                        llm_first_token_latency_ms = raw_first_token_latency
-                    execution.update(
-                        {
-                            key: value
-                            for key, value in data.items()
-                            if key not in {"code", "message", "text", "sources"}
-                        }
-                    )
-                    await finish(
-                        "failed",
-                        str(data.get("message") or "回答生成服务暂时不可用，请稍后重试。"),
-                        {
-                            **execution,
-                            "error_code": str(data.get("code") or "generation_failed"),
-                            "llm_first_token_latency_ms": llm_first_token_latency_ms,
-                        },
-                    )
-                elif event == "done":
-                    execution.update(dict(data))
+                elif event_type == "done":
+                    received_done = True
+                    done_metadata = {
+                        key: value for key, value in product_event.items() if key != "type"
+                    }
+                    execution.update(done_metadata)
                     status = (
-                        "no_answer" if data.get("finish_reason") == "no_answer" else "completed"
+                        "no_answer"
+                        if done_metadata.get("terminal_status") == "no_answer"
+                        else "completed"
+                    )
+                    execution["response_total_latency_ms"] = round(
+                        (perf_counter() - prepared_stream.request_started_at) * 1_000
                     )
                     persistence_started_at = perf_counter()
                     await finish(
                         status,
                         no_answer_content or "".join(answer_parts),
-                        execution,
+                        dict(execution),
                     )
-                    data = {
-                        **data,
+                    product_event = {
+                        **product_event,
+                        "history_turn_count": len(prepared_stream.conversation_history),
                         "conversation_persistence_latency_ms": round(
                             (perf_counter() - persistence_started_at) * 1_000
                         ),
@@ -239,14 +273,18 @@ async def stream_rag_answer(
                             (perf_counter() - prepared_stream.request_started_at) * 1_000
                         ),
                     }
+
                 if await request.is_disconnected():
+                    disconnected = True
                     await finish(
                         "no_answer" if no_answer_content is not None else "cancelled",
                         no_answer_content or "".join(answer_parts),
                         {
                             **execution,
                             "cancelled": no_answer_content is None,
-                            "llm_first_token_latency_ms": llm_first_token_latency_ms,
+                            "response_total_latency_ms": round(
+                                (perf_counter() - prepared_stream.request_started_at) * 1_000
+                            ),
                         },
                     )
                     logger.info(
@@ -255,13 +293,12 @@ async def stream_rag_answer(
                         prepared_stream.knowledge_base_id,
                     )
                     break
-                if exchange is not None:
-                    data = {
-                        **data,
-                        "conversation_id": str(exchange.conversation_id),
-                        "message_id": str(exchange.assistant_message_id),
-                    }
-                yield ServerSentEvent(event=event, data=data)
+                yield ServerSentEvent(
+                    event=cast(str, event_type),
+                    data=sse_payload(product_event),
+                )
+        if not received_done and not disconnected:
+            raise RuntimeError("LangGraph custom stream ended before a done event")
     except asyncio.CancelledError:
         try:
             await finish_shielded(
@@ -270,26 +307,47 @@ async def stream_rag_answer(
                 {
                     **execution,
                     "cancelled": no_answer_content is None,
-                    "llm_first_token_latency_ms": llm_first_token_latency_ms,
+                    "response_total_latency_ms": round(
+                        (perf_counter() - prepared_stream.request_started_at) * 1_000
+                    ),
                 },
             )
         except SQLAlchemyError:
             logger.exception("Cancelled conversation response could not be persisted")
         raise
-    except Exception:
-        try:
-            await finish(
-                "failed",
-                "回答生成服务暂时不可用，请稍后重试。",
+    except (SemanticSearchUnavailableError, HybridSearchUnavailableError):
+        logger.warning(
+            "RAG retrieval unavailable trace_id=%s knowledge_base_id=%s",
+            prepared_stream.trace_id,
+            prepared_stream.knowledge_base_id,
+            exc_info=True,
+        )
+        await persist_failure("retrieval_unavailable")
+        yield ServerSentEvent(
+            event="error",
+            data=sse_payload(
                 {
-                    **execution,
-                    "error_code": "generation_failed",
-                    "llm_first_token_latency_ms": llm_first_token_latency_ms,
-                },
-            )
-        except SQLAlchemyError:
-            logger.exception("Failed conversation response could not be persisted")
-        raise
+                    "code": "retrieval_unavailable",
+                    "message": SAFE_GENERATION_ERROR_MESSAGE,
+                }
+            ),
+        )
+    except Exception:
+        logger.exception(
+            "RAG generation failed trace_id=%s knowledge_base_id=%s",
+            prepared_stream.trace_id,
+            prepared_stream.knowledge_base_id,
+        )
+        await persist_failure("generation_failed")
+        yield ServerSentEvent(
+            event="error",
+            data=sse_payload(
+                {
+                    "code": "generation_failed",
+                    "message": SAFE_GENERATION_ERROR_MESSAGE,
+                }
+            ),
+        )
     finally:
         if not terminal_saved:
             try:
@@ -299,7 +357,9 @@ async def stream_rag_answer(
                     {
                         **execution,
                         "cancelled": no_answer_content is None,
-                        "llm_first_token_latency_ms": llm_first_token_latency_ms,
+                        "response_total_latency_ms": round(
+                            (perf_counter() - prepared_stream.request_started_at) * 1_000
+                        ),
                     },
                 )
             except SQLAlchemyError:

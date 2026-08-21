@@ -13,7 +13,8 @@ from app.db.session import Database
 from app.embedding import EmbeddingError, SentenceTransformerEmbeddingProvider
 from app.integrations.qdrant import QdrantClient
 from app.integrations.redis import RedisClient
-from app.llm import OpenAICompatibleLLMProvider
+from app.llm.factory import create_chat_model
+from app.rag.graph import build_rag_graph
 from app.repositories.knowledge_base_restore_lock import RestoreAdvisoryLock
 from app.reranker import HttpRerankerProvider
 from app.services.knowledge_base_restore import KnowledgeBaseRestoreRecoveryService
@@ -86,23 +87,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if app_settings.reranker_enabled
             else None
         )
-        app.state.llm_provider = (
-            OpenAICompatibleLLMProvider(
-                base_url=app_settings.llm_base_url or "",
-                api_key=(
-                    app_settings.llm_api_key.get_secret_value()
-                    if app_settings.llm_api_key is not None
-                    else None
-                ),
-                model=app_settings.llm_model or "",
-                timeout=app_settings.llm_timeout_seconds,
-                temperature=app_settings.llm_temperature,
-                max_tokens=app_settings.llm_max_tokens,
-                enable_thinking=app_settings.llm_enable_thinking,
-            )
-            if app_settings.rag_llm_enabled
-            else None
+        app.state.chat_model = (
+            create_chat_model(app_settings) if app_settings.rag_llm_enabled else None
         )
+        app.state.rag_graph = build_rag_graph()
         try:
             yield
         finally:
@@ -115,11 +103,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     await app.state.reranker_provider.close()
                 except Exception:
                     logger.warning("Reranker provider did not close cleanly")
-            if app.state.llm_provider is not None:
-                try:
-                    await app.state.llm_provider.close()
-                except Exception:
-                    logger.warning("LLM provider did not close cleanly")
             await app.state.qdrant_client.close()
             await app.state.redis_client.close()
             await app.state.database.close()

@@ -1086,3 +1086,14 @@ Citation 均不会进入 outward token。当前 LangGraph 1.2.11 的稳定 consu
 
 Graph + RAG/Citation 定向测试为 72 passed；`ruff check app tests`、`ruff format --check app tests` 和 `mypy app`（130
 source files）通过；默认全量 pytest 为 596 passed、40 skipped，并保留既有 Starlette TestClient deprecation warning。
+
+# 2026-08-21 — RAG V2 Step 7 Production Wiring
+
+生产 `/rag/stream` 已从旧 `RagService/LLMProvider` 切换为应用启动时单次 compile 的 LangGraph；FastAPI 通过
+`RagRuntimeContext` 注入 ChatModel、Settings、现有 Retrieval 与 Reranking service，直接消费
+`graph.astream(..., stream_mode="custom")`。Conversation begin/finish、sources snapshot、outward token、no-answer、安全错误映射与
+disconnect/cancellation shield 语义保留；未引入 Graph runner、event adapter 或双协议兼容层，legacy 源码留待 Step 8。
+
+前端只保留 sources/token/no_answer/done/error V2 SSE contract，ConversationView 以 sources、首 token 与 done 驱动既有
+progress，Citation/Evidence/Save as Knowledge 路径不变。后端定向测试 58 passed，全量 597 passed、40 skipped；
+Ruff、format、mypy 通过。前端定向 19 passed，全量 91 passed；type-check、lint 与 production build 通过。

@@ -5,8 +5,7 @@ import type {
   RagDoneEvent,
   RagErrorEvent,
   RagNoAnswerEvent,
-  RagPipelineEvent,
-  RagRetrievalEvent,
+  RagSourcesEvent,
   RagStreamRequest,
   RagTokenEvent,
 } from '@/types/rag'
@@ -14,8 +13,7 @@ import type {
 const MAX_EVENT_DATA_CHARS = 1_000_000
 
 export interface RagStreamHandlers {
-  onPipeline(event: RagPipelineEvent): void
-  onRetrieval(event: RagRetrievalEvent): void
+  onSources(event: RagSourcesEvent): void
   onToken(event: RagTokenEvent): void
   onNoAnswer(event: RagNoAnswerEvent): void
   onDone(event: RagDoneEvent): void
@@ -50,8 +48,7 @@ export async function streamRagAnswer(
         throw new ApiError(502, '回答生成事件过大')
       }
       const data = JSON.parse(event.data) as unknown
-      if (event.event === 'pipeline') handlers.onPipeline(data as RagPipelineEvent)
-      else if (event.event === 'retrieval') handlers.onRetrieval(data as RagRetrievalEvent)
+      if (event.event === 'sources') handlers.onSources(data as RagSourcesEvent)
       else if (event.event === 'token') handlers.onToken(data as RagTokenEvent)
       else if (event.event === 'no_answer') handlers.onNoAnswer(data as RagNoAnswerEvent)
       else if (event.event === 'done') {

@@ -104,14 +104,11 @@ function detail(
 function doneEvent(overrides: Partial<RagDoneEvent> = {}): RagDoneEvent {
   return {
     trace_id: 'trace-1',
-    finish_reason: 'stop',
+    terminal_status: 'completed',
     grounded: true,
     valid_citation_count: 1,
     invalid_citation_count: 0,
-    retrieval_latency_ms: 20,
-    llm_first_token_latency_ms: 30,
-    llm_latency_ms: 40,
-    total_latency_ms: 60,
+    qdrant_latency_ms: 20,
     retrieval_mode: 'hybrid_reranker',
     rerank_latency_ms: 10,
     reranker_fallback: false,
@@ -231,7 +228,7 @@ describe('ConversationView', () => {
     )
     mockedGet.mockResolvedValueOnce(detail(conv)).mockResolvedValue(detail(conv, [persisted]))
     mockedStream.mockImplementation(async (_knowledgeBaseId, _request, handlers) => {
-      handlers.onRetrieval({
+      handlers.onSources({
         trace_id: 'trace-1',
         message_id: 'assistant-stream',
         source_count: 1,
@@ -262,6 +259,53 @@ describe('ConversationView', () => {
     expect(wrapper.get('[data-testid="evidence-source-assistant-stream-S1"]').text()).toContain(
       'first source excerpt',
     )
+  })
+
+  it('keeps no-answer terminal status from the V2 done event', async () => {
+    const persisted = message('assistant-no-answer', 'No relevant information', null, 'no_answer')
+    mockedGet.mockResolvedValueOnce(detail(conv)).mockResolvedValue(detail(conv, [persisted]))
+    mockedStream.mockImplementation(async (_knowledgeBaseId, _request, handlers) => {
+      handlers.onNoAnswer({
+        trace_id: 'trace-1',
+        message_id: 'assistant-no-answer',
+        message: 'No relevant information',
+      })
+      handlers.onDone(
+        doneEvent({
+          message_id: 'assistant-no-answer',
+          terminal_status: 'no_answer',
+          grounded: false,
+          valid_citation_count: 0,
+        }),
+      )
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('input[aria-label="你的问题"]').setValue('Unknown question')
+    await wrapper.get('[data-testid="conversation-composer"]').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('No relevant information')
+    expect(wrapper.text()).toContain('已完成')
+  })
+
+  it('shows the safe message from a V2 error event', async () => {
+    mockedStream.mockImplementation(async (_knowledgeBaseId, _request, handlers) => {
+      handlers.onError({
+        trace_id: 'trace-1',
+        code: 'generation_failed',
+        message: 'Safe public error',
+      })
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('input[aria-label="你的问题"]').setValue('Fail safely')
+    await wrapper.get('[data-testid="conversation-composer"]').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('生成失败')
   })
 
   it('cancels an active stream', async () => {
@@ -375,7 +419,7 @@ describe('ConversationView', () => {
     await flushPromises()
     await wrapper.get('[data-message-id="a1"] .cite-btn').trigger('click')
 
-    streamHandlers?.onRetrieval({
+    streamHandlers?.onSources({
       trace_id: 'trace-2',
       message_id: 'assistant-stream',
       source_count: 1,

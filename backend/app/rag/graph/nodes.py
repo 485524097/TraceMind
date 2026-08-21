@@ -302,15 +302,37 @@ def finalize_node(state: RagState) -> dict[str, str]:
     if "answer" not in state:
         raise ValueError("Generation did not produce an answer")
     terminal_status = "no_answer" if state.get("terminal_status") == "no_answer" else "completed"
-    get_stream_writer()(
-        {
-            "type": "done",
-            "terminal_status": terminal_status,
-            "grounded": state.get("grounded", False),
-            "valid_citation_count": state.get("valid_citation_count", 0),
-            "invalid_citation_count": state.get("invalid_citation_count", 0),
-        }
-    )
+    event: dict[str, object] = {
+        "type": "done",
+        "route_mode": state["route_mode"],
+        "terminal_status": terminal_status,
+        "grounded": state.get("grounded", False),
+        "valid_citation_count": state.get("valid_citation_count", 0),
+        "invalid_citation_count": state.get("invalid_citation_count", 0),
+    }
+    for key, value in (
+        ("query_rewrite_mode", state.get("query_rewrite_mode")),
+        ("query_rewrite_latency_ms", state.get("query_rewrite_latency_ms")),
+        ("query_rewrite_fallback_reason", state.get("query_rewrite_fallback_reason")),
+        ("retrieval_query", state.get("retrieval_query")),
+        ("retrieval_mode", state.get("retrieval_mode")),
+        ("rerank_latency_ms", state.get("rerank_latency_ms")),
+        ("reranker_fallback", state.get("reranker_fallback")),
+        ("reranker_fallback_reason", state.get("reranker_fallback_reason")),
+        ("embedding_latency_ms", state.get("embedding_latency_ms")),
+        ("qdrant_latency_ms", state.get("qdrant_latency_ms")),
+        ("fusion_latency_ms", state.get("fusion_latency_ms")),
+        ("dense_candidate_count", state.get("dense_candidate_count")),
+        ("sparse_candidate_count", state.get("sparse_candidate_count")),
+    ):
+        if key in state:
+            event[key] = value
+    if context := state.get("rag_context"):
+        event["source_count"] = len(context.sources)
+    if prepared := state.get("prepared_retrieval_query"):
+        event["path_scope_mode"] = prepared.path_scope_mode
+        event["scoped_relative_path"] = prepared.explicit_relative_path
+    get_stream_writer()(event)
     return {"terminal_status": terminal_status}
 
 

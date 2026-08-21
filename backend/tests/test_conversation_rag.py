@@ -1,29 +1,56 @@
 import asyncio
-from collections.abc import AsyncGenerator
-from dataclasses import dataclass
+from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
+from typing import Any, cast
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from fastapi.sse import ServerSentEvent
 
-from app.api.routes.rag import PreparedRagStream, stream_rag_answer
+from app.api.routes.rag import PreparedRagStream, RagGraph, stream_rag_answer
+from app.rag.graph import RagRuntimeContext, RagState
 from app.schemas.rag import RagStreamRequest
 from app.services.conversation import (
     ConversationExchange,
     ConversationService,
     ConversationTurn,
 )
+from app.services.exceptions import HybridSearchUnavailableError
 
 
 @dataclass
-class FakeRagService:
-    events: list[tuple[str, dict[str, object]]]
+class FakeGraph:
+    events: list[dict[str, object]]
+    error: Exception | None = None
+    calls: list[tuple[RagState, RagRuntimeContext, str]] = field(default_factory=list)
 
-    async def stream_query(
-        self, *args: object, **kwargs: object
-    ) -> AsyncGenerator[tuple[str, dict[str, object]]]:
-        for item in self.events:
-            yield item
+    async def astream(
+        self,
+        graph_input: RagState,
+        *,
+        context: RagRuntimeContext,
+        stream_mode: str,
+    ) -> AsyncIterator[dict[str, object]]:
+        self.calls.append((graph_input, context, stream_mode))
+        if self.error is not None:
+            raise self.error
+        for event in self.events:
+            yield event
+
+
+@dataclass
+class BlockingGraph:
+    async def astream(
+        self,
+        graph_input: RagState,
+        *,
+        context: RagRuntimeContext,
+        stream_mode: str,
+    ) -> AsyncIterator[dict[str, object]]:
+        yield {"type": "sources", "source_count": 0, "sources": []}
+        await asyncio.Event().wait()
+        yield {"type": "token", "text": "unreachable"}
 
 
 class DisconnectRequest:
@@ -36,19 +63,11 @@ class DisconnectRequest:
         return self.disconnect_on_call == self.calls
 
 
-@dataclass
-class BlockingRagService:
-    async def stream_query(
-        self, *args: object, **kwargs: object
-    ) -> AsyncGenerator[tuple[str, dict[str, object]]]:
-        yield "retrieval", {"trace_id": "trace", "sources": []}
-        await asyncio.Event().wait()
-        yield "token", {"trace_id": "trace", "text": "unreachable"}
-
-
 def prepared_stream(
-    events: list[tuple[str, dict[str, object]]],
-) -> tuple[PreparedRagStream, AsyncMock, ConversationExchange]:
+    events: list[dict[str, object]],
+    *,
+    error: Exception | None = None,
+) -> tuple[PreparedRagStream, AsyncMock, ConversationExchange, FakeGraph]:
     knowledge_base_id = uuid4()
     trace_id = uuid4()
     exchange = ConversationExchange(
@@ -59,147 +78,185 @@ def prepared_stream(
         trace_id,
     )
     persistence = AsyncMock(spec=ConversationService)
+    graph = FakeGraph(events, error)
     stream = PreparedRagStream(
-        FakeRagService(events),  # type: ignore[arg-type]
-        knowledge_base_id,
-        RagStreamRequest(query="问题", conversation_id=exchange.conversation_id),
-        trace_id,
-        (ConversationTurn("历史问题", "历史回答"),),
-        persistence,
-        exchange,
+        graph=cast(RagGraph, graph),
+        runtime_context=cast(RagRuntimeContext, object()),
+        knowledge_base_id=knowledge_base_id,
+        body=RagStreamRequest(query="问题", conversation_id=exchange.conversation_id),
+        trace_id=trace_id,
+        conversation_history=(ConversationTurn("历史问题", "历史回答"),),
+        conversation_service=persistence,
+        exchange=exchange,
     )
-    return stream, persistence, exchange
+    return stream, persistence, exchange, graph
 
 
-async def consume(stream: PreparedRagStream, request: DisconnectRequest | None = None) -> None:
-    async for _ in stream_rag_answer(request or DisconnectRequest(), stream):  # type: ignore[arg-type]
-        pass
+async def consume(
+    stream: PreparedRagStream,
+    request: DisconnectRequest | None = None,
+) -> list[ServerSentEvent]:
+    return [
+        event
+        async for event in stream_rag_answer(
+            request or DisconnectRequest(),  # type: ignore[arg-type]
+            stream,
+        )
+    ]
 
 
-@pytest.mark.parametrize(
-    ("retrieval_mode", "fallback"),
-    [("hybrid_reranker", False), ("hybrid_fallback", True)],
-)
-async def test_completed_answer_persists_guarded_content_sources_and_metadata(
-    retrieval_mode: str, fallback: bool
-) -> None:
+def metadata_without_latency(metadata: dict[str, Any]) -> dict[str, Any]:
+    result = dict(metadata)
+    assert isinstance(result.pop("response_total_latency_ms"), int)
+    return result
+
+
+async def test_completed_answer_uses_custom_graph_and_persists_sources_and_tokens() -> None:
     source = {
         "source_id": "S1",
         "content": "生成时正文",
         "document_name": "doc.md",
     }
     done = {
-        "trace_id": "trace",
-        "finish_reason": "stop",
-        "retrieval_mode": retrieval_mode,
-        "reranker_fallback": fallback,
+        "type": "done",
+        "terminal_status": "completed",
+        "route_mode": "rag",
+        "retrieval_mode": "hybrid_reranker",
+        "reranker_fallback": False,
         "grounded": True,
+        "valid_citation_count": 1,
+        "invalid_citation_count": 0,
         "query_rewrite_mode": "rewritten",
         "query_rewrite_latency_ms": 7,
-        "history_turn_count": 1,
         "path_scope_mode": "none",
         "scoped_relative_path": None,
-        "llm_first_token_latency_ms": 4,
     }
-    stream, persistence, exchange = prepared_stream(
+    stream, persistence, exchange, graph = prepared_stream(
         [
-            ("retrieval", {"trace_id": "trace", "sources": [source]}),
-            ("token", {"trace_id": "trace", "text": "安全"}),
-            ("token", {"trace_id": "trace", "text": "回答 [S1]"}),
-            ("done", done),
+            {"type": "sources", "source_count": 1, "sources": [source]},
+            {"type": "token", "text": "安全"},
+            {"type": "token", "text": "回答 [S1]"},
+            done,
         ]
     )
-    await consume(stream)
 
-    persistence.finish_exchange.assert_awaited_once_with(
-        exchange,
-        status="completed",
-        content="安全回答 [S1]",
-        sources=[source],
-        generation_metadata=done,
-    )
+    events = await consume(stream)
+
+    assert graph.calls == [
+        (
+            {
+                "trace_id": stream.trace_id,
+                "knowledge_base_id": stream.knowledge_base_id,
+                "query": "问题",
+                "language": None,
+                "document_id": None,
+                "conversation_history": (ConversationTurn("历史问题", "历史回答"),),
+            },
+            stream.runtime_context,
+            "custom",
+        )
+    ]
+    kwargs = persistence.finish_exchange.await_args.kwargs
+    assert kwargs["status"] == "completed"
+    assert kwargs["content"] == "安全回答 [S1]"
+    assert kwargs["sources"] == [source]
+    assert metadata_without_latency(kwargs["generation_metadata"]) == {
+        "trace_id": str(stream.trace_id),
+        "history_turn_count": 1,
+        **{key: value for key, value in done.items() if key != "type"},
+    }
+    assert persistence.finish_exchange.await_args.args == (exchange,)
     source["content"] = "后来改变"
-    assert persistence.finish_exchange.await_args.kwargs["sources"][0]["content"] == "生成时正文"
-    assert "lookup" not in str(persistence.finish_exchange.await_args.kwargs)
+    assert kwargs["sources"][0]["content"] == "生成时正文"
+
+    assert [event.event for event in events] == ["sources", "token", "token", "done"]
+    assert all(event.data["trace_id"] == str(stream.trace_id) for event in events)
+    assert all(event.data["conversation_id"] == str(exchange.conversation_id) for event in events)
+    assert all(event.data["message_id"] == str(exchange.assistant_message_id) for event in events)
+    assert events[-1].data["terminal_status"] == "completed"
+    assert isinstance(events[-1].data["conversation_persistence_latency_ms"], int)
 
 
 async def test_no_answer_is_persisted_as_terminal_message() -> None:
-    stream, persistence, exchange = prepared_stream(
+    stream, persistence, exchange, _ = prepared_stream(
         [
-            ("retrieval", {"trace_id": "trace", "sources": []}),
-            ("no_answer", {"trace_id": "trace", "message": "没有足够信息"}),
-            ("done", {"trace_id": "trace", "finish_reason": "no_answer"}),
+            {"type": "no_answer", "message": "没有足够信息"},
+            {
+                "type": "done",
+                "terminal_status": "no_answer",
+                "route_mode": "rag",
+                "grounded": False,
+                "valid_citation_count": 0,
+                "invalid_citation_count": 0,
+            },
         ]
     )
-    await consume(stream)
-    persistence.finish_exchange.assert_awaited_once_with(
-        exchange,
-        status="no_answer",
-        content="没有足够信息",
-        sources=[],
-        generation_metadata={
-            "history_turn_count": 1,
-            "trace_id": "trace",
-            "finish_reason": "no_answer",
-        },
-    )
 
+    events = await consume(stream)
 
-async def test_llm_error_persists_only_safe_public_error() -> None:
-    stream, persistence, exchange = prepared_stream(
-        [
-            ("retrieval", {"trace_id": "trace", "sources": []}),
-            (
-                "error",
-                {
-                    "trace_id": "trace",
-                    "code": "llm_unavailable",
-                    "message": "回答生成服务暂时不可用，请稍后重试。",
-                },
-            ),
-        ]
-    )
-    await consume(stream)
     kwargs = persistence.finish_exchange.await_args.kwargs
-    assert kwargs == {
-        "status": "failed",
-        "content": "回答生成服务暂时不可用，请稍后重试。",
-        "sources": [],
-        "generation_metadata": {
-            "trace_id": "trace",
-            "history_turn_count": 1,
-            "error_code": "llm_unavailable",
-            "llm_first_token_latency_ms": 0,
-        },
+    assert kwargs["status"] == "no_answer"
+    assert kwargs["content"] == "没有足够信息"
+    assert kwargs["sources"] is None
+    assert metadata_without_latency(kwargs["generation_metadata"])["terminal_status"] == "no_answer"
+    assert persistence.finish_exchange.await_args.args == (exchange,)
+    assert [event.event for event in events] == ["no_answer", "done"]
+
+
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        (HybridSearchUnavailableError("private retrieval detail"), "retrieval_unavailable"),
+        (RuntimeError("private model detail"), "generation_failed"),
+    ],
+)
+async def test_graph_error_emits_safe_event_and_persists_failed(
+    error: Exception,
+    code: str,
+) -> None:
+    stream, persistence, exchange, _ = prepared_stream([], error=error)
+
+    events = await consume(stream)
+
+    assert len(events) == 1
+    assert events[0].event == "error"
+    assert events[0].data == {
+        "code": code,
+        "message": "回答生成服务暂时不可用，请稍后重试。",
+        "trace_id": str(stream.trace_id),
+        "conversation_id": str(exchange.conversation_id),
+        "message_id": str(exchange.assistant_message_id),
     }
-    assert "upstream" not in str(kwargs).lower()
+    assert "private" not in str(events[0].data)
+    kwargs = persistence.finish_exchange.await_args.kwargs
+    assert kwargs["status"] == "failed"
+    assert kwargs["content"] == "回答生成服务暂时不可用，请稍后重试。"
+    assert metadata_without_latency(kwargs["generation_metadata"])["error_code"] == code
+
+
+async def test_disconnect_stops_graph_and_persists_partial_answer() -> None:
+    source = {"source_id": "S1", "content": "source"}
+    stream, persistence, exchange, _ = prepared_stream(
+        [
+            {"type": "sources", "source_count": 1, "sources": [source]},
+            {"type": "token", "text": "部分回答"},
+            {"type": "token", "text": "不应到达"},
+        ]
+    )
+
+    events = await consume(stream, DisconnectRequest(disconnect_on_call=2))
+
+    assert [event.event for event in events] == ["sources"]
+    kwargs = persistence.finish_exchange.await_args.kwargs
+    assert kwargs["status"] == "cancelled"
+    assert kwargs["content"] == "部分回答"
+    assert kwargs["sources"] == [source]
+    metadata = metadata_without_latency(kwargs["generation_metadata"])
+    assert metadata["cancelled"] is True
     assert persistence.finish_exchange.await_args.args == (exchange,)
 
 
-async def test_disconnect_persists_cancelled_without_pending_message() -> None:
-    stream, persistence, exchange = prepared_stream(
-        [
-            ("retrieval", {"trace_id": "trace", "sources": []}),
-            ("token", {"trace_id": "trace", "text": "部分回答"}),
-            ("token", {"trace_id": "trace", "text": "不应到达"}),
-        ]
-    )
-    await consume(stream, DisconnectRequest(disconnect_on_call=2))
-    persistence.finish_exchange.assert_awaited_once_with(
-        exchange,
-        status="cancelled",
-        content="部分回答",
-        sources=[],
-        generation_metadata={
-            "trace_id": "trace",
-            "history_turn_count": 1,
-            "cancelled": True,
-            "llm_first_token_latency_ms": 0,
-        },
-    )
-
-
-async def test_task_cancellation_persists_cancelled_status() -> None:
+async def test_task_cancellation_shields_terminal_persistence_and_propagates() -> None:
     knowledge_base_id = uuid4()
     trace_id = uuid4()
     exchange = ConversationExchange(
@@ -211,68 +268,26 @@ async def test_task_cancellation_persists_cancelled_status() -> None:
     )
     persistence = AsyncMock(spec=ConversationService)
     stream = PreparedRagStream(
-        BlockingRagService(),  # type: ignore[arg-type]
-        knowledge_base_id,
-        RagStreamRequest(query="问题", conversation_id=exchange.conversation_id),
-        trace_id,
-        (),
-        persistence,
-        exchange,
+        graph=cast(RagGraph, BlockingGraph()),
+        runtime_context=cast(RagRuntimeContext, object()),
+        knowledge_base_id=knowledge_base_id,
+        body=RagStreamRequest(query="问题", conversation_id=exchange.conversation_id),
+        trace_id=trace_id,
+        conversation_service=persistence,
+        exchange=exchange,
     )
     response = stream_rag_answer(DisconnectRequest(), stream)  # type: ignore[arg-type]
-    await anext(response)
+    first = await anext(response)
+    assert first.event == "sources"
     task = asyncio.create_task(anext(response))
     await asyncio.sleep(0)
     task.cancel()
+
     with pytest.raises(asyncio.CancelledError):
         await task
-    persistence.finish_exchange.assert_awaited_once_with(
-        exchange,
-        status="cancelled",
-        content="",
-        sources=[],
-        generation_metadata={
-            "trace_id": "trace",
-            "history_turn_count": 0,
-            "cancelled": True,
-            "llm_first_token_latency_ms": 0,
-        },
-    )
 
-
-async def test_retrieval_error_persists_failed_with_safe_scope_metadata() -> None:
-    scope = {
-        "path_scope_mode": "exact",
-        "scoped_relative_path": "src/UserService.java",
-    }
-    stream, persistence, exchange = prepared_stream(
-        [
-            (
-                "error",
-                {
-                    "trace_id": "trace",
-                    "route_mode": "rag",
-                    "code": "retrieval_unavailable",
-                    "message": "回答生成服务暂时不可用，请稍后重试。",
-                    **scope,
-                },
-            )
-        ]
-    )
-    await consume(stream)
-
-    persistence.finish_exchange.assert_awaited_once_with(
-        exchange,
-        status="failed",
-        content="回答生成服务暂时不可用，请稍后重试。",
-        sources=None,
-        generation_metadata={
-            "trace_id": "trace",
-            "history_turn_count": 1,
-            "route_mode": "rag",
-            "path_scope_mode": "exact",
-            "scoped_relative_path": "src/UserService.java",
-            "error_code": "retrieval_unavailable",
-            "llm_first_token_latency_ms": 0,
-        },
-    )
+    kwargs = persistence.finish_exchange.await_args.kwargs
+    assert kwargs["status"] == "cancelled"
+    assert kwargs["content"] == ""
+    assert kwargs["sources"] == []
+    assert metadata_without_latency(kwargs["generation_metadata"])["cancelled"] is True
