@@ -1076,3 +1076,13 @@ skipped，并保留既有 Starlette TestClient deprecation warning。
 
 `StreamingCitationGuard.finish()` 现在丢弃并单次计数未闭合的 Citation-like tail，避免未经验证的 `[S`/`[S1` 泄露；
 普通 bracket、完整 Citation 与跨 chunk 验证行为保持不变。Citation 专项为 7 passed，全量为 586 passed、40 skipped。
+
+# 2026-08-21 — RAG V2 Step 6 LangGraph Custom Streaming
+
+Direct 与 grounded generation 改用 `BaseChatModel.astream()`，节点通过 `get_stream_writer()` 发送最小
+token/sources/no_answer/done 产品事件；grounded raw chunk 必须先经过 `StreamingCitationGuard`，完整与未闭合非法
+Citation 均不会进入 outward token。当前 LangGraph 1.2.11 的稳定 consumer 使用
+`graph.astream(..., stream_mode="custom")`，默认 v1 返回值直接是 TraceMind product event payload，不引入额外消费适配层。
+
+Graph + RAG/Citation 定向测试为 72 passed；`ruff check app tests`、`ruff format --check app tests` 和 `mypy app`（130
+source files）通过；默认全量 pytest 为 596 passed、40 skipped，并保留既有 Starlette TestClient deprecation warning。

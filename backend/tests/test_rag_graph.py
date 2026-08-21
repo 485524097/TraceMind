@@ -1,5 +1,6 @@
 import asyncio
 import json
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -10,8 +11,14 @@ from langchain_core.callbacks.manager import (
     CallbackManagerForLLMRun,
 )
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+)
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import Field
 
@@ -38,6 +45,7 @@ HISTORY = (ConversationTurn("Nacos 有什么作用？", "它提供配置管理�
 class RecordingChatModel(BaseChatModel):
     response: AIMessage
     responses: list[AIMessage] = Field(default_factory=list)
+    stream_chunks: list[str] = Field(default_factory=list)
     delay: float = 0
     error: str | None = None
     calls: list[list[BaseMessage]] = Field(default_factory=list)
@@ -73,6 +81,26 @@ class RecordingChatModel(BaseChatModel):
         if self.error is not None:
             raise RuntimeError(self.error)
         return ChatResult(generations=[ChatGeneration(message=self._next_response())])
+
+    async def _astream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[ChatGenerationChunk]:
+        self.calls.append(messages)
+        self.started.set()
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        if self.error is not None:
+            raise RuntimeError(self.error)
+        if self.stream_chunks:
+            for text in self.stream_chunks:
+                yield ChatGenerationChunk(message=AIMessageChunk(content=text))
+            return
+        response = self._next_response()
+        yield ChatGenerationChunk(message=AIMessageChunk(content=response.content))
 
     def _next_response(self) -> AIMessage:
         return self.responses.pop(0) if self.responses else self.response
@@ -262,6 +290,21 @@ def runtime_context(
     )
 
 
+async def collect_custom_stream(
+    state: RagState,
+    context: RagRuntimeContext,
+) -> list[dict[str, Any]]:
+    product_events: list[dict[str, Any]] = []
+    async for event in build_rag_graph().astream(
+        state,
+        context=context,
+        stream_mode="custom",
+    ):
+        assert isinstance(event, dict)
+        product_events.append(event)
+    return product_events
+
+
 def test_graph_compiles_without_checkpointer_or_store() -> None:
     graph = build_rag_graph()
 
@@ -289,6 +332,38 @@ async def test_direct_route_uses_langchain_messages_and_reaches_terminal_state()
     assert "简单社交表达" in model.calls[0][0].content
     assert isinstance(model.calls[0][1], HumanMessage)
     assert model.calls[0][1].content == "你好！"
+
+
+async def test_direct_event_stream_emits_tokens_then_completed_done() -> None:
+    model = RecordingChatModel(
+        response=AIMessage(content="unused"),
+        stream_chunks=["你", "好", "", "！"],
+    )
+
+    context = runtime_context(model)
+    product_events = await collect_custom_stream(
+        graph_input("你好！"),
+        context,
+    )
+    output = await build_rag_graph().ainvoke(
+        graph_input("你好！"),
+        context=context,
+    )
+
+    assert [event["type"] for event in product_events] == ["token", "token", "token", "done"]
+    assert [event["text"] for event in product_events[:-1]] == ["你", "好", "！"]
+    assert "".join(event["text"] for event in product_events[:-1]) == output["answer"]
+    assert output["answer"] == "你好！"
+    assert output["terminal_status"] == "completed"
+    assert all(event["type"] != "sources" for event in product_events)
+    done = product_events[-1]
+    assert done == {
+        "type": "done",
+        "terminal_status": "completed",
+        "grounded": False,
+        "valid_citation_count": 0,
+        "invalid_citation_count": 0,
+    }
 
 
 async def test_rag_route_without_history_skips_model_and_uses_original_query() -> None:
@@ -951,6 +1026,157 @@ async def test_grounded_generation_filters_and_counts_citations(
     assert result["valid_citation_count"] == valid_count
     assert result["invalid_citation_count"] == invalid_count
     assert result["terminal_status"] == "completed"
+
+
+@pytest.mark.parametrize(
+    ("chunks", "token_texts", "grounded", "valid_count", "invalid_count"),
+    [
+        (["答案 [S", "1]"], ["答案 ", "[S1]"], True, 1, 0),
+        (["答案 [S", "999]"], ["答案 "], False, 0, 1),
+        (["答案 [S1"], ["答案 "], False, 0, 1),
+        (["答案 [S999"], ["答案 "], False, 0, 1),
+        (["没有引用"], ["没有引用"], False, 0, 0),
+    ],
+)
+async def test_grounded_event_stream_is_citation_safe_across_chunks_and_eof(
+    chunks: list[str],
+    token_texts: list[str],
+    grounded: bool,
+    valid_count: int,
+    invalid_count: int,
+) -> None:
+    candidate = search_result("source", score=0.9, rank=1)
+    retrieval_service = RecordingRetrievalService(
+        result=RagHybridRetrievalResult([candidate], 1, 2, 3, 1, 1)
+    )
+    model = RecordingChatModel(
+        response=AIMessage(content="unused"),
+        stream_chunks=chunks,
+    )
+
+    context = runtime_context(model, retrieval_service)
+    product_events = await collect_custom_stream(
+        graph_input("来源是什么？"),
+        context,
+    )
+    output = await build_rag_graph().ainvoke(
+        graph_input("来源是什么？"),
+        context=context,
+    )
+
+    assert [event["type"] for event in product_events] == [
+        "sources",
+        *("token" for _ in token_texts),
+        "done",
+    ]
+    source_event = product_events[0]
+    assert source_event["source_count"] == 1
+    assert source_event["sources"][0]["source_id"] == "S1"
+    streamed_texts = [event["text"] for event in product_events if event["type"] == "token"]
+    assert streamed_texts == token_texts
+    assert "[S999]" not in "".join(streamed_texts)
+    assert "[S999" not in "".join(streamed_texts)
+    assert "[S1" not in "".join(streamed_texts).replace("[S1]", "")
+    assert output["answer"] == "".join(streamed_texts)
+    assert output["grounded"] is grounded
+    assert output["valid_citation_count"] == valid_count
+    assert output["invalid_citation_count"] == invalid_count
+    done = product_events[-1]
+    assert done["terminal_status"] == "completed"
+    assert done["grounded"] is grounded
+    assert done["valid_citation_count"] == valid_count
+    assert done["invalid_citation_count"] == invalid_count
+
+
+async def test_no_answer_event_stream_emits_no_answer_then_done_without_model() -> None:
+    model = RecordingChatModel(
+        response=AIMessage(content="must not be called"),
+        stream_chunks=["must not be called"],
+    )
+
+    context = runtime_context(model)
+    product_events = await collect_custom_stream(
+        graph_input("知识库里不存在的问题"),
+        context,
+    )
+    output = await build_rag_graph().ainvoke(
+        graph_input("知识库里不存在的问题"),
+        context=context,
+    )
+
+    assert product_events == [
+        {
+            "type": "no_answer",
+            "message": "知识库中未找到足够相关的信息。",
+        },
+        {
+            "type": "done",
+            "terminal_status": "no_answer",
+            "grounded": False,
+            "valid_citation_count": 0,
+            "invalid_citation_count": 0,
+        },
+    ]
+    assert model.calls == []
+    assert output["answer"] == "知识库中未找到足够相关的信息。"
+    assert output["terminal_status"] == "no_answer"
+
+
+@pytest.mark.parametrize("grounded", [False, True])
+async def test_event_stream_model_cancellation_propagates(grounded: bool) -> None:
+    model = RecordingChatModel(
+        response=AIMessage(content="unused"),
+        delay=10,
+    )
+    retrieval_service = (
+        RecordingRetrievalService(
+            result=RagHybridRetrievalResult(
+                [search_result("source", score=0.9, rank=1)],
+                1,
+                2,
+                3,
+                1,
+                1,
+            )
+        )
+        if grounded
+        else RecordingRetrievalService()
+    )
+    state = graph_input("来源是什么？" if grounded else "你好！")
+
+    async def consume() -> None:
+        async for _ in build_rag_graph().astream(
+            state,
+            context=runtime_context(model, retrieval_service),
+            stream_mode="custom",
+        ):
+            pass
+
+    task = asyncio.create_task(consume())
+    async with asyncio.timeout(1):
+        await model.started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+async def test_event_stream_model_error_propagates_without_custom_error_event() -> None:
+    model = RecordingChatModel(
+        response=AIMessage(content="unused"),
+        error="private stream detail",
+    )
+    custom_events: list[dict[str, Any]] = []
+
+    with pytest.raises(RuntimeError, match="private stream detail"):
+        async for event in build_rag_graph().astream(
+            graph_input("你好！"),
+            context=runtime_context(model),
+            stream_mode="custom",
+        ):
+            assert isinstance(event, dict)
+            custom_events.append(event)
+    assert all(event["type"] != "error" for event in custom_events)
 
 
 async def test_grounded_model_error_propagates() -> None:

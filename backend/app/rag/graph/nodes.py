@@ -8,6 +8,7 @@ from langchain_core.exceptions import OutputParserException
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import ChatPromptTemplate
+from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -209,12 +210,19 @@ def prepare_context_node(
     state: RagState,
     runtime: Runtime[RagRuntimeContext],
 ) -> dict[str, object]:
-    return {
-        "rag_context": build_rag_context(
-            state["ranked_results"],
-            runtime.context.settings.rag_max_context_chars,
+    context = build_rag_context(
+        state["ranked_results"],
+        runtime.context.settings.rag_max_context_chars,
+    )
+    if context.sources:
+        get_stream_writer()(
+            {
+                "type": "sources",
+                "source_count": len(context.sources),
+                "sources": [source.model_dump(mode="json") for source in context.sources],
+            }
         )
-    }
+    return {"rag_context": context}
 
 
 def select_context_path(state: RagState) -> Literal["no_answer", "generate_grounded"]:
@@ -222,6 +230,7 @@ def select_context_path(state: RagState) -> Literal["no_answer", "generate_groun
 
 
 def no_answer_node(state: RagState) -> dict[str, object]:
+    get_stream_writer()({"type": "no_answer", "message": NO_ANSWER_MESSAGE})
     return {
         "answer": NO_ANSWER_MESSAGE,
         "terminal_status": "no_answer",
@@ -247,16 +256,24 @@ async def generate_grounded_node(
         history,
         scoped_relative_path=state["prepared_retrieval_query"].explicit_relative_path,
     )
-    response = await runtime.context.model.ainvoke(
-        [
-            SystemMessage(content=SYSTEM_PROMPT),
-            HumanMessage(content=json.dumps(payload, ensure_ascii=False, separators=(",", ":"))),
-        ]
-    )
+    messages = [
+        SystemMessage(content=SYSTEM_PROMPT),
+        HumanMessage(content=json.dumps(payload, ensure_ascii=False, separators=(",", ":"))),
+    ]
     guard = StreamingCitationGuard({source.source_id for source in context.sources})
-    answer = guard.push(response.text) + guard.finish()
+    writer = get_stream_writer()
+    parts: list[str] = []
+    async for chunk in runtime.context.model.astream(messages):
+        safe_text = guard.push(chunk.text)
+        if safe_text:
+            parts.append(safe_text)
+            writer({"type": "token", "text": safe_text})
+    tail = guard.finish()
+    if tail:
+        parts.append(tail)
+        writer({"type": "token", "text": tail})
     return {
-        "answer": answer,
+        "answer": "".join(parts),
         "grounded": guard.grounded,
         "valid_citation_count": guard.valid_citation_count,
         "invalid_citation_count": guard.invalid_citation_count,
@@ -267,21 +284,34 @@ async def generate_direct_node(
     state: RagState,
     runtime: Runtime[RagRuntimeContext],
 ) -> dict[str, str]:
-    response = await runtime.context.model.ainvoke(
-        [
-            SystemMessage(content=DIRECT_SYSTEM_PROMPT),
-            HumanMessage(content=state["query"]),
-        ]
-    )
-    return {"answer": response.text}
+    messages = [
+        SystemMessage(content=DIRECT_SYSTEM_PROMPT),
+        HumanMessage(content=state["query"]),
+    ]
+    writer = get_stream_writer()
+    parts: list[str] = []
+    async for chunk in runtime.context.model.astream(messages):
+        text = chunk.text
+        if text:
+            parts.append(text)
+            writer({"type": "token", "text": text})
+    return {"answer": "".join(parts)}
 
 
 def finalize_node(state: RagState) -> dict[str, str]:
     if "answer" not in state:
         raise ValueError("Generation did not produce an answer")
-    if state.get("terminal_status") == "no_answer":
-        return {"terminal_status": "no_answer"}
-    return {"terminal_status": "completed"}
+    terminal_status = "no_answer" if state.get("terminal_status") == "no_answer" else "completed"
+    get_stream_writer()(
+        {
+            "type": "done",
+            "terminal_status": terminal_status,
+            "grounded": state.get("grounded", False),
+            "valid_citation_count": state.get("valid_citation_count", 0),
+            "invalid_citation_count": state.get("invalid_citation_count", 0),
+        }
+    )
+    return {"terminal_status": terminal_status}
 
 
 def _rewrite_fallback(
