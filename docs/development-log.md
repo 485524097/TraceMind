@@ -1097,3 +1097,15 @@ disconnect/cancellation shield 语义保留；未引入 Graph runner、event ada
 前端只保留 sources/token/no_answer/done/error V2 SSE contract，ConversationView 以 sources、首 token 与 done 驱动既有
 progress，Citation/Evidence/Save as Knowledge 路径不变。后端定向测试 58 passed，全量 597 passed、40 skipped；
 Ruff、format、mypy 通过。前端定向 19 passed，全量 91 passed；type-check、lint 与 production build 通过。
+
+# 2026-08-21 — RAG V2 Step 8 Legacy RAG / LLM Cleanup
+
+删除已退出 production path 的 `RagService`、旧 Query Rewrite service、自研 LLM provider/message/delta/error 抽象与
+OpenAI-compatible implementation；`app.llm.factory` 继续直接提供 LangChain `BaseChatModel/ChatOpenAI`。旧
+`build_rag_messages()` 已删除，现有 SYSTEM_PROMPT、payload/location/source identity、Context、CitationGuard、Retrieval、
+Reranking、path scope、Conversation 与 LangGraph production coverage 保留。
+
+删除三个纯 legacy 测试文件，混合 `test_rag.py` 只保留产品能力回归。直接 OpenAI SDK 使用已为 0，
+因此移除显式 `openai` dependency；它仍由 `langchain-openai` 作为 transitive dependency 锁定，未升级
+LangChain/LangGraph。受影响定向测试 83 passed，全量 567 passed、40 skipped；Ruff、format、mypy 与
+`uv sync --frozen --offline` 通过。

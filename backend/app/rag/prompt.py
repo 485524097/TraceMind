@@ -1,6 +1,3 @@
-import json
-
-from app.llm import LLMMessage
 from app.rag.context import RagContext
 from app.schemas.rag import RagSource
 from app.services.conversation import ConversationTurn
@@ -37,28 +34,6 @@ def _location(source: RagSource) -> str:
     if start is not None and end is not None:
         return f"第 {start}-{end} 行"
     return f"Chunk {source.chunk_index}"
-
-
-def build_rag_messages(
-    query: str,
-    context: RagContext,
-    history: tuple[ConversationTurn, ...] = (),
-    *,
-    scoped_relative_path: str | None = None,
-) -> list[LLMMessage]:
-    payload = build_rag_payload(
-        query,
-        context,
-        history,
-        scoped_relative_path=scoped_relative_path,
-    )
-    return [
-        LLMMessage(role="system", content=SYSTEM_PROMPT),
-        LLMMessage(
-            role="user",
-            content=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-        ),
-    ]
 
 
 def build_rag_payload(
